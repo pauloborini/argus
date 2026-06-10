@@ -3,4 +3,7 @@ headroom
 Understand-Anything
 codegraph
 .app-vault
-.atlas
+.atlas/*
+!.atlas/**/
+!.atlas/**/*.md
+.atlas/state/
