@@ -1,0 +1,18 @@
+{
+  "name": "atlas-cortex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Atlas Cortex — motor local de code retrieval e context packing para agentes",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@atlas-cortex/cortex",
+    "test": "npm run test --workspace=@atlas-cortex/cortex",
+    "lint": "npm run lint --workspace=@atlas-cortex/cortex",
+    "typecheck": "npm run typecheck --workspace=@atlas-cortex/cortex"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

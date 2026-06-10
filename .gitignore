@@ -7,3 +7,9 @@ codegraph
 !.atlas/**/
 !.atlas/**/*.md
 .atlas/state/
+
+# Node / TypeScript
+node_modules/
+dist/
+.cortex/
+*.tsbuildinfo
