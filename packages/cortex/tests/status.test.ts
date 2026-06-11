@@ -39,19 +39,22 @@ describe("status stub e staleness", () => {
     expect(payload.index_version).toBeNull();
   });
 
-  it("status após index fica fresh/sucesso", () => {
+  it("status após index fica fresh/sucesso com coverage", async () => {
     const root = setupWorkspace();
-    expect(runIndex()).toBe(0);
+    expect(await runIndex()).toBe(0);
     const payload = buildToolStub("status", root);
     expect(payload.state).toBe("sucesso");
     expect(payload.staleness).toBe("fresh");
     expect(payload.pending_files_count).toBe(0);
     expect(typeof payload.index_version).toBe("string");
+    expect(String(payload.index_version)).toContain("structural@");
+    const coverage = payload.coverage_by_language as Record<string, { symbols: number }>;
+    expect(coverage.typescript?.symbols).toBeGreaterThan(0);
   });
 
-  it("status detecta stale quando arquivo muda", () => {
+  it("status detecta stale quando arquivo muda", async () => {
     const root = setupWorkspace();
-    expect(runIndex()).toBe(0);
+    expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "main.ts"), "export const main = false;\n", "utf-8");
     const payload = buildToolStub("status", root);
     expect(payload.state).toBe("stale");
@@ -59,24 +62,23 @@ describe("status stub e staleness", () => {
     expect(Number(payload.pending_files_count)).toBeGreaterThan(0);
   });
 
-  it("tools semânticas degradam para stale quando manifest está desatualizado", () => {
+  it("tools semânticas degradam honestamente com índice estrutural", async () => {
     const root = setupWorkspace();
-    expect(runIndex()).toBe(0);
-    writeFileSync(join(root, "main.ts"), "export const main = false;\n", "utf-8");
+    expect(await runIndex()).toBe(0);
 
     const searchPayload = buildToolStub("search", root);
-    expect(searchPayload.state).toBe("stale");
-    expect(String(searchPayload.message)).toContain("E_STALE_INDEX");
-    expect(String(searchPayload.staleness_hint)).toContain("cortex sync");
+    expect(searchPayload.state).toBe("parcial");
+    expect(searchPayload.candidates).toEqual([]);
+    expect(String(searchPayload.message)).toContain("S06");
 
     const packPayload = buildToolStub("pack_context", root);
-    expect(packPayload.state).toBe("stale");
-    expect(String(packPayload.message)).toContain("E_STALE_INDEX");
+    expect(packPayload.state).toBe("parcial");
+    expect(packPayload.packed_context).toBeNull();
   });
 
-  it("status degradado quando manifest está corrompido", () => {
+  it("status degradado quando manifest está corrompido", async () => {
     const root = setupWorkspace();
-    expect(runIndex()).toBe(0);
+    expect(await runIndex()).toBe(0);
     const manifestPath = join(root, ".cortex", "file-manifest.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
       schema_version: string;
@@ -91,6 +93,16 @@ describe("status stub e staleness", () => {
     const payload = buildToolStub("status", root);
     expect(payload.state).toBe("parcial");
     expect(payload.staleness).toBe("unknown");
+    expect(String(payload.message)).toContain("E_INDEX_CORRUPTED");
+  });
+
+  it("status falha quando índice estrutural está corrompido", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    writeFileSync(join(root, ".cortex", "structural-index.json"), "{ invalid", "utf-8");
+
+    const payload = buildToolStub("status", root);
+    expect(payload.state).toBe("falha");
     expect(String(payload.message)).toContain("E_INDEX_CORRUPTED");
   });
 });

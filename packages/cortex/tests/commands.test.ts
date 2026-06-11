@@ -25,14 +25,14 @@ describe("commands lifecycle", () => {
     process.chdir(tempDir);
   }
 
-  it("index falha sem workspace com exit 1", () => {
+  it("index falha sem workspace com exit 1", async () => {
     useEmptyDir();
-    expect(runIndex()).toBe(1);
+    await expect(runIndex()).resolves.toBe(1);
   });
 
-  it("sync falha sem workspace com exit 1", () => {
+  it("sync falha sem workspace com exit 1", async () => {
     useEmptyDir();
-    expect(runSync()).toBe(1);
+    await expect(runSync()).resolves.toBe(1);
   });
 
   it("serve --mcp falha sem workspace com exit 1", async () => {

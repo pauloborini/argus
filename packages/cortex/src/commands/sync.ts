@@ -10,9 +10,19 @@ import {
 import { discoverFiles } from "../discovery/walk.js";
 import type { DiscoveryManifest } from "../discovery/types.js";
 import { diffManifest, planManifestSync } from "../discovery/delta.js";
-import { getManifestPath, requireWorkspace } from "../workspace/workspace.js";
+import {
+  readStructuralIndex,
+  StructuralIndexCorruptedError,
+  writeStructuralIndexAtomic,
+} from "../extraction/index-store.js";
+import { updateStructuralIndexDelta } from "../extraction/pipeline.js";
+import {
+  getManifestPath,
+  getStructuralIndexPath,
+  requireWorkspace,
+} from "../workspace/workspace.js";
 
-export function runSync(): number {
+export async function runSync(): Promise<number> {
   let rootPath: string;
   try {
     const metadata = requireWorkspace();
@@ -52,12 +62,41 @@ export function runSync(): number {
     const nextManifest = buildDiscoveryManifest(rootPath, nextFingerprints);
     writeManifestAtomic(manifestPath, nextManifest);
 
-    if (delta.pending_files_count === 0) {
-      console.log("Sync concluído: índice já estava atualizado (0 alterações).");
-    } else {
+    const structuralPath = getStructuralIndexPath(rootPath);
+    let previousStructural = null;
+    try {
+      previousStructural = readStructuralIndex(structuralPath);
+    } catch (err) {
+      if (err instanceof StructuralIndexCorruptedError) {
+        console.error(err.message);
+        return 1;
+      }
+      throw err;
+    }
+
+    if (delta.pending_files_count > 0 || !previousStructural) {
+      const changedPaths = [
+        ...delta.added.map((file) => file.relative_path),
+        ...delta.changed.map((file) => file.relative_path),
+      ];
+      const removedPaths = delta.removed.map((file) => file.relative_path);
+      const { index, summary } = await updateStructuralIndexDelta(
+        nextManifest,
+        rootPath,
+        previousStructural,
+        changedPaths,
+        removedPaths,
+      );
+      writeStructuralIndexAtomic(structuralPath, index);
+
       console.log(
         `Sync concluído: +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
       );
+      console.log(
+        `Extração estrutural (delta): ${summary.files_parsed} arquivos reprocessados, ${summary.symbol_count} símbolos (${summary.duration_ms}ms).`,
+      );
+    } else {
+      console.log("Sync concluído: índice já estava atualizado (0 alterações).");
     }
 
     if (discovery.limitations.length > 0) {

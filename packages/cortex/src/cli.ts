@@ -23,15 +23,15 @@ program
 program
   .command("index")
   .description("Indexação completa do inventário local de arquivos")
-  .action(() => {
-    process.exit(runIndex());
+  .action(async () => {
+    process.exit(await runIndex());
   });
 
 program
   .command("sync")
   .description("Sincronização incremental do manifest local")
-  .action(() => {
-    process.exit(runSync());
+  .action(async () => {
+    process.exit(await runSync());
   });
 
 program

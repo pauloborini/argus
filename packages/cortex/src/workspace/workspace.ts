@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 export const WORKSPACE_DIR = ".cortex";
 export const WORKSPACE_METADATA_FILE = "workspace.json";
 export const FILE_MANIFEST_FILE = "file-manifest.json";
+export const STRUCTURAL_INDEX_FILE = "structural-index.json";
 export const PRODUCT_ID = "atlas-cortex";
 export const SCHEMA_VERSION = "1.0.0";
 
@@ -31,6 +32,10 @@ export function getMetadataPath(cwd: string = process.cwd()): string {
 
 export function getManifestPath(cwd: string = process.cwd()): string {
   return join(getWorkspacePath(cwd), FILE_MANIFEST_FILE);
+}
+
+export function getStructuralIndexPath(cwd: string = process.cwd()): string {
+  return join(getWorkspacePath(cwd), STRUCTURAL_INDEX_FILE);
 }
 
 export function workspaceExists(cwd: string = process.cwd()): boolean {
