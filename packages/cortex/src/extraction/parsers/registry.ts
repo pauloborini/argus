@@ -34,9 +34,16 @@ function getNativeParser(language: SupportedLanguage): Parser {
     case "typescript":
       parser.setLanguage(TypeScript.typescript);
       break;
-    case "javascript":
-      parser.setLanguage(TypeScript.typescript);
+    case "javascript": {
+      const jsLanguage =
+        "javascript" in TypeScript &&
+        TypeScript.javascript !== undefined &&
+        TypeScript.javascript !== null
+          ? TypeScript.javascript
+          : TypeScript.typescript;
+      parser.setLanguage(jsLanguage);
       break;
+    }
     case "python":
       parser.setLanguage(Python);
       break;

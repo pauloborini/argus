@@ -39,6 +39,17 @@ describe("status stub e staleness", () => {
     expect(payload.index_version).toBeNull();
   });
 
+  it("status reporta limitations quando há arquivos não suportados no manifest", async () => {
+    const root = setupWorkspace();
+    writeFileSync(join(root, "notes.md"), "# notes\n", "utf-8");
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("status", root);
+    expect(payload.state).toBe("parcial");
+    const limitations = payload.limitations as string[];
+    expect(limitations.some((line) => line.includes("não suportada"))).toBe(true);
+  });
+
   it("status após index fica fresh/sucesso com coverage", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);

@@ -2,6 +2,15 @@ import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
 import { endLine, namedIdentifier, startLine, stripQuotes, walkTree } from "./ast-utils.js";
 
+function extractDartImportSource(spec: SyntaxNode): string | null {
+  const uri =
+    spec.descendantsOfType("uri")[0]?.text ??
+    spec.descendantsOfType("configurable_uri")[0]?.descendantsOfType("uri")[0]?.text ??
+    spec.descendantsOfType("configuration_uri")[0]?.descendantsOfType("uri")[0]?.text ??
+    spec.descendantsOfType("identifier")[0]?.text;
+  return uri ? stripQuotes(uri) : null;
+}
+
 export function extractDart(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
   const imports: FileExtractionResult["imports"] = [];
@@ -62,10 +71,8 @@ export function extractDart(root: SyntaxNode): FileExtractionResult {
       }
       case "library_import": {
         const spec = node.descendantsOfType("import_specification")[0];
-        const uri = spec?.descendantsOfType("configuration_uri")[0]?.text
-          ?? spec?.descendantsOfType("identifier")[0]?.text;
-        if (uri) {
-          const source = stripQuotes(uri);
+        const source = spec ? extractDartImportSource(spec) : null;
+        if (source) {
           imports.push({ source });
           edges.push({ kind: "imports", to: source, line: startLine(node) });
         }

@@ -75,6 +75,7 @@ export interface StructuralIndex {
   symbol_count: number;
   files: FileStructuralEntry[];
   coverage_by_language: Record<string, LanguageCoverage>;
+  extraction_limitations?: string[];
 }
 
 export interface FileExtractionResult {

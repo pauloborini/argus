@@ -79,6 +79,7 @@ export function buildStructuralIndexDocument(
   manifestHash: string,
   files: FileStructuralEntry[],
   coverage: StructuralIndex["coverage_by_language"],
+  extractionLimitations: string[] = [],
 ): StructuralIndex {
   const sortedFiles = [...files].sort((a, b) => a.relative_path.localeCompare(b.relative_path));
   const symbolCount = sortedFiles.reduce((sum, file) => sum + file.symbols.length, 0);
@@ -91,5 +92,6 @@ export function buildStructuralIndexDocument(
     symbol_count: symbolCount,
     files: sortedFiles,
     coverage_by_language: coverage,
+    ...(extractionLimitations.length > 0 ? { extraction_limitations: extractionLimitations } : {}),
   };
 }

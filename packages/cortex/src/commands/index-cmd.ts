@@ -20,9 +20,9 @@ export async function runIndex(): Promise<number> {
     const discovery = discoverFiles(rootPath);
     const fingerprints = fingerprintDiscoveredFiles(discovery.files);
     const manifest = buildDiscoveryManifest(rootPath, fingerprints);
-    writeManifestAtomic(getManifestPath(rootPath), manifest);
-
     const { index, summary } = await buildStructuralIndex(manifest, rootPath);
+
+    writeManifestAtomic(getManifestPath(rootPath), manifest);
     writeStructuralIndexAtomic(getStructuralIndexPath(rootPath), index);
 
     console.log(`Index concluído: ${manifest.file_count} arquivos inventariados.`);

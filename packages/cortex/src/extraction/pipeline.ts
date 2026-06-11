@@ -1,5 +1,5 @@
 import type { DiscoveryManifest } from "../discovery/types.js";
-import { buildCoverageSummary } from "./coverage.js";
+import { buildCoverageSummary, buildExtractionLimitations } from "./coverage.js";
 import { extractFile } from "./extract-file.js";
 import { buildStructuralIndexDocument } from "./index-store.js";
 import { detectLanguageFromPath } from "./language.js";
@@ -38,8 +38,10 @@ export async function buildStructuralIndex(
     entries.push(extractFile(rootPath, file.relative_path));
   }
 
-  const coverage = buildCoverageSummary(entries);
-  const index = buildStructuralIndexDocument(manifestHash, entries, coverage);
+  const manifestPaths = manifest.files.map((file) => file.relative_path);
+  const coverage = buildCoverageSummary(entries, manifestPaths);
+  const limitations = buildExtractionLimitations(manifestPaths, entries);
+  const index = buildStructuralIndexDocument(manifestHash, entries, coverage, limitations);
 
   return {
     index,
@@ -80,8 +82,10 @@ export async function updateStructuralIndexDelta(
   }
 
   const entries = [...previousMap.values()].filter((entry) => allowed.has(entry.relative_path));
-  const coverage = buildCoverageSummary(entries);
-  const index = buildStructuralIndexDocument(manifestHash, entries, coverage);
+  const manifestPaths = manifest.files.map((file) => file.relative_path);
+  const coverage = buildCoverageSummary(entries, manifestPaths);
+  const limitations = buildExtractionLimitations(manifestPaths, entries);
+  const index = buildStructuralIndexDocument(manifestHash, entries, coverage, limitations);
 
   return {
     index,

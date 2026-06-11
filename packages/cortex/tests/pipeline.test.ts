@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,7 +39,10 @@ describe("pipeline de extração", () => {
     expect(index.symbol_count).toBeGreaterThan(0);
     expect(index.coverage_by_language.typescript?.symbols).toBeGreaterThan(0);
     expect(index.coverage_by_language.python?.symbols).toBeGreaterThan(0);
+    expect(index.coverage_by_language.typescript?.files_eligible).toBe(1);
+    expect(index.coverage_by_language.python?.files_eligible).toBe(1);
     expect(index.files.some((f) => f.relative_path === "readme.md")).toBe(false);
+    expect(index.extraction_limitations?.[0]).toContain("não suportada");
   });
 
   it("delta add/remove/modify atualiza índice incrementalmente", async () => {

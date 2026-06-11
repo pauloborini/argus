@@ -15,7 +15,10 @@ import {
   StructuralIndexCorruptedError,
   writeStructuralIndexAtomic,
 } from "../extraction/index-store.js";
-import { updateStructuralIndexDelta } from "../extraction/pipeline.js";
+import {
+  buildStructuralIndex,
+  updateStructuralIndexDelta,
+} from "../extraction/pipeline.js";
 import {
   getManifestPath,
   getStructuralIndexPath,
@@ -74,7 +77,17 @@ export async function runSync(): Promise<number> {
       throw err;
     }
 
-    if (delta.pending_files_count > 0 || !previousStructural) {
+    if (!previousStructural) {
+      const { index, summary } = await buildStructuralIndex(nextManifest, rootPath);
+      writeStructuralIndexAtomic(structuralPath, index);
+
+      console.log(
+        `Sync concluído: +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
+      );
+      console.log(
+        `Extração estrutural (rebuild): ${summary.files_parsed} arquivos, ${summary.symbol_count} símbolos (${summary.duration_ms}ms).`,
+      );
+    } else if (delta.pending_files_count > 0) {
       const changedPaths = [
         ...delta.added.map((file) => file.relative_path),
         ...delta.changed.map((file) => file.relative_path),

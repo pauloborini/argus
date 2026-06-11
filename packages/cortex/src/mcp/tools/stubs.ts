@@ -27,7 +27,7 @@ const STALE_INDEX = "E_STALE_INDEX: Índice desatualizado; resultados podem esta
 const WORKSPACE_MISSING =
   "E_WORKSPACE_INVALID: Workspace não preparado ou path inválido. Execute cortex init.";
 const STRUCTURAL_INDEX_MISSING =
-  "E_INDEX_MISSING: Manifest disponível; índice estrutural ausente — execute cortex index.";
+  "E_INDEX_MISSING: Manifest disponível; índice estrutural ausente — execute cortex index ou cortex sync.";
 const FTS_RETRIEVAL_PENDING =
   "Extração estrutural disponível; busca textual e retrieval semântico aguardam S06+.";
 const PARTIAL_NO_MANIFEST_LIMITATIONS = [
@@ -37,7 +37,7 @@ const PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS = [
   "Manifest de arquivos corrompido; execute cortex index para recriar o inventário.",
 ];
 const PARTIAL_STRUCTURAL_MISSING_LIMITATIONS = [
-  "Manifest presente, mas índice estrutural ausente; execute cortex index.",
+  "Manifest presente, mas índice estrutural ausente; execute cortex index ou cortex sync.",
 ];
 const PARTIAL_FTS_LIMITATIONS = [
   "Índice estrutural local disponível (S05); FTS e ranking semântico aguardam S06/S08.",
@@ -63,6 +63,16 @@ function loadStructuralIndex(rootPath: string): StructuralIndex | null {
     }
     throw err;
   }
+}
+
+function mergeStructuralLimitations(
+  structural: StructuralIndex | null,
+  base: string[] = [],
+): string[] {
+  if (!structural?.extraction_limitations?.length) {
+    return base;
+  }
+  return [...base, ...structural.extraction_limitations];
 }
 
 function buildIndexVersion(manifest: DiscoveryManifest, structural: StructuralIndex | null): string {
@@ -164,12 +174,23 @@ function buildStatusStub(cwd: string): ToolStubPayload {
       ...basePayload,
       ...stubResponse("parcial", STRUCTURAL_INDEX_MISSING, {
         limitations: PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-        staleness_hint: "Execute cortex index para gerar o índice estrutural.",
+        staleness_hint: "Execute cortex index ou cortex sync para gerar o índice estrutural.",
       }),
     };
   }
 
+  const structuralLimitations = mergeStructuralLimitations(structural);
+
   if (staleness.staleness === "fresh") {
+    if (structuralLimitations.length > 0) {
+      return {
+        ...basePayload,
+        ...stubResponse("parcial", "Índice estrutural atualizado com limitações de cobertura.", {
+          limitations: structuralLimitations,
+        }),
+      };
+    }
+
     return {
       ...basePayload,
       ...stubResponse("sucesso", "Índice de arquivos e extração estrutural atualizados."),
@@ -180,6 +201,7 @@ function buildStatusStub(cwd: string): ToolStubPayload {
     return {
       ...basePayload,
       ...stubResponse("stale", STALE_INDEX, {
+        limitations: structuralLimitations,
         staleness_hint: "Execute cortex sync para sincronizar o delta pendente.",
       }),
     };
@@ -188,7 +210,9 @@ function buildStatusStub(cwd: string): ToolStubPayload {
   return {
     ...basePayload,
     ...stubResponse("parcial", STALE_INDEX, {
-      limitations: ["Não foi possível determinar staleness com segurança."],
+      limitations: mergeStructuralLimitations(structural, [
+        "Não foi possível determinar staleness com segurança.",
+      ]),
       staleness_hint: "Execute cortex sync se o filesystem mudou recentemente.",
     }),
   };
@@ -206,9 +230,10 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
   } catch (err) {
     if (err instanceof ManifestCorruptedError) {
       return {
-        state: "falha",
+        state: "parcial",
         message: err.message,
         limitations: PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS,
+        staleness_hint: "Execute cortex index para reconstruir o manifest.",
         structuralIndex: null,
       };
     }
@@ -217,7 +242,7 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
 
   if (!manifest) {
     return {
-      state: "falha",
+      state: "parcial",
       message: INDEX_MISSING,
       limitations: PARTIAL_NO_MANIFEST_LIMITATIONS,
       staleness_hint: "Execute cortex index para criar o manifest inicial.",
@@ -266,7 +291,7 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
       state: "parcial",
       message: STRUCTURAL_INDEX_MISSING,
       limitations: PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-      staleness_hint: "Execute cortex index para gerar o índice estrutural.",
+      staleness_hint: "Execute cortex index ou cortex sync para gerar o índice estrutural.",
       structuralIndex: null,
     };
   }
@@ -274,7 +299,7 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
   return {
     state: "parcial",
     message: FTS_RETRIEVAL_PENDING,
-    limitations: PARTIAL_FTS_LIMITATIONS,
+    limitations: mergeStructuralLimitations(structural, PARTIAL_FTS_LIMITATIONS),
     structuralIndex: structural,
   };
 }
@@ -303,6 +328,17 @@ function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
       ...stubResponse("stale", semanticStub.message, {
         limitations: semanticStub.limitations,
         staleness_hint: semanticStub.staleness_hint,
+      }),
+    };
+  }
+
+  const structuralLimitations = mergeStructuralLimitations(structural);
+  if (structuralLimitations.length > 0) {
+    return {
+      tree,
+      languages,
+      ...stubResponse("parcial", "Estrutura indexada com limitações de cobertura.", {
+        limitations: structuralLimitations,
       }),
     };
   }

@@ -1,11 +1,12 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { runSync } from "../src/commands/sync.js";
 import { readManifest } from "../src/discovery/manifest.js";
 import { readStructuralIndex } from "../src/extraction/index-store.js";
+import * as pipeline from "../src/extraction/pipeline.js";
 import { getStructuralIndexPath, initWorkspace } from "../src/workspace/workspace.js";
 
 describe("index e sync", () => {
@@ -70,6 +71,37 @@ describe("index e sync", () => {
     };
     writeFileSync(manifestPath, JSON.stringify(corrupted, null, 2) + "\n", "utf-8");
     expect(await runSync()).toBe(1);
+  });
+
+  it("sync reconstrói índice estrutural quando manifest existe mas índice está ausente", async () => {
+    const { manifestPath, structuralPath } = useWorkspace();
+    expect(await runIndex()).toBe(0);
+    expect(existsSync(manifestPath)).toBe(true);
+    expect(existsSync(structuralPath)).toBe(true);
+
+    rmSync(structuralPath);
+
+    expect(await runSync()).toBe(0);
+    expect(existsSync(structuralPath)).toBe(true);
+
+    const manifest = readManifest(manifestPath);
+    const structural = readStructuralIndex(structuralPath);
+    expect(structural?.files.map((f) => f.relative_path).sort()).toEqual(["a.ts", "b.ts"]);
+    expect(structural?.file_count).toBe(manifest?.file_count);
+    expect(structural?.symbol_count).toBeGreaterThan(0);
+  });
+
+  it("index não persiste manifest quando extração falha", async () => {
+    const { manifestPath, structuralPath } = useWorkspace();
+    const spy = vi
+      .spyOn(pipeline, "buildStructuralIndex")
+      .mockRejectedValue(new Error("falha simulada de extração"));
+
+    expect(await runIndex()).toBe(1);
+    expect(existsSync(manifestPath)).toBe(false);
+    expect(existsSync(structuralPath)).toBe(false);
+
+    spy.mockRestore();
   });
 
   it("sync atualiza delta e índice estrutural", async () => {

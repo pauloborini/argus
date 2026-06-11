@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { extractFile } from "../src/extraction/extract-file.js";
 import { extractGo } from "../src/extraction/extractors/go.js";
 import { extractJava } from "../src/extraction/extractors/java.js";
 import { extractPython } from "../src/extraction/extractors/python.js";
@@ -12,8 +14,31 @@ import { initAllParsers, parseFile } from "../src/extraction/parsers/registry.js
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
 describe("extractors core", () => {
+  let tempDir: string | undefined;
+
   beforeAll(async () => {
     await initAllParsers();
+  });
+
+  afterEach(() => {
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+      tempDir = undefined;
+    }
+  });
+
+  it("resolve resolved_path em imports relativos TypeScript", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "cortex-import-resolve-"));
+    writeFileSync(join(tempDir, "bar.ts"), "export const bar = 1;\n", "utf-8");
+    writeFileSync(
+      join(tempDir, "main.ts"),
+      'import { bar } from "./bar";\nexport const main = bar;\n',
+      "utf-8",
+    );
+
+    const result = extractFile(tempDir, "main.ts");
+    expect(result.imports[0]?.source).toBe("./bar");
+    expect(result.imports[0]?.resolved_path).toBe("bar.ts");
   });
 
   it("extrai função, classe, import e edges em TypeScript", () => {
