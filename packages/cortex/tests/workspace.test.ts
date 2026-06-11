@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -48,5 +48,16 @@ describe("workspace", () => {
     tempDir = mkdtempSync(join(tmpdir(), "cortex-ws-"));
     expect(workspaceExists(tempDir)).toBe(false);
     expect(() => requireWorkspace(tempDir)).toThrow(/E_WORKSPACE_INVALID/);
+  });
+
+  it("init falha com workspace.json corrompido", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "cortex-ws-"));
+    mkdirSync(join(tempDir, ".cortex"));
+    writeFileSync(getMetadataPath(tempDir), "{ invalid json", "utf-8");
+
+    const result = initWorkspace(tempDir);
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/corrompidos/);
   });
 });

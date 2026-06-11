@@ -1,4 +1,9 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
 export const WORKSPACE_DIR = ".cortex";
+export const WORKSPACE_METADATA_FILE = "workspace.json";
+export const FILE_MANIFEST_FILE = "file-manifest.json";
 export const PRODUCT_ID = "atlas-cortex";
 export const SCHEMA_VERSION = "1.0.0";
 
@@ -16,15 +21,16 @@ export interface WorkspaceResult {
   metadata?: WorkspaceMetadata;
 }
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-
 export function getWorkspacePath(cwd: string = process.cwd()): string {
   return join(resolve(cwd), WORKSPACE_DIR);
 }
 
 export function getMetadataPath(cwd: string = process.cwd()): string {
-  return join(getWorkspacePath(cwd), "workspace.json");
+  return join(getWorkspacePath(cwd), WORKSPACE_METADATA_FILE);
+}
+
+export function getManifestPath(cwd: string = process.cwd()): string {
+  return join(getWorkspacePath(cwd), FILE_MANIFEST_FILE);
 }
 
 export function workspaceExists(cwd: string = process.cwd()): boolean {
@@ -52,33 +58,50 @@ export function initWorkspace(cwd: string = process.cwd()): WorkspaceResult {
 
   if (alreadyExists) {
     const existing = readWorkspaceMetadata(root);
+    if (!existing) {
+      return {
+        ok: false,
+        created: false,
+        message:
+          "E_WORKSPACE_INVALID: Metadados corrompidos em .cortex/workspace.json. Remova .cortex/ ou repare o arquivo e execute cortex init novamente.",
+      };
+    }
     return {
       ok: true,
       created: false,
       message:
         "Workspace já preparado. Próximo passo: cortex index (indisponível até S04 — indexação real pendente).",
-      metadata: existing ?? undefined,
+      metadata: existing,
     };
   }
 
-  mkdirSync(wsPath, { recursive: true });
+  try {
+    mkdirSync(wsPath, { recursive: true });
 
-  const metadata: WorkspaceMetadata = {
-    schema_version: SCHEMA_VERSION,
-    product_id: PRODUCT_ID,
-    initialized_at: new Date().toISOString(),
-    root_path: root,
-  };
+    const metadata: WorkspaceMetadata = {
+      schema_version: SCHEMA_VERSION,
+      product_id: PRODUCT_ID,
+      initialized_at: new Date().toISOString(),
+      root_path: root,
+    };
 
-  writeFileSync(metaPath, JSON.stringify(metadata, null, 2) + "\n", "utf-8");
+    writeFileSync(metaPath, JSON.stringify(metadata, null, 2) + "\n", "utf-8");
 
-  return {
-    ok: true,
-    created: true,
-    message:
-      "Workspace preparado. Próximo passo: cortex index (indisponível até S04 — indexação real pendente).",
-    metadata,
-  };
+    return {
+      ok: true,
+      created: true,
+      message:
+        "Workspace preparado. Próximo passo: cortex index (indisponível até S04 — indexação real pendente).",
+      metadata,
+    };
+  } catch {
+    return {
+      ok: false,
+      created: false,
+      message:
+        "E_WORKSPACE_INVALID: Não foi possível criar workspace em .cortex/. Verifique permissões do diretório.",
+    };
+  }
 }
 
 export function requireWorkspace(cwd: string = process.cwd()): WorkspaceMetadata {

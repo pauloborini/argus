@@ -28,7 +28,12 @@ cd packages/cortex && npm link
 cortex init
 ```
 
-Cria metadados em `.cortex/` no repositório alvo. Reexecução é idempotente (aviso se já preparado).
+Cria metadados em `.cortex/` no repositório alvo:
+
+- `.cortex/workspace.json` — metadados do workspace (S03)
+- `.cortex/file-manifest.json` — fingerprint de arquivos (S04+)
+
+Reexecução é idempotente (aviso se já preparado). JSON corrompido retorna erro orientado.
 
 ### 2. Comandos lifecycle (stubs S03)
 
@@ -70,7 +75,11 @@ npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
 ```
 
-## Limitações desta sprint (S03)
+## Próximo passo (S04)
+
+Discovery e fingerprint incremental — popular `file-manifest.json` e preparar base para `cortex sync`.
+
+## Limitações atuais (pós-S03)
 
 - Sem discovery, fingerprint ou indexação real (S04+)
 - Sem persistência SQLite funcional (dependência preparada)
