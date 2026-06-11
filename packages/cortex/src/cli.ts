@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { runInit } from "./commands/init.js";
 import { runIndex } from "./commands/index-cmd.js";
+import { runStatus } from "./commands/status.js";
 import { runSync } from "./commands/sync.js";
 import { runServeMcp } from "./commands/serve.js";
 
@@ -21,16 +22,24 @@ program
 
 program
   .command("index")
-  .description("Indexação completa inicial (stub até S04+)")
+  .description("Indexação completa do inventário local de arquivos")
   .action(() => {
     process.exit(runIndex());
   });
 
 program
   .command("sync")
-  .description("Sincronização incremental (stub até S04+)")
+  .description("Sincronização incremental do manifest local")
   .action(() => {
     process.exit(runSync());
+  });
+
+program
+  .command("status")
+  .description("Saúde e staleness do manifest local")
+  .option("--path <path>", "Subpath ou workspace a inspecionar")
+  .action((opts: { path?: string }) => {
+    process.exit(runStatus(opts.path));
   });
 
 program

@@ -11,14 +11,14 @@ import { buildToolStub } from "./tools/stubs.js";
 const toolInputSchema = z.object({}).passthrough();
 
 const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
-  search: "Localizar símbolos, arquivos e configs indexados (stub S03)",
-  explore: "Entender como algo funciona — tool principal (stub S03)",
-  trace: "Fluxo/execução provável entre pontos (stub S03)",
-  impact: "Blast radius de símbolo ou arquivo (stub S03)",
-  diff_impact: "Impacto do diff Git atual (stub S03)",
-  files: "Estrutura indexada do workspace (stub S03)",
-  pack_context: "Empacotar contexto curto para o modelo (stub S03)",
-  status: "Saúde, staleness e confiança do índice (stub S03)",
+  search: "Localizar símbolos, arquivos e configs indexados (stub semântico S04)",
+  explore: "Entender como algo funciona — tool principal (stub semântico S04)",
+  trace: "Fluxo/execução provável entre pontos (stub semântico S04)",
+  impact: "Blast radius de símbolo ou arquivo (stub semântico S04)",
+  diff_impact: "Impacto do diff Git atual (stub semântico S04)",
+  files: "Estrutura indexada do workspace (stub semântico S04)",
+  pack_context: "Empacotar contexto curto para o modelo (stub semântico S04)",
+  status: "Saúde, staleness e confiança do índice local",
 };
 
 export function createMcpServer(): Server {

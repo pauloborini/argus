@@ -35,15 +35,19 @@ Cria metadados em `.cortex/` no repositório alvo:
 
 Reexecução é idempotente (aviso se já preparado). JSON corrompido retorna erro orientado.
 
-### 2. Comandos lifecycle (stubs S03)
+### 2. Comandos lifecycle (operacional S04)
 
 ```bash
-cortex index   # indisponível até S04 — exit != 0
-cortex sync    # indisponível até S04 — exit != 0
+cortex index   # full rebuild do manifest local
+cortex sync    # atualização incremental (delta)
+cortex status  # saúde/staleness do inventário
 cortex serve --mcp   # sobe servidor MCP stdio
 ```
 
 Sem workspace inicializado, `index`, `sync` e `serve --mcp` falham com orientação para rodar `init`.
+
+Sem manifest prévio, `sync` falha com `E_INDEX_MISSING` orientando executar `cortex index`.
+`cortex status` espelha a saúde do manifest via CLI com `fresh`/`stale`/`unknown`.
 
 ### 3. Servidor MCP
 
@@ -62,7 +66,8 @@ Configure seu agente/IDE para MCP stdio:
 
 O servidor expõe **exatamente oito tools** congeladas na S02: `search`, `explore`, `trace`, `impact`, `diff_impact`, `files`, `pack_context`, `status`.
 
-Respostas são **stubs honestos**: campos vazios + `state` explícito (`parcial` ou `falha`), sem dados fictícios plausíveis.
+Respostas de retrieval permanecem **stubs honestos**: campos vazios + `state` explícito, sem dados fictícios plausíveis.
+`status` já usa o manifest local para reportar `fresh`/`stale`/`unknown`.
 
 ## Scripts de desenvolvimento
 
@@ -75,13 +80,9 @@ npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
 ```
 
-## Próximo passo (S04)
+## Limitações atuais (pós-S04)
 
-Discovery e fingerprint incremental — popular `file-manifest.json` e preparar base para `cortex sync`.
-
-## Limitações atuais (pós-S03)
-
-- Sem discovery, fingerprint ou indexação real (S04+)
+- Sem retrieval semântico útil (S05+)
 - Sem persistência SQLite funcional (dependência preparada)
 - Tools MCP retornam payloads stub alinhados a `.atlas/contracts/ESTADOS_RESPOSTA.md`
 

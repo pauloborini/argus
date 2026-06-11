@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
+import { runStatus } from "../src/commands/status.js";
 import { runServeMcp } from "../src/commands/serve.js";
 import { runSync } from "../src/commands/sync.js";
+import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("commands lifecycle", () => {
   let tempDir: string;
@@ -36,5 +38,16 @@ describe("commands lifecycle", () => {
   it("serve --mcp falha sem workspace com exit 1", async () => {
     useEmptyDir();
     await expect(runServeMcp()).resolves.toBe(1);
+  });
+
+  it("status retorna 1 sem workspace", () => {
+    useEmptyDir();
+    expect(runStatus()).toBe(1);
+  });
+
+  it("status retorna 0 com workspace preparado", () => {
+    useEmptyDir();
+    initWorkspace(tempDir);
+    expect(runStatus()).toBe(0);
   });
 });

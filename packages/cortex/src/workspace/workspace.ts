@@ -69,8 +69,7 @@ export function initWorkspace(cwd: string = process.cwd()): WorkspaceResult {
     return {
       ok: true,
       created: false,
-      message:
-        "Workspace já preparado. Próximo passo: cortex index (indisponível até S04 — indexação real pendente).",
+      message: "Workspace já preparado. Próximo passo: cortex index para gerar o manifest local.",
       metadata: existing,
     };
   }
@@ -90,8 +89,7 @@ export function initWorkspace(cwd: string = process.cwd()): WorkspaceResult {
     return {
       ok: true,
       created: true,
-      message:
-        "Workspace preparado. Próximo passo: cortex index (indisponível até S04 — indexação real pendente).",
+      message: "Workspace preparado. Próximo passo: cortex index para gerar o manifest local.",
       metadata,
     };
   } catch {
