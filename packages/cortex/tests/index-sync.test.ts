@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { runSync } from "../src/commands/sync.js";
 import { readManifest } from "../src/discovery/manifest.js";
-import { readStructuralIndex } from "../src/extraction/index-store.js";
 import * as pipeline from "../src/extraction/pipeline.js";
-import { getStructuralIndexPath, initWorkspace } from "../src/workspace/workspace.js";
+import { loadStructuralIndexForRead } from "../src/storage/index-persistence.js";
+import { getIndexDbPath, getStructuralIndexPath, initWorkspace } from "../src/workspace/workspace.js";
 
 describe("index e sync", () => {
   let tempDir: string | undefined;
@@ -24,7 +24,7 @@ describe("index e sync", () => {
     }
   });
 
-  function useWorkspace(): { root: string; manifestPath: string; structuralPath: string } {
+  function useWorkspace(): { root: string; manifestPath: string; dbPath: string; legacyJsonPath: string } {
     originalCwd = process.cwd();
     tempDir = mkdtempSync(join(tmpdir(), "cortex-index-"));
     writeFileSync(join(tempDir, "a.ts"), "export const a = 1;\n", "utf-8");
@@ -34,21 +34,23 @@ describe("index e sync", () => {
     return {
       root: tempDir,
       manifestPath: join(tempDir, ".cortex", "file-manifest.json"),
-      structuralPath: getStructuralIndexPath(tempDir),
+      dbPath: getIndexDbPath(tempDir),
+      legacyJsonPath: getStructuralIndexPath(tempDir),
     };
   }
 
-  it("index gera manifest e índice estrutural", async () => {
-    const { manifestPath, structuralPath } = useWorkspace();
+  it("index gera manifest e banco SQLite", async () => {
+    const { manifestPath, dbPath, legacyJsonPath } = useWorkspace();
 
     expect(await runIndex()).toBe(0);
     expect(existsSync(manifestPath)).toBe(true);
-    expect(existsSync(structuralPath)).toBe(true);
+    expect(existsSync(dbPath)).toBe(true);
+    expect(existsSync(legacyJsonPath)).toBe(false);
 
     const manifest = readManifest(manifestPath);
     expect(manifest?.file_count).toBe(2);
 
-    const structural = readStructuralIndex(structuralPath);
+    const structural = loadStructuralIndexForRead(tempDir!);
     expect(structural?.file_count).toBe(2);
     expect(structural?.symbol_count).toBeGreaterThan(0);
     expect(structural?.coverage_by_language.typescript).toBeDefined();
@@ -73,39 +75,39 @@ describe("index e sync", () => {
     expect(await runSync()).toBe(1);
   });
 
-  it("sync reconstrói índice estrutural quando manifest existe mas índice está ausente", async () => {
-    const { manifestPath, structuralPath } = useWorkspace();
+  it("sync reconstrói índice quando manifest existe mas SQLite está ausente", async () => {
+    const { manifestPath, dbPath } = useWorkspace();
     expect(await runIndex()).toBe(0);
     expect(existsSync(manifestPath)).toBe(true);
-    expect(existsSync(structuralPath)).toBe(true);
+    expect(existsSync(dbPath)).toBe(true);
 
-    rmSync(structuralPath);
+    rmSync(dbPath);
 
     expect(await runSync()).toBe(0);
-    expect(existsSync(structuralPath)).toBe(true);
+    expect(existsSync(dbPath)).toBe(true);
 
     const manifest = readManifest(manifestPath);
-    const structural = readStructuralIndex(structuralPath);
+    const structural = loadStructuralIndexForRead(tempDir!);
     expect(structural?.files.map((f) => f.relative_path).sort()).toEqual(["a.ts", "b.ts"]);
     expect(structural?.file_count).toBe(manifest?.file_count);
     expect(structural?.symbol_count).toBeGreaterThan(0);
   });
 
   it("index não persiste manifest quando extração falha", async () => {
-    const { manifestPath, structuralPath } = useWorkspace();
+    const { manifestPath, dbPath } = useWorkspace();
     const spy = vi
       .spyOn(pipeline, "buildStructuralIndex")
       .mockRejectedValue(new Error("falha simulada de extração"));
 
     expect(await runIndex()).toBe(1);
     expect(existsSync(manifestPath)).toBe(false);
-    expect(existsSync(structuralPath)).toBe(false);
+    expect(existsSync(dbPath)).toBe(false);
 
     spy.mockRestore();
   });
 
-  it("sync atualiza delta e índice estrutural", async () => {
-    const { root, manifestPath, structuralPath } = useWorkspace();
+  it("sync atualiza delta no SQLite", async () => {
+    const { root, manifestPath, dbPath } = useWorkspace();
     expect(await runIndex()).toBe(0);
 
     writeFileSync(join(root, "a.ts"), "export function alphaChanged() {}\n", "utf-8");
@@ -120,10 +122,11 @@ describe("index e sync", () => {
     expect(manifest.file_count).toBe(2);
     expect(manifest.files.map((file) => file.relative_path).sort()).toEqual(["a.ts", "c.ts"]);
 
-    const structural = readStructuralIndex(structuralPath);
+    const structural = loadStructuralIndexForRead(root);
     expect(structural?.files.map((f) => f.relative_path).sort()).toEqual(["a.ts", "c.ts"]);
     expect(structural?.files.find((f) => f.relative_path === "a.ts")?.symbols[0]?.name).toBe(
       "alphaChanged",
     );
+    expect(existsSync(dbPath)).toBe(true);
   });
 });

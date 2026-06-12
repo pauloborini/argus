@@ -11,19 +11,17 @@ import { discoverFiles } from "../discovery/walk.js";
 import type { DiscoveryManifest } from "../discovery/types.js";
 import { diffManifest, planManifestSync } from "../discovery/delta.js";
 import {
-  readStructuralIndex,
-  StructuralIndexCorruptedError,
-  writeStructuralIndexAtomic,
-} from "../extraction/index-store.js";
-import {
   buildStructuralIndex,
   updateStructuralIndexDelta,
 } from "../extraction/pipeline.js";
 import {
-  getManifestPath,
-  getStructuralIndexPath,
-  requireWorkspace,
-} from "../workspace/workspace.js";
+  IndexDbCorruptedError,
+  IndexDbSchemaError,
+  loadStructuralIndexForRead,
+  persistFullStructuralIndex,
+  persistStructuralIndexDelta,
+} from "../storage/index-persistence.js";
+import { getManifestPath, requireWorkspace } from "../workspace/workspace.js";
 
 export async function runSync(): Promise<number> {
   let rootPath: string;
@@ -65,12 +63,11 @@ export async function runSync(): Promise<number> {
     const nextManifest = buildDiscoveryManifest(rootPath, nextFingerprints);
     writeManifestAtomic(manifestPath, nextManifest);
 
-    const structuralPath = getStructuralIndexPath(rootPath);
     let previousStructural = null;
     try {
-      previousStructural = readStructuralIndex(structuralPath);
+      previousStructural = loadStructuralIndexForRead(rootPath);
     } catch (err) {
-      if (err instanceof StructuralIndexCorruptedError) {
+      if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
         console.error(err.message);
         return 1;
       }
@@ -79,7 +76,7 @@ export async function runSync(): Promise<number> {
 
     if (!previousStructural) {
       const { index, summary } = await buildStructuralIndex(nextManifest, rootPath);
-      writeStructuralIndexAtomic(structuralPath, index);
+      persistFullStructuralIndex(rootPath, index);
 
       console.log(
         `Sync concluído: +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
@@ -100,7 +97,16 @@ export async function runSync(): Promise<number> {
         changedPaths,
         removedPaths,
       );
-      writeStructuralIndexAtomic(structuralPath, index);
+
+      const changedSet = new Set(changedPaths);
+      persistStructuralIndexDelta(rootPath, {
+        manifestHash: index.manifest_hash,
+        generatedAt: index.generated_at,
+        coverage: index.coverage_by_language,
+        extractionLimitations: index.extraction_limitations,
+        upsertedFiles: index.files.filter((file) => changedSet.has(file.relative_path)),
+        removedPaths,
+      });
 
       console.log(
         `Sync concluído: +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,

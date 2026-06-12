@@ -5,15 +5,16 @@ import type { DiscoveryManifest } from "../../discovery/types.js";
 import { ManifestCorruptedError, readManifest } from "../../discovery/manifest.js";
 import { computeManifestStaleness } from "../../discovery/staleness.js";
 import { collectIndexedLanguages, buildFilesTree } from "../../extraction/files-tree.js";
-import {
-  readStructuralIndex,
-  StructuralIndexCorruptedError,
-} from "../../extraction/index-store.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { STRUCTURAL_INDEX_SCHEMA_VERSION } from "../../extraction/types.js";
 import {
+  IndexDbCorruptedError,
+  IndexDbSchemaError,
+  loadStructuralIndexForRead,
+} from "../../storage/index-persistence.js";
+import { SQLITE_SCHEMA_VERSION } from "../../storage/sqlite-prepared.js";
+import {
   getManifestPath,
-  getStructuralIndexPath,
   readWorkspaceMetadata,
 } from "../../workspace/workspace.js";
 import type { McpToolName } from "../tool-registry.js";
@@ -29,7 +30,7 @@ const WORKSPACE_MISSING =
 const STRUCTURAL_INDEX_MISSING =
   "E_INDEX_MISSING: Manifest disponível; índice estrutural ausente — execute cortex index ou cortex sync.";
 const FTS_RETRIEVAL_PENDING =
-  "Extração estrutural disponível; busca textual e retrieval semântico aguardam S06+.";
+  "FTS lexical local disponível (S06); busca rankeada e retrieval semântico para o agente aguardam S08.";
 const PARTIAL_NO_MANIFEST_LIMITATIONS = [
   "Manifest de arquivos ausente; execute cortex index para iniciar o inventário.",
 ];
@@ -37,13 +38,13 @@ const PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS = [
   "Manifest de arquivos corrompido; execute cortex index para recriar o inventário.",
 ];
 const PARTIAL_STRUCTURAL_MISSING_LIMITATIONS = [
-  "Manifest presente, mas índice estrutural ausente; execute cortex index ou cortex sync.",
+  "Manifest presente, mas índice SQLite ausente; execute cortex index ou cortex sync.",
 ];
 const PARTIAL_FTS_LIMITATIONS = [
-  "Índice estrutural local disponível (S05); FTS e ranking semântico aguardam S06/S08.",
+  "Índice SQLite com FTS lexical local (S06); ranking e retrieval útil para o agente aguardam S08.",
 ];
 const PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS = [
-  "Índice estrutural corrompido; execute cortex index para reconstruir.",
+  "Índice SQLite corrompido; execute cortex index para reconstruir.",
 ];
 
 interface SemanticStubEnvelope {
@@ -52,17 +53,12 @@ interface SemanticStubEnvelope {
   limitations?: string[];
   staleness_hint?: string;
   structuralIndex: StructuralIndex | null;
+  storage_backend: "sqlite" | null;
+  schema_version: string | null;
 }
 
 function loadStructuralIndex(rootPath: string): StructuralIndex | null {
-  try {
-    return readStructuralIndex(getStructuralIndexPath(rootPath));
-  } catch (err) {
-    if (err instanceof StructuralIndexCorruptedError) {
-      throw err;
-    }
-    throw err;
-  }
+  return loadStructuralIndexForRead(rootPath);
 }
 
 function mergeStructuralLimitations(
@@ -77,7 +73,7 @@ function mergeStructuralLimitations(
 
 function buildIndexVersion(manifest: DiscoveryManifest, structural: StructuralIndex | null): string {
   if (structural) {
-    return `${manifest.schema_version}+structural@${structural.schema_version}`;
+    return `${manifest.schema_version}+sqlite@${structural.schema_version}`;
   }
   return manifest.schema_version;
 }
@@ -101,6 +97,8 @@ function buildStatusStub(cwd: string): ToolStubPayload {
       pending_files_count: 0,
       coverage_by_language: {},
       index_version: null,
+      storage_backend: null,
+      schema_version: null,
       ...stubResponse("falha", WORKSPACE_MISSING),
     };
   }
@@ -116,6 +114,8 @@ function buildStatusStub(cwd: string): ToolStubPayload {
         pending_files_count: 0,
         coverage_by_language: {},
         index_version: null,
+        storage_backend: null,
+        schema_version: null,
         ...stubResponse("parcial", err.message, {
           limitations: PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS,
           staleness_hint: "Execute cortex index para reconstruir o manifest.",
@@ -132,6 +132,8 @@ function buildStatusStub(cwd: string): ToolStubPayload {
       pending_files_count: 0,
       coverage_by_language: {},
       index_version: null,
+      storage_backend: null,
+      schema_version: null,
       ...stubResponse("parcial", INDEX_MISSING, {
         limitations: PARTIAL_NO_MANIFEST_LIMITATIONS,
         staleness_hint: "Execute cortex index para criar o manifest inicial.",
@@ -143,13 +145,15 @@ function buildStatusStub(cwd: string): ToolStubPayload {
   try {
     structural = loadStructuralIndex(metadata.root_path);
   } catch (err) {
-    if (err instanceof StructuralIndexCorruptedError) {
+    if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
       return {
         initialized: true,
         staleness: "unknown",
         pending_files_count: 0,
         coverage_by_language: {},
         index_version: null,
+        storage_backend: "sqlite",
+        schema_version: null,
         ...stubResponse("falha", err.message, {
           limitations: PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS,
           staleness_hint: "Execute cortex index para reconstruir o índice estrutural.",
@@ -167,6 +171,8 @@ function buildStatusStub(cwd: string): ToolStubPayload {
     pending_files_count: staleness.pending_files_count,
     coverage_by_language: coverage,
     index_version: buildIndexVersion(manifest, structural),
+    storage_backend: structural ? ("sqlite" as const) : null,
+    schema_version: structural?.schema_version ?? null,
   };
 
   if (!structural) {
@@ -174,7 +180,7 @@ function buildStatusStub(cwd: string): ToolStubPayload {
       ...basePayload,
       ...stubResponse("parcial", STRUCTURAL_INDEX_MISSING, {
         limitations: PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-        staleness_hint: "Execute cortex index ou cortex sync para gerar o índice estrutural.",
+        staleness_hint: "Execute cortex index ou cortex sync para gerar o índice SQLite.",
       }),
     };
   }
@@ -193,7 +199,7 @@ function buildStatusStub(cwd: string): ToolStubPayload {
 
     return {
       ...basePayload,
-      ...stubResponse("sucesso", "Índice de arquivos e extração estrutural atualizados."),
+      ...stubResponse("sucesso", "Índice de arquivos e extração estrutural atualizados (SQLite)."),
     };
   }
 
@@ -221,7 +227,13 @@ function buildStatusStub(cwd: string): ToolStubPayload {
 function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
   const metadata = readWorkspaceMetadata(cwd);
   if (!metadata) {
-    return { state: "falha", message: WORKSPACE_MISSING, structuralIndex: null };
+    return {
+      state: "falha",
+      message: WORKSPACE_MISSING,
+      structuralIndex: null,
+      storage_backend: null,
+      schema_version: null,
+    };
   }
 
   let manifest: DiscoveryManifest | null;
@@ -235,6 +247,8 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
         limitations: PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS,
         staleness_hint: "Execute cortex index para reconstruir o manifest.",
         structuralIndex: null,
+        storage_backend: null,
+        schema_version: null,
       };
     }
     throw err;
@@ -247,6 +261,8 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
       limitations: PARTIAL_NO_MANIFEST_LIMITATIONS,
       staleness_hint: "Execute cortex index para criar o manifest inicial.",
       structuralIndex: null,
+      storage_backend: null,
+      schema_version: null,
     };
   }
 
@@ -254,16 +270,21 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
   try {
     structural = loadStructuralIndex(metadata.root_path);
   } catch (err) {
-    if (err instanceof StructuralIndexCorruptedError) {
+    if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
       return {
         state: "falha",
         message: err.message,
         limitations: PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS,
         structuralIndex: null,
+        storage_backend: "sqlite",
+        schema_version: null,
       };
     }
     throw err;
   }
+
+  const storage_backend = structural ? ("sqlite" as const) : null;
+  const schema_version = structural?.schema_version ?? null;
 
   const staleness = computeManifestStaleness(metadata.root_path, manifest);
   if (staleness.staleness === "stale") {
@@ -273,6 +294,8 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
       limitations: structural ? PARTIAL_FTS_LIMITATIONS : PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
       staleness_hint: "Execute cortex sync para sincronizar o delta pendente.",
       structuralIndex: structural,
+      storage_backend,
+      schema_version,
     };
   }
 
@@ -283,6 +306,8 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
       limitations: structural ? PARTIAL_FTS_LIMITATIONS : PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
       staleness_hint: "Não foi possível determinar staleness com segurança.",
       structuralIndex: structural,
+      storage_backend,
+      schema_version,
     };
   }
 
@@ -291,8 +316,10 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
       state: "parcial",
       message: STRUCTURAL_INDEX_MISSING,
       limitations: PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-      staleness_hint: "Execute cortex index ou cortex sync para gerar o índice estrutural.",
+      staleness_hint: "Execute cortex index ou cortex sync para gerar o índice SQLite.",
       structuralIndex: null,
+      storage_backend: null,
+      schema_version: null,
     };
   }
 
@@ -301,6 +328,8 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
     message: FTS_RETRIEVAL_PENDING,
     limitations: mergeStructuralLimitations(structural, PARTIAL_FTS_LIMITATIONS),
     structuralIndex: structural,
+    storage_backend,
+    schema_version,
   };
 }
 
@@ -311,6 +340,8 @@ function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
     return {
       tree: [],
       languages: [],
+      storage_backend: semanticStub.storage_backend,
+      schema_version: semanticStub.schema_version,
       ...stubResponse(semanticStub.state, semanticStub.message, {
         limitations: semanticStub.limitations,
         staleness_hint: semanticStub.staleness_hint,
@@ -325,6 +356,8 @@ function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
     return {
       tree,
       languages,
+      storage_backend: semanticStub.storage_backend,
+      schema_version: semanticStub.schema_version,
       ...stubResponse("stale", semanticStub.message, {
         limitations: semanticStub.limitations,
         staleness_hint: semanticStub.staleness_hint,
@@ -337,6 +370,8 @@ function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
     return {
       tree,
       languages,
+      storage_backend: semanticStub.storage_backend,
+      schema_version: semanticStub.schema_version,
       ...stubResponse("parcial", "Estrutura indexada com limitações de cobertura.", {
         limitations: structuralLimitations,
       }),
@@ -346,6 +381,8 @@ function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
   return {
     tree,
     languages,
+    storage_backend: semanticStub.storage_backend,
+    schema_version: semanticStub.schema_version,
     ...stubResponse("sucesso", "Estrutura indexada com contagens de símbolos por arquivo."),
   };
 }
@@ -364,6 +401,8 @@ export function buildToolStub(tool: McpToolName, cwd: string = process.cwd()): T
     case "search":
       return {
         candidates: [],
+        storage_backend: semanticStub.storage_backend,
+        schema_version: semanticStub.schema_version,
         ...stubResponse(semanticStub.state, semanticStub.message, {
           limitations: semanticStub.limitations,
           staleness_hint: semanticStub.staleness_hint,
@@ -429,4 +468,4 @@ export function buildToolStub(tool: McpToolName, cwd: string = process.cwd()): T
   }
 }
 
-export { STRUCTURAL_INDEX_SCHEMA_VERSION };
+export { STRUCTURAL_INDEX_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION };

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   FILE_MANIFEST_FILE,
+  INDEX_DB_FILE,
   STRUCTURAL_INDEX_FILE,
   WORKSPACE_METADATA_FILE,
+  getIndexDbPath,
   getManifestPath,
   getMetadataPath,
   getStructuralIndexPath,
@@ -16,5 +18,7 @@ describe("workspace paths", () => {
     expect(getManifestPath("/tmp/repo")).toMatch(/\.cortex\/file-manifest\.json$/);
     expect(STRUCTURAL_INDEX_FILE).toBe("structural-index.json");
     expect(getStructuralIndexPath("/tmp/repo")).toMatch(/\.cortex\/structural-index\.json$/);
+    expect(INDEX_DB_FILE).toBe("index.db");
+    expect(getIndexDbPath("/tmp/repo")).toMatch(/\.cortex\/index\.db$/);
   });
 });

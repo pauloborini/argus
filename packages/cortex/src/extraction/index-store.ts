@@ -44,6 +44,7 @@ function isStructuralIndexLike(value: unknown): value is StructuralIndex {
   );
 }
 
+/** Leitura JSON legada — somente migração/import one-shot (PRD D8). Pipeline S06+ grava em SQLite. */
 export function readStructuralIndex(indexPath: string): StructuralIndex | null {
   if (!existsSync(indexPath)) {
     return null;

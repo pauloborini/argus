@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { buildToolStub } from "../src/mcp/tools/stubs.js";
-import { initWorkspace } from "../src/workspace/workspace.js";
+import { SQLITE_SCHEMA_VERSION } from "../src/storage/sqlite-prepared.js";
+import { getIndexDbPath, initWorkspace } from "../src/workspace/workspace.js";
 
 describe("status stub e staleness", () => {
   let tempDir: string | undefined;
@@ -37,6 +38,7 @@ describe("status stub e staleness", () => {
     expect(payload.state).toBe("parcial");
     expect(payload.staleness).toBe("unknown");
     expect(payload.index_version).toBeNull();
+    expect(payload.storage_backend).toBeNull();
   });
 
   it("status reporta limitations quando há arquivos não suportados no manifest", async () => {
@@ -50,15 +52,17 @@ describe("status stub e staleness", () => {
     expect(limitations.some((line) => line.includes("não suportada"))).toBe(true);
   });
 
-  it("status após index fica fresh/sucesso com coverage", async () => {
+  it("status após index fica fresh/sucesso com coverage e backend sqlite", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
     const payload = buildToolStub("status", root);
     expect(payload.state).toBe("sucesso");
     expect(payload.staleness).toBe("fresh");
     expect(payload.pending_files_count).toBe(0);
+    expect(payload.storage_backend).toBe("sqlite");
+    expect(payload.schema_version).toBe(SQLITE_SCHEMA_VERSION);
     expect(typeof payload.index_version).toBe("string");
-    expect(String(payload.index_version)).toContain("structural@");
+    expect(String(payload.index_version)).toContain("sqlite@");
     const coverage = payload.coverage_by_language as Record<string, { symbols: number }>;
     expect(coverage.typescript?.symbols).toBeGreaterThan(0);
   });
@@ -73,14 +77,14 @@ describe("status stub e staleness", () => {
     expect(Number(payload.pending_files_count)).toBeGreaterThan(0);
   });
 
-  it("tools semânticas degradam honestamente com índice estrutural", async () => {
+  it("tools semânticas degradam honestamente com índice SQLite", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
     const searchPayload = buildToolStub("search", root);
     expect(searchPayload.state).toBe("parcial");
     expect(searchPayload.candidates).toEqual([]);
-    expect(String(searchPayload.message)).toContain("S06");
+    expect(String(searchPayload.message)).toContain("S08");
 
     const packPayload = buildToolStub("pack_context", root);
     expect(packPayload.state).toBe("parcial");
@@ -107,10 +111,10 @@ describe("status stub e staleness", () => {
     expect(String(payload.message)).toContain("E_INDEX_CORRUPTED");
   });
 
-  it("status falha quando índice estrutural está corrompido", async () => {
+  it("status falha quando banco SQLite está corrompido", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
-    writeFileSync(join(root, ".cortex", "structural-index.json"), "{ invalid", "utf-8");
+    writeFileSync(getIndexDbPath(root), "not-a-sqlite-db", "utf-8");
 
     const payload = buildToolStub("status", root);
     expect(payload.state).toBe("falha");

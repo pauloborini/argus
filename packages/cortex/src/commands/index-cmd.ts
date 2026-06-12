@@ -1,9 +1,9 @@
 import { buildDiscoveryManifest, fingerprintDiscoveredFiles } from "../discovery/fingerprint.js";
 import { writeManifestAtomic } from "../discovery/manifest.js";
 import { discoverFiles } from "../discovery/walk.js";
-import { writeStructuralIndexAtomic } from "../extraction/index-store.js";
 import { buildStructuralIndex } from "../extraction/pipeline.js";
-import { getManifestPath, getStructuralIndexPath, requireWorkspace } from "../workspace/workspace.js";
+import { persistFullStructuralIndex } from "../storage/index-persistence.js";
+import { getManifestPath, requireWorkspace } from "../workspace/workspace.js";
 
 export async function runIndex(): Promise<number> {
   let rootPath: string;
@@ -23,7 +23,7 @@ export async function runIndex(): Promise<number> {
     const { index, summary } = await buildStructuralIndex(manifest, rootPath);
 
     writeManifestAtomic(getManifestPath(rootPath), manifest);
-    writeStructuralIndexAtomic(getStructuralIndexPath(rootPath), index);
+    persistFullStructuralIndex(rootPath, index);
 
     console.log(`Index concluído: ${manifest.file_count} arquivos inventariados.`);
     console.log(
