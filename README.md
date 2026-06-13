@@ -1,89 +1,84 @@
+<!-- Language: **English** · [Português](README.pt-BR.md) -->
+
 # Atlas Cortex
 
-Local code retrieval and context packing for coding agents. Runtime `1.0.0`,
-local-first, sem UI, com CLI e MCP.
+**Local code retrieval and context packing for coding agents.**
 
-## Requisitos
+Atlas Cortex indexes a repository once and answers an agent's structural
+questions — *where is this symbol, what calls it, what breaks if I change it,
+give me just the relevant context* — without the agent reading and re-reading
+files. It runs entirely on your machine, has no UI, and speaks two interfaces:
+a **CLI** and an **MCP server**.
 
-- Node.js >= 20
-- npm (workspaces)
+> 📖 Looking for the exhaustive command list? See **[COMMANDS.md](COMMANDS.md)**.
+> This README explains the *why* and *how*; COMMANDS is the pure reference.
 
-## Instalação
+---
 
-Via npm:
+## Why it exists
+
+Agents burn tokens and tool calls re-discovering a codebase: `grep`, open file,
+`grep` again, open three more. Atlas Cortex collapses that into single,
+structured answers backed by a local index.
+
+On the internal benchmark (real engineering tasks, 6 repos):
+
+| Metric | Baseline | Atlas Cortex |
+|---|---|---|
+| Tool calls | 24 | **14** (−41.7%) |
+| Approx. tokens | 76,209 | **8,940** (−88.1%) |
+| Average usefulness | — | **4.17 / 5** |
+
+It is **local-first**: nothing is indexed or sent to a remote service, and
+recovered context never leaves the workspace.
+
+---
+
+## Requirements
+
+- Node.js **>= 20**
+
+---
+
+## Install
 
 ```bash
+# Global install — gives you the `cortex` binary
 npm install -g atlas-cortex
 cortex --version
-```
 
-Via `npx`, sem instalação global:
-
-```bash
+# Or run without installing
 npx atlas-cortex init
-npx atlas-cortex index
 ```
 
-Para desenvolver o monorepo:
+---
+
+## Quickstart
+
+Three steps take you from a cold repo to useful answers.
 
 ```bash
-npm ci
-npm run validate
-```
-
-## Uso rápido
-
-### 1. Preparar workspace
-
-```bash
+# 1. Prepare the workspace (creates a local .cortex/ folder)
 cortex init
+
+# 2. Build the index (files, symbols, imports, relations)
+cortex index
+
+# 3. Ask questions
+cortex search "calculateTotal"            # find a symbol fast
+cortex explore src/billing.ts --mode file # structured context for a file
 ```
 
-Cria metadados em `.cortex/` no repositório alvo:
+That's the core loop. After code changes, run `cortex sync` (incremental) and
+check `cortex status` for staleness. **Every other command — `trace`,
+`impact`, `diff-impact`, `pack-context`, `retrieve` — lives in
+[COMMANDS.md](COMMANDS.md) with full flags and examples.**
 
-- `.cortex/workspace.json` — metadados do workspace (S03)
-- `.cortex/file-manifest.json` — fingerprint de arquivos (S04+)
+---
 
-Reexecução é idempotente (aviso se já preparado). JSON corrompido retorna erro orientado.
+## Use it as an MCP server
 
-### 2. Comandos lifecycle e discovery (operacional S17)
-
-```bash
-cortex index   # full rebuild do manifest + índice SQLite local
-cortex sync    # atualização incremental (delta) no manifest + SQLite
-cortex status  # saúde/staleness do índice local
-cortex search "MinhaFuncao"   # busca lexical de símbolos via FTS
-cortex files --pattern src    # estrutura indexada com filtros simples
-cortex explore "MinhaFuncao" --mode symbol   # contexto estrutural composto
-cortex trace --from MinhaFuncao --to OutraFuncao   # fluxo provável com incerteza explícita
-cortex impact MinhaFuncao --direction dependents   # blast radius provável com risco resumido
-cortex diff-impact --scope all   # impacto provável do diff Git atual
-cortex pack-context --sources utils.ts --goal "entender refactor" --token-budget 400
-cortex retrieve rh_0123456789abcdef
-cortex serve --mcp   # sobe servidor MCP stdio
-```
-
-Sem workspace inicializado, `index`, `sync` e `serve --mcp` falham com orientação para rodar `init`.
-
-Sem manifest prévio, `sync` falha com `E_INDEX_MISSING` orientando executar `cortex index`.
-`cortex index` e `cortex sync` mantêm:
-
-- `.cortex/file-manifest.json` — inventário/fingerprint
-- `.cortex/index.db` — fonte de verdade estrutural em SQLite + FTS
-
-`cortex status` espelha saúde do índice via CLI com `fresh`/`stale`/`unknown`, `storage_backend=sqlite` e `schema_version`.
-`cortex search` retorna candidatos lexicais indexados com estados honestos (`sucesso`, `ambigua`, `stale`, `falha`).
-`cortex files` retorna a estrutura indexada com `symbol_counts`, além de `--pattern` e `--max-depth`.
-`cortex explore` combina alvo, símbolos centrais, imports, arquivos relevantes e snippets por faixa de linha.
-`cortex trace` devolve caminhos prováveis entre símbolos/arquivos com `paths`, `files`, `symbols` e `uncertainty_points`.
-`cortex impact` estima blast radius por símbolo/arquivo com `direct_affected`, `indirect_affected`, `files`, `tests` e `risk_summary`.
-`cortex diff-impact` lê o diff Git real e retorna `changed_files`, `changed_symbols`, `affected_areas`, `affected_tests` e `risk_summary`.
-`cortex pack-context` monta pacote curto com refs e handle opcional.
-`cortex retrieve` recupera explicitamente o original persistido no mesmo workspace.
-
-### 3. Servidor MCP
-
-Configure seu agente/IDE para MCP stdio:
+Point your agent or IDE at the stdio MCP server:
 
 ```json
 {
@@ -96,127 +91,77 @@ Configure seu agente/IDE para MCP stdio:
 }
 ```
 
-O servidor expõe nove tools: `search`, `explore`, `trace`, `impact`,
-`diff_impact`, `files`, `pack_context`, `retrieve`, `status`.
+The server exposes nine tools: `search`, `explore`, `trace`, `impact`,
+`diff_impact`, `files`, `pack_context`, `retrieve`, `status`. They all read
+local state only.
 
-Todas leem estado local. Respostas incluem `state`, `confidence`, limitações e
-staleness quando aplicável. `retrieve` aceita apenas handles opacos locais.
+---
 
-## Plugin Codex
+## Reading the answers
 
-O marketplace do repositório vive em `.agents/plugins/marketplace.json`.
-Após o repositório estar público:
+Every tool returns JSON with the same honesty envelope, so an agent always
+knows how much to trust a result:
 
-```bash
-codex plugin marketplace add https://github.com/pauloborini/atlas-cortex
-codex plugin install atlas-cortex@atlas-cortex
-```
+- **`state`** — `sucesso` (clean), `ambigua` (several equivalent matches),
+  `parcial` (partial coverage / uncertain staleness), `stale` (index behind the
+  code), `falha` (cannot answer).
+- **`confidence`** — `high` / `medium` / `low`.
+- **`limitations`** and **`staleness_hint`** — present when something might be
+  off, telling you what to do (e.g. run `cortex sync`).
 
-O plugin sobe o MCP via pacote npm versionado. Manifest:
-`plugins/atlas-cortex/.codex-plugin/plugin.json`.
+Two ideas worth knowing:
 
-## Scripts de desenvolvimento
+- **Staleness.** The index can drift from the code. `status` and every query
+  surface `fresh` / `stale` / `unknown` so results are never silently wrong.
+- **Retrieve handles.** `pack_context` may return a compact context plus an
+  opaque handle (`rh_…`). `retrieve <handle>` rehydrates the original, on
+  demand, confined to the same workspace.
 
-Na raiz do monorepo:
+---
 
-```bash
-npm run build      # compila packages/cortex
-npm run benchmark:mvp  # executa benchmark interno S16
-npm run test       # testes unitários (vitest)
-npm run lint       # eslint
-npm run typecheck  # tsc --noEmit
-npm run smoke:package  # instala e exercita o tarball em diretório limpo
-npm run homologate     # valida repos externos locais
-```
+## Supported languages
 
-O benchmark escreve evidência em `.atlas/benchmark/latest/`:
+| Tier | Languages | Coverage |
+|---|---|---|
+| Core | TypeScript/JavaScript, Python, Go, Java, Rust | full |
+| Extension | Dart, Kotlin | partial (honest degradation) |
 
-- `summary.json` — resultado agregado machine-readable
-- `SUMMARY.md` — leitura humana do benchmark
-- `BT-01-*.md` ... `BT-06-*.md` — detalhe bruto por task/arm
+Dart gets first-class structural extraction (classes, mixins, typedefs,
+top-level constants, `with`/`on` relations) because of Flutter.
 
-## Release
+---
 
-Fluxo mínimo para adoção interna do MVP:
+## Known limitations
+
+- Calls without a resolved import degrade to global name matching.
+- Dart/Kotlin keep explicit partial coverage.
+- Dynamic/reflective resolution is not treated as proven causality.
+- `search` ranks lexically and structurally — **no embeddings**.
+
+---
+
+## Development
 
 ```bash
 npm ci
-npm run validate
-npm run smoke:package
-npm run benchmark:mvp
-npm run homologate
-npm run release:check
+npm run validate        # typecheck + tests + lint + build
 ```
 
-Tags `v*` executam CI, smoke do tarball, publicação npm com provenance e
-GitHub Release com `SHA256SUMS`. A versão da tag deve coincidir com root,
-runtime e plugin.
+Build, benchmark, smoke, homologation and release scripts are documented in
+[COMMANDS.md → Development & release](COMMANDS.md#development--release).
 
-Pré-requisitos para a primeira publicação:
+---
 
-1. tornar `pauloborini/atlas-cortex` público
-2. configurar trusted publisher no npm para `.github/workflows/release.yml`
-3. criar e enviar a tag `v1.0.0`
+## Documentation map
 
-### Upgrade
+- **[COMMANDS.md](COMMANDS.md)** — every command, flag and output field.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute.
+- [SECURITY.md](SECURITY.md) — reporting vulnerabilities.
+- [CHANGELOG.md](CHANGELOG.md) — release history.
+- `.atlas/contracts/` — frozen MCP/CLI surface and response-state contracts.
 
-Use versão explícita para manter a instalação reproduzível:
+---
 
-```bash
-npm install -g atlas-cortex@1.0.0
-cortex --version
-```
+## License
 
-Atualize o plugin e a configuração MCP para a mesma versão antes de publicar
-uma nova tag SemVer. Execute `cortex sync`; se houver mudança incompatível de
-schema ou falha de leitura, execute `cortex index` para reconstrução completa.
-
-### Rollback
-
-Reinstale a última versão conhecida e restaure a referência versionada no MCP:
-
-```bash
-npm install -g atlas-cortex@<versao-anterior>
-cortex --version
-cortex index
-```
-
-Não reutilize `.cortex/index.db` quando a versão anterior não reconhecer o
-schema. Remova somente `.cortex/index.db` e rode `cortex index`; os arquivos do
-projeto não são alterados.
-
-### Recovery
-
-- índice stale: `cortex sync`
-- índice ausente ou corrompido: remova `.cortex/index.db` e rode `cortex index`
-- workspace inválido: preserve o código, remova `.cortex/`, rode `cortex init`
-  e depois `cortex index`
-- handle corrompido: gere novamente o pacote com `cortex pack-context`; não
-  edite manifests em `.cortex/packed-handles`
-
-Critério de GO:
-
-- redução de tool calls >= 35%
-- redução de tokens >= 25%
-- utilidade média >= 4/5
-- nenhuma task atlas-cortex abaixo de 3/5
-
-Resultado mais recente do benchmark S16:
-
-- tool calls: `24 -> 14` (`-41,7%`)
-- tokens aproximados: `76209 -> 8919` (`-88,3%`)
-- utilidade média atlas-cortex: `4,17/5`
-- menor utilidade atlas-cortex: `4/5`
-
-## Limitações conhecidas
-
-- chamadas sem import resolvido degradam para correspondência global por nome
-- Dart/Kotlin mantêm cobertura parcial explícita
-- resolução dinâmica/reflexiva não é tratada como causalidade comprovada
-- `search` combina ranking lexical/estrutural; não usa embeddings
-
-## Contratos de referência
-
-- `.atlas/contracts/SURFACE_MCP_CLI.md` — surface congelada
-- `.atlas/contracts/ESTADOS_RESPOSTA.md` — estados operacionais
-- `.atlas/contracts/CONTRATO_MVP.md` — contrato MVP
+See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

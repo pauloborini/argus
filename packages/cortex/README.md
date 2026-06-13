@@ -1,12 +1,22 @@
 # Atlas Cortex
 
-Runtime local de code retrieval e context packing para agentes.
+Local code retrieval and context packing for coding agents. Local-first, no UI,
+CLI + MCP. · *Runtime local de code retrieval e context packing para agentes.*
 
 ```bash
-npx atlas-cortex init
-npx atlas-cortex index
-npx atlas-cortex search "MinhaFuncao"
-npx atlas-cortex serve --mcp
+npm install -g atlas-cortex
+cortex init
+cortex index
+cortex search "calculateTotal"
+cortex serve --mcp
 ```
 
-Documentação completa: https://github.com/pauloborini/atlas-cortex
+Exposes nine MCP tools: `search`, `explore`, `trace`, `impact`, `diff_impact`,
+`files`, `pack_context`, `retrieve`, `status`.
+
+## Documentation
+
+- README — [English](https://github.com/pauloborini/atlas-cortex/blob/main/README.md)
+  · [Português](https://github.com/pauloborini/atlas-cortex/blob/main/README.pt-BR.md)
+- Commands — [English](https://github.com/pauloborini/atlas-cortex/blob/main/COMMANDS.md)
+  · [Português](https://github.com/pauloborini/atlas-cortex/blob/main/COMMANDS.pt-BR.md)
