@@ -17,6 +17,14 @@ import { CORTEX_VERSION } from "./version.js";
 
 const program = new Command();
 
+// Define o código de saída sem matar o processo. `process.exit()` corta writes
+// assíncronos pendentes em stdout: output grande sobre pipe (CLI scriptável,
+// execFileSync) trunca no buffer do SO (~64KB no macOS). Deixar o Node sair
+// naturalmente após drenar stdout garante payload completo.
+function finish(code: number): void {
+  process.exitCode = code;
+}
+
 program
   .name("cortex")
   .description("Atlas Cortex — CLI local de retrieval e context packing")
@@ -26,21 +34,21 @@ program
   .command("init")
   .description("Preparar workspace e metadados locais em .cortex/")
   .action(() => {
-    process.exit(runInit());
+    finish(runInit());
   });
 
 program
   .command("index")
   .description("Indexação completa do inventário local de arquivos")
   .action(async () => {
-    process.exit(await runIndex());
+    finish(await runIndex());
   });
 
 program
   .command("sync")
   .description("Sincronização incremental do manifest local")
   .action(async () => {
-    process.exit(await runSync());
+    finish(await runSync());
   });
 
 program
@@ -51,7 +59,7 @@ program
   .option("--kind <kind>", "Restringir por tipo de símbolo")
   .option("--limit <n>", "Máximo de candidatos", (value) => Number(value))
   .action((query: string, opts: { scope?: string; kind?: string; limit?: number }) => {
-    process.exit(runSearch(query, opts));
+    finish(runSearch(query, opts));
   });
 
 program
@@ -60,7 +68,7 @@ program
   .option("--pattern <pattern>", "Filtro simples por substring do path")
   .option("--max-depth <n>", "Profundidade máxima por path", (value) => Number(value))
   .action((opts: { pattern?: string; maxDepth?: number }) => {
-    process.exit(runFiles(opts));
+    finish(runFiles(opts));
   });
 
 program
@@ -76,7 +84,7 @@ program
       target: string,
       opts: { mode?: string; depth?: number; includeTests?: boolean; budget?: number },
     ) => {
-      process.exit(runExplore(target, opts));
+      finish(runExplore(target, opts));
     },
   );
 
@@ -88,7 +96,7 @@ program
   .option("--direction <direction>", "forward | backward | both")
   .option("--max-hops <n>", "Número máximo de hops", (value) => Number(value))
   .action((opts: { from: string; to?: string; direction?: string; maxHops?: number }) => {
-    process.exit(runTrace(opts.from, opts));
+    finish(runTrace(opts.from, opts));
   });
 
 program
@@ -104,7 +112,7 @@ program
       target: string,
       opts: { direction?: string; depth?: number; includeTests?: boolean; summaryOnly?: boolean },
     ) => {
-      process.exit(runImpact(target, opts));
+      finish(runImpact(target, opts));
     },
   );
 
@@ -114,7 +122,7 @@ program
   .option("--scope <scope>", "unstaged | staged | all | compare")
   .option("--base-ref <ref>", "Base Git para comparação quando scope=compare")
   .action((opts: { scope?: string; baseRef?: string }) => {
-    process.exit(runDiffImpact(opts));
+    finish(runDiffImpact(opts));
   });
 
 program
@@ -125,7 +133,7 @@ program
   .requiredOption("--token-budget <n>", "Budget máximo aproximado do pacote", (value) => Number(value))
   .option("--style <style>", "brief | balanced | deep")
   .action((opts: { sources: string; goal: string; tokenBudget: number; style?: string }) => {
-    process.exit(
+    finish(
       runPackContext({
         sources: opts.sources.split(",").map((item) => item.trim()).filter(Boolean),
         goal: opts.goal,
@@ -140,7 +148,7 @@ program
   .description("Recuperar conteúdo original persistido por retrieve_handle")
   .argument("<handle>", "Handle opaco no formato rh_<16 hex>")
   .action((handle: string) => {
-    process.exit(runRetrieve(handle));
+    finish(runRetrieve(handle));
   });
 
 program
@@ -148,7 +156,7 @@ program
   .description("Saúde e staleness do manifest local")
   .option("--path <path>", "Subpath ou workspace a inspecionar")
   .action((opts: { path?: string }) => {
-    process.exit(runStatus(opts.path));
+    finish(runStatus(opts.path));
   });
 
 program

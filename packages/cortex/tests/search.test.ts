@@ -124,6 +124,24 @@ describe("search tool", () => {
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
 
+  it("retorna candidatos quando staleness é indeterminada por limitação de discovery", async () => {
+    // Regressão: um único arquivo acima de MAX_FILE_SIZE faz o discovery
+    // reportar limitação → staleness "unknown". O índice persistido continua
+    // válido; search não pode suprimir todos os candidatos só por isso.
+    const root = setupWorkspace({
+      "app.ts": "export function calculateTotal() { return 1; }\n",
+      "assets/blob.bin": "x".repeat(2 * 1024 * 1024 + 1),
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("search", root, { query: "calculateTotal" });
+    expect(payload.state).toBe("parcial");
+    const candidates = payload.candidates as Array<{ name: string; path: string }>;
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates[0]?.name).toBe("calculateTotal");
+    expect(String(payload.staleness_hint)).toContain("determinar staleness");
+  });
+
   it("degrada para parcial quando o match está em linguagem com cobertura parcial", async () => {
     const root = setupWorkspace({
       "lib/feature.dart": "class FeatureController { void run() {} }\n",

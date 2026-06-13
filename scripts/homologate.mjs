@@ -43,6 +43,75 @@ const ignored = new Set([
 ]);
 const results = [];
 
+function runCliJson(args, cwd) {
+  const raw = execFileSync(process.execPath, [cli, ...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  return JSON.parse(raw);
+}
+
+const MEANINGFUL_KINDS = new Set([
+  "function",
+  "method",
+  "class",
+  "interface",
+  "struct",
+  "enum",
+  "type",
+]);
+
+// Sonda de retrieval real: prova que o índice não só existe, mas responde
+// explore/search úteis sobre um arquivo real do repo. Sem isto, homologação
+// só atesta indexação, nunca utilidade.
+function probeRetrieval(cwd) {
+  const files = runCliJson(["files", "--max-depth", "4"], cwd);
+  const tree = Array.isArray(files.tree) ? files.tree : [];
+  const probeFile = tree.find((entry) => (entry?.symbol_counts?.total ?? 0) > 0)?.path;
+  if (!probeFile) {
+    return {
+      verdict: "degraded",
+      reason: "Nenhum arquivo indexado com símbolos para sondar.",
+      probe_file: null,
+      explore_symbols: 0,
+      search_query: null,
+      search_hit: false,
+      confidence: null,
+    };
+  }
+
+  const explore = runCliJson(["explore", probeFile, "--mode", "file"], cwd);
+  const centralSymbols = Array.isArray(explore.central_symbols) ? explore.central_symbols : [];
+  const probeSymbol =
+    centralSymbols.find((sym) => MEANINGFUL_KINDS.has(sym?.kind)) ?? centralSymbols[0];
+
+  let searchHit = false;
+  let searchQuery = null;
+  if (probeSymbol?.name) {
+    searchQuery = probeSymbol.name;
+    const search = runCliJson(["search", searchQuery, "--limit", "5"], cwd);
+    const candidates = Array.isArray(search.candidates) ? search.candidates : [];
+    searchHit = candidates.some(
+      (cand) => cand?.name === probeSymbol.name || cand?.path === probeFile,
+    );
+  }
+
+  const useful = centralSymbols.length > 0 && searchHit && explore.state !== "falha";
+  return {
+    verdict: useful ? "useful" : "degraded",
+    reason: useful
+      ? null
+      : "explore sem símbolos centrais ou search não reencontrou o símbolo sondado.",
+    probe_file: probeFile,
+    explore_symbols: centralSymbols.length,
+    search_query: searchQuery,
+    search_hit: searchHit,
+    confidence: explore.confidence ?? null,
+  };
+}
+
 for (const source of targets) {
   const temp = mkdtempSync(join(tmpdir(), "atlas-cortex-homologation-"));
   const target = join(temp, basename(source));
@@ -68,6 +137,7 @@ for (const source of targets) {
     if (status.state === "falha" || status.initialized !== true) {
       throw new Error(`Status inválido em ${source}: ${statusRaw}`);
     }
+    const retrieval = probeRetrieval(target);
     results.push({
       repository: basename(source),
       duration_ms: durationMs,
@@ -75,6 +145,7 @@ for (const source of targets) {
       coverage_by_language: status.coverage_by_language,
       staleness: status.staleness,
       state: status.state,
+      retrieval,
     });
   } finally {
     rmSync(temp, { recursive: true, force: true });
@@ -89,9 +160,17 @@ const payload = {
     readFileSync(join(root, "packages", "cortex", "package.json"), "utf8"),
   ).version,
   repositories: results,
-  verdict: results.every((item) => item.state !== "falha" && item.staleness !== "stale")
-    ? "passed"
-    : "failed",
+  verdict: (() => {
+    const indexed = results.every(
+      (item) => item.state !== "falha" && item.staleness !== "stale",
+    );
+    if (!indexed) {
+      return "failed";
+    }
+    return results.every((item) => item.retrieval.verdict === "useful")
+      ? "passed"
+      : "incomplete";
+  })(),
 };
 writeFileSync(join(evidenceDir, "latest.json"), `${JSON.stringify(payload, null, 2)}\n`);
 writeFileSync(
@@ -103,17 +182,26 @@ writeFileSync(
     `- Runtime: ${payload.runtime_version}`,
     `- Veredito: ${payload.verdict}`,
     "",
-    "| Repositório | Duração | Staleness | Estado |",
-    "|---|---:|---|---|",
+    "| Repositório | Duração | Staleness | Estado | Retrieval | Sonda |",
+    "|---|---:|---|---|---|---|",
     ...results.map(
       (item) =>
-        `| ${item.repository} | ${item.duration_ms} ms | ${item.staleness} | ${item.state} |`,
+        `| ${item.repository} | ${item.duration_ms} ms | ${item.staleness} | ${item.state} | ${item.retrieval.verdict} | ${item.retrieval.probe_file ?? "—"} (${item.retrieval.explore_symbols} sym, search ${item.retrieval.search_hit ? "hit" : "miss"}) |`,
     ),
     "",
   ].join("\n"),
 );
 
-if (payload.verdict !== "passed") {
-  throw new Error("Homologação ampliada falhou.");
+if (payload.verdict === "failed") {
+  throw new Error("Homologação ampliada falhou: indexação inválida ou índice stale.");
 }
-console.log(`Homologação aprovada em ${results.length} repositórios.`);
+if (payload.verdict === "incomplete") {
+  const degraded = results
+    .filter((item) => item.retrieval.verdict !== "useful")
+    .map((item) => `${item.repository} (${item.retrieval.reason})`)
+    .join("; ");
+  throw new Error(`Homologação incompleta: retrieval degradado em ${degraded}.`);
+}
+console.log(
+  `Homologação aprovada em ${results.length} repositórios com retrieval útil sondado.`,
+);

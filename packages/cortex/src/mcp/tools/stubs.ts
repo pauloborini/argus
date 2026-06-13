@@ -679,17 +679,11 @@ function buildSearchStub(
     };
   }
 
-  if (semanticStub.state === "parcial" && semanticStub.message !== FTS_RETRIEVAL_PENDING) {
-    return {
-      candidates: [],
-      storage_backend: semanticStub.storage_backend,
-      schema_version: semanticStub.schema_version,
-      ...stubResponse("parcial", semanticStub.message, {
-        limitations: semanticStub.limitations,
-        staleness_hint: semanticStub.staleness_hint,
-      }),
-    };
-  }
+  // Com índice estrutural presente, sempre consultamos. Staleness "unknown"
+  // (ex.: repo grande com limitações de discovery, ou sem git) é aviso suave,
+  // não motivo para suprimir resultados: o índice persistido continua válido.
+  // Suprimir tudo deixava search inútil em codebases reais grandes — o alvo do
+  // produto. O sinal de incerteza é propagado no estado/limitations abaixo.
 
   const metadata = readWorkspaceMetadata(cwd);
   if (!metadata) {
@@ -737,12 +731,16 @@ function buildSearchStub(
       return language ? semanticStub.structuralIndex?.coverage_by_language[language]?.coverage_level === "partial" : false;
     });
     const baseState = buildSearchState(query, candidates);
+    // O envelope sempre chega "parcial" (até fresh usa FTS_RETRIEVAL_PENDING).
+    // O sinal real de incerteza é staleness indeterminada (message STALE_INDEX),
+    // não o estado parcial genérico do envelope.
+    const indexUncertain = semanticStub.message === STALE_INDEX;
     const state =
       semanticStub.state === "stale"
         ? "stale"
         : baseState === "ambigua"
           ? "ambigua"
-          : partialCoverage
+          : partialCoverage || indexUncertain
             ? "parcial"
             : baseState;
     const message =
@@ -760,9 +758,11 @@ function buildSearchStub(
         limitations:
           semanticStub.state === "stale"
             ? semanticStub.limitations
-            : partialCoverage
-              ? ["Cobertura parcial para pelo menos uma das linguagens encontradas; refine ou valide o alvo antes de mudanças críticas."]
-              : undefined,
+            : indexUncertain
+              ? semanticStub.limitations
+              : partialCoverage
+                ? ["Cobertura parcial para pelo menos uma das linguagens encontradas; refine ou valide o alvo antes de mudanças críticas."]
+                : undefined,
         staleness_hint: semanticStub.staleness_hint,
       }),
     };
