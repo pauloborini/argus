@@ -115,9 +115,13 @@ describe("tool-registry", () => {
   it("pack_context stub expõe campos de packing SURFACE §7", () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
-    const payload = buildToolStub("pack_context", dir);
+    const payload = buildToolStub("pack_context", dir, {
+      sources: ["foo.ts"],
+      goal: "entender",
+      token_budget: 120,
+    });
     expect(payload).toMatchObject({
-      packed_context: null,
+      packed_context: "",
       origin_refs: [],
       removed_or_summarized: [],
       reversibility: "none",

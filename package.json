@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspace=@atlas-cortex/cortex",
+    "benchmark:mvp": "npm run benchmark:mvp --workspace=@atlas-cortex/cortex",
     "test": "npm run test --workspace=@atlas-cortex/cortex",
     "lint": "npm run lint --workspace=@atlas-cortex/cortex",
     "typecheck": "npm run typecheck --workspace=@atlas-cortex/cortex"

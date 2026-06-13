@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "benchmark:mvp": "node ./dist/benchmark/run-mvp.js ../..",
     "test": "vitest run",
     "lint": "eslint src tests",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -47,4 +47,15 @@ describe("files stub com índice estrutural", () => {
     expect(tree[0]?.symbol_counts?.total).toBeGreaterThan(0);
     expect((payload.languages as string[]).includes("typescript")).toBe(true);
   });
+
+  it("files aceita filtro por pattern e profundidade", async () => {
+    const root = setupWorkspace();
+    writeFileSync(join(root, "nested.ts"), "export function nested() {}\n", "utf-8");
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("files", root, { pattern: "app", max_depth: 0 });
+    const tree = payload.tree as Array<{ path: string }>;
+    expect(tree).toHaveLength(1);
+    expect(tree[0]?.path).toBe("app.ts");
+  });
 });

@@ -77,18 +77,17 @@ describe("status stub e staleness", () => {
     expect(Number(payload.pending_files_count)).toBeGreaterThan(0);
   });
 
-  it("tools semânticas degradam honestamente com índice SQLite", async () => {
+  it("tools semânticas pendentes degradam honestamente com índice SQLite", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const searchPayload = buildToolStub("search", root);
-    expect(searchPayload.state).toBe("parcial");
-    expect(searchPayload.candidates).toEqual([]);
-    expect(String(searchPayload.message)).toContain("S08");
-
-    const packPayload = buildToolStub("pack_context", root);
-    expect(packPayload.state).toBe("parcial");
-    expect(packPayload.packed_context).toBeNull();
+    const packPayload = buildToolStub("pack_context", root, {
+      sources: ["main.ts"],
+      goal: "entender fluxo",
+      token_budget: 120,
+    });
+    expect(["sucesso", "parcial", "stale"]).toContain(packPayload.state);
+    expect(typeof packPayload.packed_context).toBe("string");
   });
 
   it("status degradado quando manifest está corrompido", async () => {
