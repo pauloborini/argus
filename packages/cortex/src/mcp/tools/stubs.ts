@@ -124,6 +124,8 @@ interface SearchCandidate {
   kind: string;
   name: string;
   path: string;
+  start_line: number;
+  end_line: number;
   score: number;
   match_reason: string;
 }
@@ -712,6 +714,8 @@ function buildSearchStub(
           kind: hit.kind,
           name: hit.name,
           path: hit.relative_path,
+          start_line: hit.start_line,
+          end_line: hit.end_line,
           score: scoreCandidate(hit.rank, matchReason, hit.relative_path),
           match_reason: matchReason,
         };
@@ -720,7 +724,8 @@ function buildSearchStub(
         (left, right) =>
           right.score - left.score ||
           left.name.localeCompare(right.name) ||
-          left.path.localeCompare(right.path),
+          left.path.localeCompare(right.path) ||
+          left.start_line - right.start_line,
       )
       .slice(0, requestedLimit);
 

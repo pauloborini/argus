@@ -62,6 +62,24 @@ describe("search tool", () => {
     expect(candidates).toHaveLength(2);
   });
 
+  it("expõe start_line e distingue símbolos homônimos no mesmo arquivo", async () => {
+    const root = setupWorkspace({
+      "dup.ts":
+        "export function compress() { return 1; }\n\nexport const x = 1;\n\nexport function compress2() { return 2; }\nexport function compress() { return 3; }\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("search", root, { query: "compress", kind: "function" });
+    const candidates = payload.candidates as Array<{ name: string; path: string; start_line: number }>;
+    const homonyms = candidates.filter((c) => c.name === "compress" && c.path === "dup.ts");
+    expect(homonyms.length).toBe(2);
+    expect(homonyms[0]!.start_line).toBeGreaterThan(0);
+    expect(homonyms[1]!.start_line).toBeGreaterThan(0);
+    expect(homonyms[0]!.start_line).not.toBe(homonyms[1]!.start_line);
+    // tiebreak determinístico por linha
+    expect(homonyms[0]!.start_line).toBeLessThan(homonyms[1]!.start_line);
+  });
+
   it("rankeia prefixo e respeita scope/kind", async () => {
     const root = setupWorkspace({
       "src/billing.ts": "export function calculateTotal() { return 1; }\n",

@@ -44,6 +44,8 @@ export interface FtsSearchHit {
   name: string;
   relative_path: string;
   kind: string;
+  start_line: number;
+  end_line: number;
   rank: number;
 }
 
@@ -327,7 +329,7 @@ export function searchFtsInternal(
   const ftsRows = db
     .prepare(
       `SELECT s.id AS symbol_id, s.name, f.relative_path, s.kind,
-              bm25(symbols_fts) AS rank
+              s.start_line, s.end_line, bm25(symbols_fts) AS rank
        FROM symbols_fts
        JOIN symbols s ON s.id = symbols_fts.rowid
        JOIN files f ON f.id = s.file_id
@@ -340,7 +342,8 @@ export function searchFtsInternal(
   const like = `%${sanitized.toLowerCase()}%`;
   const lexicalRows = db
     .prepare(
-      `SELECT s.id AS symbol_id, s.name, f.relative_path, s.kind, 0 AS rank
+      `SELECT s.id AS symbol_id, s.name, f.relative_path, s.kind,
+              s.start_line, s.end_line, 0 AS rank
        FROM symbols s
        JOIN files f ON f.id = s.file_id
        WHERE (lower(s.name) LIKE ? OR lower(f.relative_path) LIKE ? OR lower(s.kind) = ?)
