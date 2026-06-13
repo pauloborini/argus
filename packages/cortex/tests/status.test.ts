@@ -80,6 +80,17 @@ describe("status stub e staleness", () => {
     expect(coverage.typescript?.symbols).toBeGreaterThan(0);
   });
 
+  it("arquivo grande (MAX_FILE_SIZE) não envenena staleness; permanece fresh", async () => {
+    const root = setupWorkspace();
+    writeFileSync(join(root, "asset.bin"), "x".repeat(2 * 1024 * 1024 + 1), "utf-8");
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("status", root);
+    expect(payload.staleness).toBe("fresh");
+    expect(payload.pending_files_count).toBe(0);
+    expect(payload.state).toBe("sucesso");
+  });
+
   it("status detecta stale quando arquivo muda", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);

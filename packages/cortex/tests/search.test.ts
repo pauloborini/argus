@@ -124,10 +124,10 @@ describe("search tool", () => {
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
 
-  it("retorna candidatos quando staleness é indeterminada por limitação de discovery", async () => {
-    // Regressão: um único arquivo acima de MAX_FILE_SIZE faz o discovery
-    // reportar limitação → staleness "unknown". O índice persistido continua
-    // válido; search não pode suprimir todos os candidatos só por isso.
+  it("um arquivo grande não quebra search (MAX_FILE_SIZE é exclusão simétrica)", async () => {
+    // Regressão do bug que zerava search em repos reais: um único arquivo
+    // acima de MAX_FILE_SIZE (lockfile, código gerado, asset) não pode
+    // poluir staleness nem suprimir candidatos. O índice continua válido.
     const root = setupWorkspace({
       "app.ts": "export function calculateTotal() { return 1; }\n",
       "assets/blob.bin": "x".repeat(2 * 1024 * 1024 + 1),
@@ -135,11 +135,10 @@ describe("search tool", () => {
     expect(await runIndex()).toBe(0);
 
     const payload = buildToolStub("search", root, { query: "calculateTotal" });
-    expect(payload.state).toBe("parcial");
+    expect(payload.state).toBe("sucesso");
     const candidates = payload.candidates as Array<{ name: string; path: string }>;
     expect(candidates.length).toBeGreaterThan(0);
     expect(candidates[0]?.name).toBe("calculateTotal");
-    expect(String(payload.staleness_hint)).toContain("determinar staleness");
   });
 
   it("degrada para parcial quando o match está em linguagem com cobertura parcial", async () => {

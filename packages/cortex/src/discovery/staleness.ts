@@ -14,7 +14,18 @@ export function computeManifestStaleness(
 ): StalenessResult {
   try {
     const discovery = discoverFiles(rootPath);
-    if (discovery.limitations.length > 0) {
+    // Só limitações que comprometem a integridade da comparação geram "unknown".
+    // MAX_FILE_SIZE é exclusão determinística e simétrica: o mesmo arquivo grande
+    // é omitido na indexação e no recheck (todos usam discoverFiles com o mesmo
+    // cap), logo nunca entra no manifest e não introduz incerteza. Tratá-lo como
+    // "unknown" zerava staleness — e, por consequência, search — em qualquer repo
+    // real com um único arquivo >2MB (lockfile, código gerado, asset).
+    // READ_ERROR (não conseguimos ler) e MAX_FILE_COUNT (discovery truncado)
+    // sim comprometem a comparação e permanecem "unknown".
+    const blockingLimitations = discovery.limitations.filter(
+      (limitation) => limitation.code !== "MAX_FILE_SIZE",
+    );
+    if (blockingLimitations.length > 0) {
       return {
         staleness: "unknown",
         pending_files_count: 0,
