@@ -1,4 +1,4 @@
-/** Nomes congelados das oito tools MCP públicas (S02) */
+/** Surface pública do runtime maduro (S19 adiciona retrieve explícito). */
 export const MCP_TOOL_NAMES = [
   "search",
   "explore",
@@ -7,6 +7,7 @@ export const MCP_TOOL_NAMES = [
   "diff_impact",
   "files",
   "pack_context",
+  "retrieve",
   "status",
 ] as const;
 

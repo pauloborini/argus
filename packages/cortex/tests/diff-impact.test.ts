@@ -56,6 +56,41 @@ describe("diff impact tool", () => {
     expect((payload.changed_symbols as Array<{ name: string }>).some((item) => item.name === "helper")).toBe(true);
   });
 
+  it("diff-impact limita símbolos aos hunks alterados", async () => {
+    const root = setupWorkspace({
+      "src/multi.ts":
+        "export function first() { return 1; }\n\nexport function second() { return 2; }\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    writeFileSync(
+      join(root, "src/multi.ts"),
+      "export function first() { return 10; }\n\nexport function second() { return 2; }\n",
+      "utf-8",
+    );
+    const payload = buildToolStub("diff_impact", root, { scope: "unstaged" });
+    const symbols = payload.changed_symbols as Array<{ name: string }>;
+    expect(symbols.map((item) => item.name)).toContain("first");
+    expect(symbols.map((item) => item.name)).not.toContain("second");
+    expect((payload.changed_hunks as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("diff-impact preserva hunk e símbolo de arquivo removido", async () => {
+    const root = setupWorkspace({
+      "src/removed.ts": "export function removed() { return 1; }\n",
+    });
+    expect(await runIndex()).toBe(0);
+    rmSync(join(root, "src/removed.ts"));
+
+    const payload = buildToolStub("diff_impact", root, { scope: "unstaged" });
+    expect(payload.changed_hunks).toEqual([
+      expect.objectContaining({ path: "src/removed.ts", start_line: 1, line_count: 1 }),
+    ]);
+    expect(payload.changed_symbols).toEqual([
+      expect.objectContaining({ name: "removed", path: "src/removed.ts" }),
+    ]);
+  });
+
   it("diff-impact staged lê diff cached", async () => {
     const root = setupWorkspace({
       "src/dep.ts": "export function helper() {}\n",

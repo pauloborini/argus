@@ -1,16 +1,8 @@
 import { buildToolStub } from "../mcp/tools/stubs.js";
 
-export function runSearch(
-  query: string,
-  options?: { scope?: string; kind?: string; limit?: number },
-): number {
+export function runRetrieve(handle: string): number {
   try {
-    const payload = buildToolStub("search", process.cwd(), {
-      query,
-      scope: options?.scope,
-      kind: options?.kind,
-      limit: options?.limit,
-    });
+    const payload = buildToolStub("retrieve", process.cwd(), { handle });
     console.log(JSON.stringify(payload, null, 2));
     return payload.state === "falha" ? 1 : 0;
   } catch (err) {

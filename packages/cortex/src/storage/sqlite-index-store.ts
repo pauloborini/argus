@@ -294,11 +294,25 @@ export function readFilesTree(db: Database): FileStructuralEntry[] {
   return readAllFileEntries(db);
 }
 
-export function searchFtsInternal(db: Database, query: string, limit = 50): FtsSearchHit[] {
+export function searchFtsInternal(
+  db: Database,
+  query: string,
+  limit = 50,
+  filters?: { scope?: string; kind?: string },
+): FtsSearchHit[] {
   const sanitized = query.trim();
   if (!sanitized) {
     return [];
   }
+  const scope = filters?.scope?.trim().toLowerCase();
+  const kind = filters?.kind?.trim().toLowerCase();
+  const filterSql = `${scope ? " AND lower(f.relative_path) LIKE ?" : ""}${
+    kind ? " AND lower(s.kind) = ?" : ""
+  }`;
+  const filterParams = [
+    ...(scope ? [`%${scope}%`] : []),
+    ...(kind ? [kind] : []),
+  ];
 
   const ftsQuery = sanitized
     .split(/\s+/)
@@ -310,20 +324,58 @@ export function searchFtsInternal(db: Database, query: string, limit = 50): FtsS
     return [];
   }
 
-  const rows = db
+  const ftsRows = db
     .prepare(
       `SELECT s.id AS symbol_id, s.name, f.relative_path, s.kind,
               bm25(symbols_fts) AS rank
        FROM symbols_fts
        JOIN symbols s ON s.id = symbols_fts.rowid
        JOIN files f ON f.id = s.file_id
-       WHERE symbols_fts MATCH ?
+       WHERE symbols_fts MATCH ?${filterSql}
        ORDER BY rank
        LIMIT ?`,
     )
-    .all(ftsQuery, limit) as FtsSearchHit[];
+    .all(ftsQuery, ...filterParams, limit) as FtsSearchHit[];
 
-  return rows;
+  const like = `%${sanitized.toLowerCase()}%`;
+  const lexicalRows = db
+    .prepare(
+      `SELECT s.id AS symbol_id, s.name, f.relative_path, s.kind, 0 AS rank
+       FROM symbols s
+       JOIN files f ON f.id = s.file_id
+       WHERE (lower(s.name) LIKE ? OR lower(f.relative_path) LIKE ? OR lower(s.kind) = ?)
+         ${filterSql}
+       ORDER BY
+         CASE
+           WHEN lower(s.name) = ? THEN 0
+           WHEN lower(s.name) LIKE ? THEN 1
+           WHEN lower(s.name) LIKE ? THEN 2
+           WHEN lower(f.relative_path) LIKE ? THEN 3
+           ELSE 4
+         END,
+         length(s.name),
+         f.relative_path
+       LIMIT ?`,
+    )
+    .all(
+      like,
+      like,
+      sanitized.toLowerCase(),
+      ...filterParams,
+      sanitized.toLowerCase(),
+      `${sanitized.toLowerCase()}%`,
+      like,
+      like,
+      limit,
+    ) as FtsSearchHit[];
+
+  const byId = new Map<number, FtsSearchHit>();
+  for (const hit of [...lexicalRows, ...ftsRows]) {
+    if (!byId.has(hit.symbol_id)) {
+      byId.set(hit.symbol_id, hit);
+    }
+  }
+  return Array.from(byId.values()).slice(0, limit);
 }
 
 function writeIndexMeta(db: Database, meta: IndexMeta): void {

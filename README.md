@@ -1,6 +1,7 @@
 # Atlas Cortex
 
-Motor local de code retrieval e context packing para agentes — MVP sem UI.
+Local code retrieval and context packing for coding agents. Runtime `1.0.0`,
+local-first, sem UI, com CLI e MCP.
 
 ## Requisitos
 
@@ -9,15 +10,25 @@ Motor local de code retrieval e context packing para agentes — MVP sem UI.
 
 ## Instalação
 
+Via npm:
+
 ```bash
-npm install
-npm run build
+npm install -g atlas-cortex
+cortex --version
 ```
 
-Para usar a CLI globalmente em desenvolvimento:
+Via `npx`, sem instalação global:
 
 ```bash
-cd packages/cortex && npm link
+npx atlas-cortex init
+npx atlas-cortex index
+```
+
+Para desenvolver o monorepo:
+
+```bash
+npm ci
+npm run validate
 ```
 
 ## Uso rápido
@@ -48,6 +59,7 @@ cortex trace --from MinhaFuncao --to OutraFuncao   # fluxo provável com incerte
 cortex impact MinhaFuncao --direction dependents   # blast radius provável com risco resumido
 cortex diff-impact --scope all   # impacto provável do diff Git atual
 cortex pack-context --sources utils.ts --goal "entender refactor" --token-budget 400
+cortex retrieve rh_0123456789abcdef
 cortex serve --mcp   # sobe servidor MCP stdio
 ```
 
@@ -66,7 +78,8 @@ Sem manifest prévio, `sync` falha com `E_INDEX_MISSING` orientando executar `co
 `cortex trace` devolve caminhos prováveis entre símbolos/arquivos com `paths`, `files`, `symbols` e `uncertainty_points`.
 `cortex impact` estima blast radius por símbolo/arquivo com `direct_affected`, `indirect_affected`, `files`, `tests` e `risk_summary`.
 `cortex diff-impact` lê o diff Git real e retorna `changed_files`, `changed_symbols`, `affected_areas`, `affected_tests` e `risk_summary`.
-`cortex pack-context` monta um pacote curto com `packed_context`, `origin_refs`, `removed_or_summarized`, `retrieve_handle` opcional, `token_estimate` e `reversibility` real.
+`cortex pack-context` monta pacote curto com refs e handle opcional.
+`cortex retrieve` recupera explicitamente o original persistido no mesmo workspace.
 
 ### 3. Servidor MCP
 
@@ -76,17 +89,31 @@ Configure seu agente/IDE para MCP stdio:
 {
   "mcpServers": {
     "atlas-cortex": {
-      "command": "cortex",
-      "args": ["serve", "--mcp"]
+      "command": "npx",
+      "args": ["-y", "atlas-cortex@1.0.0", "serve", "--mcp"]
     }
   }
 }
 ```
 
-O servidor expõe **exatamente oito tools** congeladas na S02: `search`, `explore`, `trace`, `impact`, `diff_impact`, `files`, `pack_context`, `status`.
+O servidor expõe nove tools: `search`, `explore`, `trace`, `impact`,
+`diff_impact`, `files`, `pack_context`, `retrieve`, `status`.
 
-Respostas de retrieval permanecem **stubs honestos**: campos vazios + `state` explícito, sem dados fictícios plausíveis.
-`status`, `files`, `search`, `explore`, `trace`, `impact`, `diff_impact` e `pack_context` já leem o índice SQLite local.
+Todas leem estado local. Respostas incluem `state`, `confidence`, limitações e
+staleness quando aplicável. `retrieve` aceita apenas handles opacos locais.
+
+## Plugin Codex
+
+O marketplace do repositório vive em `.agents/plugins/marketplace.json`.
+Após o repositório estar público:
+
+```bash
+codex plugin marketplace add https://github.com/pauloborini/atlas-cortex
+codex plugin install atlas-cortex@atlas-cortex
+```
+
+O plugin sobe o MCP via pacote npm versionado. Manifest:
+`plugins/atlas-cortex/.codex-plugin/plugin.json`.
 
 ## Scripts de desenvolvimento
 
@@ -98,6 +125,8 @@ npm run benchmark:mvp  # executa benchmark interno S16
 npm run test       # testes unitários (vitest)
 npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
+npm run smoke:package  # instala e exercita o tarball em diretório limpo
+npm run homologate     # valida repos externos locais
 ```
 
 O benchmark escreve evidência em `.atlas/benchmark/latest/`:
@@ -106,20 +135,66 @@ O benchmark escreve evidência em `.atlas/benchmark/latest/`:
 - `SUMMARY.md` — leitura humana do benchmark
 - `BT-01-*.md` ... `BT-06-*.md` — detalhe bruto por task/arm
 
-## Rollout interno
+## Release
 
 Fluxo mínimo para adoção interna do MVP:
 
 ```bash
-npm install
-npm run build
-npm run test
-npm run lint
-npm run typecheck
+npm ci
+npm run validate
+npm run smoke:package
 npm run benchmark:mvp
+npm run homologate
+npm run release:check
 ```
 
-Critério de GO interno atual:
+Tags `v*` executam CI, smoke do tarball, publicação npm com provenance e
+GitHub Release com `SHA256SUMS`. A versão da tag deve coincidir com root,
+runtime e plugin.
+
+Pré-requisitos para a primeira publicação:
+
+1. tornar `pauloborini/atlas-cortex` público
+2. configurar trusted publisher no npm para `.github/workflows/release.yml`
+3. criar e enviar a tag `v1.0.0`
+
+### Upgrade
+
+Use versão explícita para manter a instalação reproduzível:
+
+```bash
+npm install -g atlas-cortex@1.0.0
+cortex --version
+```
+
+Atualize o plugin e a configuração MCP para a mesma versão antes de publicar
+uma nova tag SemVer. Execute `cortex sync`; se houver mudança incompatível de
+schema ou falha de leitura, execute `cortex index` para reconstrução completa.
+
+### Rollback
+
+Reinstale a última versão conhecida e restaure a referência versionada no MCP:
+
+```bash
+npm install -g atlas-cortex@<versao-anterior>
+cortex --version
+cortex index
+```
+
+Não reutilize `.cortex/index.db` quando a versão anterior não reconhecer o
+schema. Remova somente `.cortex/index.db` e rode `cortex index`; os arquivos do
+projeto não são alterados.
+
+### Recovery
+
+- índice stale: `cortex sync`
+- índice ausente ou corrompido: remova `.cortex/index.db` e rode `cortex index`
+- workspace inválido: preserve o código, remova `.cortex/`, rode `cortex init`
+  e depois `cortex index`
+- handle corrompido: gere novamente o pacote com `cortex pack-context`; não
+  edite manifests em `.cortex/packed-handles`
+
+Critério de GO:
 
 - redução de tool calls >= 35%
 - redução de tokens >= 25%
@@ -133,13 +208,12 @@ Resultado mais recente do benchmark S16:
 - utilidade média atlas-cortex: `4,17/5`
 - menor utilidade atlas-cortex: `4/5`
 
-## Limitações atuais (pós-S17)
+## Limitações conhecidas
 
-- `trace` v1 ainda usa inferência estrutural por arquivo/nome em parte das chamadas
-- `impact` v1 ainda usa o mesmo grafo estrutural do `trace`; não prova causalidade semântica profunda
-- `diff_impact` v1 trabalha por arquivo e blast radius estrutural; não interpreta hunks finos por símbolo
-- `pack_context` reidrata via `sources[]` com reversibilidade real, mas ainda não existe tool pública dedicada de retrieve fora da surface congelada
-- `search` atual é lexical/FTS e não faz retrieval semântico composto
+- chamadas sem import resolvido degradam para correspondência global por nome
+- Dart/Kotlin mantêm cobertura parcial explícita
+- resolução dinâmica/reflexiva não é tratada como causalidade comprovada
+- `search` combina ranking lexical/estrutural; não usa embeddings
 
 ## Contratos de referência
 

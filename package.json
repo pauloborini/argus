@@ -1,17 +1,21 @@
 {
   "name": "atlas-cortex",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Atlas Cortex — motor local de code retrieval e context packing para agentes",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@atlas-cortex/cortex",
-    "benchmark:mvp": "npm run benchmark:mvp --workspace=@atlas-cortex/cortex",
-    "test": "npm run test --workspace=@atlas-cortex/cortex",
-    "lint": "npm run lint --workspace=@atlas-cortex/cortex",
-    "typecheck": "npm run typecheck --workspace=@atlas-cortex/cortex"
+    "build": "npm run build --workspace=atlas-cortex",
+    "benchmark:mvp": "npm run benchmark:mvp --workspace=atlas-cortex",
+    "test": "npm run test --workspace=atlas-cortex",
+    "lint": "npm run lint --workspace=atlas-cortex",
+    "typecheck": "npm run typecheck --workspace=atlas-cortex",
+    "validate": "npm run typecheck && npm test && npm run lint && npm run build",
+    "smoke:package": "node scripts/smoke-package.mjs",
+    "homologate": "npm run build && node scripts/homologate.mjs",
+    "release:check": "node scripts/check-release.mjs"
   },
   "engines": {
     "node": ">=20"

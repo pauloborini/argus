@@ -7,10 +7,13 @@ import {
 import { z } from "zod";
 import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "./tool-registry.js";
 import { buildToolStub } from "./tools/stubs.js";
+import { CORTEX_VERSION } from "../version.js";
 
 const TOOL_INPUT_SCHEMAS = {
   search: z.object({
     query: z.string().min(1),
+    scope: z.string().min(1).optional(),
+    kind: z.string().min(1).optional(),
     limit: z.number().int().positive().max(100).optional(),
   }).passthrough(),
   explore: z.object({
@@ -50,6 +53,9 @@ const TOOL_INPUT_SCHEMAS = {
     token_budget: z.number().int().positive().max(8000),
     style: z.enum(["brief", "balanced", "deep"]).optional(),
   }).passthrough(),
+  retrieve: z.object({
+    handle: z.string().regex(/^rh_[a-f0-9]{16}$/),
+  }).passthrough(),
 } as const;
 
 const TOOL_INPUT_JSON_SCHEMAS = {
@@ -57,6 +63,8 @@ const TOOL_INPUT_JSON_SCHEMAS = {
     type: "object" as const,
     properties: {
       query: { type: "string" },
+      scope: { type: "string" },
+      kind: { type: "string" },
       limit: { type: "integer", minimum: 1, maximum: 100 },
     },
     required: ["query"],
@@ -135,6 +143,14 @@ const TOOL_INPUT_JSON_SCHEMAS = {
     required: ["sources", "goal", "token_budget"],
     additionalProperties: true,
   },
+  retrieve: {
+    type: "object" as const,
+    properties: {
+      handle: { type: "string", pattern: "^rh_[a-f0-9]{16}$" },
+    },
+    required: ["handle"],
+    additionalProperties: false,
+  },
 } as const;
 
 const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
@@ -145,12 +161,13 @@ const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
   diff_impact: "Impacto provável do diff Git atual com áreas e testes afetados",
   files: "Estrutura indexada do workspace",
   pack_context: "Empacotar contexto curto para o modelo com refs rastreáveis e handle opcional",
+  retrieve: "Recuperar explicitamente conteúdo original de um retrieve_handle local",
   status: "Saúde, staleness e confiança do índice local",
 };
 
 export function createMcpServer(): Server {
   const server = new Server(
-    { name: MCP_SERVER_NAME, version: "0.1.0" },
+    { name: MCP_SERVER_NAME, version: CORTEX_VERSION },
     { capabilities: { tools: {} } },
   );
 

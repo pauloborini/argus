@@ -62,6 +62,55 @@ describe("search tool", () => {
     expect(candidates).toHaveLength(2);
   });
 
+  it("rankeia prefixo e respeita scope/kind", async () => {
+    const root = setupWorkspace({
+      "src/billing.ts": "export function calculateTotal() { return 1; }\n",
+      "tests/billing.test.ts": "export function calculateFixture() { return 2; }\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("search", root, {
+      query: "calculate",
+      scope: "src/",
+      kind: "function",
+    });
+    const candidates = payload.candidates as Array<{
+      name: string;
+      path: string;
+      score: number;
+      match_reason: string;
+    }>;
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      name: "calculateTotal",
+      path: "src/billing.ts",
+      match_reason: "name_prefix",
+    });
+    expect(candidates[0]!.score).toBeGreaterThan(0.8);
+  });
+
+  it("aplica scope antes do limite bruto", async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 8 }, (_, index) => [
+        `src/a${index}.ts`,
+        `export function calculateA${index}() { return ${index}; }\n`,
+      ]),
+    );
+    files["target/wanted.ts"] = "export function calculateWanted() { return 1; }\n";
+    const root = setupWorkspace(files);
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("search", root, {
+      query: "calculate",
+      scope: "target/",
+      kind: "function",
+      limit: 1,
+    });
+    expect(payload.candidates).toEqual([
+      expect.objectContaining({ name: "calculateWanted", path: "target/wanted.ts" }),
+    ]);
+  });
+
   it("propaga stale com candidatos do índice atual", async () => {
     const root = setupWorkspace({
       "app.ts": "export function calculateTotal() { return 1; }\n",

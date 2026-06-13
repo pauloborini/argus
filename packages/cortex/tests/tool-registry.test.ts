@@ -28,8 +28,8 @@ describe("tool-registry", () => {
     return tempDir;
   }
 
-  it("registra exatamente oito tools congeladas", () => {
-    expect(MCP_TOOL_NAMES).toHaveLength(8);
+  it("registra as nove tools do runtime maduro", () => {
+    expect(MCP_TOOL_NAMES).toHaveLength(9);
     expect(MCP_TOOL_NAMES).toEqual([
       "search",
       "explore",
@@ -38,6 +38,7 @@ describe("tool-registry", () => {
       "diff_impact",
       "files",
       "pack_context",
+      "retrieve",
       "status",
     ]);
   });

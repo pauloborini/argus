@@ -80,6 +80,25 @@ describe("trace tool", () => {
     expect((payload.candidates as unknown[]).length).toBe(2);
   });
 
+  it("trace resolve chamada para o símbolo realmente importado", async () => {
+    const root = setupWorkspace({
+      "src/main.ts":
+        'import { helper } from "./right";\nexport function boot() { helper(); }\n',
+      "src/right.ts": "export function helper() {}\n",
+      "src/wrong.ts": "export function helper() {}\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("trace", root, {
+      from: "boot",
+      to: "src/right.ts",
+      max_hops: 4,
+    });
+    expect(["sucesso", "parcial"]).toContain(payload.state);
+    expect(payload.files).toContain("src/right.ts");
+    expect(payload.files).not.toContain("src/wrong.ts");
+  });
+
   it("trace propaga stale quando origem muda após index", async () => {
     const root = setupWorkspace({
       "src/main.ts": 'import { helper } from "./dep";\nexport function boot() { helper(); }\n',

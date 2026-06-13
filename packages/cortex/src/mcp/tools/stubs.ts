@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { stubResponse } from "../../contracts/response-state.js";
 import type { ResponseState } from "../../contracts/response-state.js";
 import type { OperationalEnvelope } from "../../contracts/response-state.js";
@@ -36,6 +36,8 @@ export interface ToolStubPayload extends OperationalEnvelope {
 
 interface SearchArgs {
   query?: string;
+  scope?: string;
+  kind?: string;
   limit?: number;
 }
 
@@ -79,6 +81,10 @@ interface PackContextArgs {
   style?: "brief" | "balanced" | "deep";
 }
 
+interface RetrieveArgs {
+  handle?: string;
+}
+
 const INDEX_MISSING = "E_INDEX_MISSING: Índice não inicializado; execute init/index";
 const STALE_INDEX = "E_STALE_INDEX: Índice desatualizado; resultados podem estar incompletos";
 const WORKSPACE_MISSING =
@@ -86,7 +92,7 @@ const WORKSPACE_MISSING =
 const STRUCTURAL_INDEX_MISSING =
   "E_INDEX_MISSING: Manifest disponível; índice estrutural ausente — execute cortex index ou cortex sync.";
 const FTS_RETRIEVAL_PENDING =
-  "FTS lexical local disponível (S06); busca rankeada e retrieval semântico para o agente aguardam S08.";
+  "Índice lexical e estrutural disponível para retrieval local.";
 const PARTIAL_NO_MANIFEST_LIMITATIONS = [
   "Manifest de arquivos ausente; execute cortex index para iniciar o inventário.",
 ];
@@ -97,7 +103,7 @@ const PARTIAL_STRUCTURAL_MISSING_LIMITATIONS = [
   "Manifest presente, mas índice SQLite ausente; execute cortex index ou cortex sync.",
 ];
 const PARTIAL_FTS_LIMITATIONS = [
-  "Índice SQLite com FTS lexical local (S06); ranking e retrieval útil para o agente aguardam S08.",
+  "Resultados dependem da cobertura estrutural disponível para cada linguagem.",
 ];
 const PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS = [
   "Índice SQLite corrompido; execute cortex index para reconstruir.",
@@ -195,6 +201,12 @@ interface DiffImpactSymbol {
   name: string;
   path: string;
   kind?: string;
+}
+
+interface DiffChangedHunk {
+  path: string;
+  start_line: number;
+  line_count: number;
 }
 
 interface PackOriginRef {
@@ -587,18 +599,27 @@ function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
   };
 }
 
-function scoreCandidate(rank: number): number {
-  const normalized = Number((-rank).toFixed(6));
-  if (Number.isNaN(normalized)) {
-    return 0;
-  }
-  return normalized;
+function scoreCandidate(rank: number, reason: string, relativePath: string): number {
+  const reasonWeight: Record<string, number> = {
+    name_exact: 1,
+    name_prefix: 0.9,
+    name_token: 0.8,
+    path_token: 0.65,
+    kind_token: 0.5,
+    fts_match: 0.4,
+  };
+  const bm25Boost = Number.isFinite(rank) ? Math.min(0.09, Math.max(0, -rank / 100)) : 0;
+  const pathPenalty = Math.min(0.08, relativePath.split("/").length * 0.005);
+  return Number(Math.max(0, (reasonWeight[reason] ?? 0.3) + bm25Boost - pathPenalty).toFixed(4));
 }
 
 function inferMatchReason(query: string, name: string, relativePath: string, kind: string): string {
   const normalizedQuery = query.trim().toLowerCase();
   if (name.toLowerCase() === normalizedQuery) {
     return "name_exact";
+  }
+  if (name.toLowerCase().startsWith(normalizedQuery)) {
+    return "name_prefix";
   }
   if (name.toLowerCase().includes(normalizedQuery)) {
     return "name_token";
@@ -682,15 +703,32 @@ function buildSearchStub(
 
   const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
   try {
-    const rawHits = searchFtsInternal(db, query, args?.limit ?? 20);
-    const candidates: SearchCandidate[] = rawHits.map((hit) => ({
-      id: `symbol:${hit.symbol_id}`,
-      kind: hit.kind,
-      name: hit.name,
-      path: hit.relative_path,
-      score: scoreCandidate(hit.rank),
-      match_reason: inferMatchReason(query, hit.name, hit.relative_path, hit.kind),
-    }));
+    const requestedLimit = args?.limit ?? 20;
+    const scope = args?.scope?.trim().toLowerCase();
+    const kind = args?.kind?.trim().toLowerCase();
+    const rawHits = searchFtsInternal(db, query, Math.min(100, requestedLimit * 4), {
+      scope,
+      kind,
+    });
+    const candidates: SearchCandidate[] = rawHits
+      .map((hit) => {
+        const matchReason = inferMatchReason(query, hit.name, hit.relative_path, hit.kind);
+        return {
+          id: `symbol:${hit.symbol_id}`,
+          kind: hit.kind,
+          name: hit.name,
+          path: hit.relative_path,
+          score: scoreCandidate(hit.rank, matchReason, hit.relative_path),
+          match_reason: matchReason,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          left.name.localeCompare(right.name) ||
+          left.path.localeCompare(right.path),
+      )
+      .slice(0, requestedLimit);
 
     const partialCoverage = candidates.some((candidate) => {
       const language = semanticStub.structuralIndex?.files.find(
@@ -939,6 +977,68 @@ function findFilesBySymbolName(
   return matches;
 }
 
+function callTargetName(rawTarget: string): string {
+  const segments = rawTarget.split(/[.:]/).filter(Boolean);
+  return segments.at(-1) ?? rawTarget;
+}
+
+function findOwningSymbol(
+  entry: FileStructuralEntry,
+  line: number | undefined,
+): ExtractedSymbol | null {
+  if (!line) {
+    return null;
+  }
+  return (
+    entry.symbols
+      .filter((symbol) => symbol.start_line <= line && symbol.end_line >= line)
+      .sort(
+        (left, right) =>
+          left.end_line - left.start_line - (right.end_line - right.start_line),
+      )[0] ?? null
+  );
+}
+
+function resolveCallTargets(
+  index: StructuralIndex,
+  source: FileStructuralEntry,
+  rawTarget: string,
+  includeTests: boolean,
+): {
+  matches: Array<{ entry: FileStructuralEntry; symbol: ExtractedSymbol }>;
+  resolution: "local" | "import" | "global" | "unresolved";
+} {
+  const target = callTargetName(rawTarget);
+  const local = source.symbols
+    .filter((symbol) => symbol.name === target)
+    .map((symbol) => ({ entry: source, symbol }));
+  if (local.length > 0) {
+    return { matches: local, resolution: "local" };
+  }
+
+  const importedPaths = new Set(
+    source.imports
+      .filter(
+        (item) =>
+          item.resolved_path &&
+          (!item.symbols || item.symbols.length === 0 || item.symbols.includes(target)),
+      )
+      .map((item) => item.resolved_path!),
+  );
+  const imported = findFilesBySymbolName(index, target, includeTests).filter((match) =>
+    importedPaths.has(match.entry.relative_path),
+  );
+  if (imported.length > 0) {
+    return { matches: imported, resolution: "import" };
+  }
+
+  const global = findFilesBySymbolName(index, target, includeTests);
+  return {
+    matches: global,
+    resolution: global.length > 0 ? "global" : "unresolved",
+  };
+}
+
 function resolveTraceTarget(
   cwd: string,
   index: StructuralIndex,
@@ -1081,26 +1181,35 @@ function buildTraceAdjacency(
 
     for (const edge of entry.edges) {
       if (edge.kind === "calls") {
-        const targetMatches = findFilesBySymbolName(index, edge.to, includeTests);
-        for (const caller of entry.symbols) {
-          const callerNode = buildSymbolNode(entry, caller);
-          for (const match of targetMatches) {
-            const targetNode = buildSymbolNode(match.entry, match.symbol);
-            addEdge({
-              relation: "calls",
-              from: callerNode,
-              to: targetNode,
-              line: edge.line,
-              uncertain: "Chamada inferida por arquivo/nome; origem exata do símbolo pode variar.",
-            });
-            addEdge({
-              relation: "called_by",
-              from: targetNode,
-              to: callerNode,
-              line: edge.line,
-              uncertain: "Caller inferido por arquivo/nome; origem exata do símbolo pode variar.",
-            });
-          }
+        const resolved = resolveCallTargets(index, entry, edge.to, includeTests);
+        const caller = edge.from_symbol
+          ? entry.symbols.find((symbol) => symbol.name === edge.from_symbol) ?? null
+          : findOwningSymbol(entry, edge.line);
+        const callerNode = caller ? buildSymbolNode(entry, caller) : fileNode;
+        for (const match of resolved.matches) {
+          const targetNode = buildSymbolNode(match.entry, match.symbol);
+          const uncertain =
+            resolved.resolution === "global"
+              ? "Alvo resolvido globalmente por nome; não há import compatível comprovando o vínculo."
+              : resolved.matches.length > 1
+                ? "Mais de um alvo compatível permanece após resolução por import."
+                : caller
+                  ? undefined
+                  : "Símbolo chamador não identificado; chamada atribuída ao arquivo.";
+          addEdge({
+            relation: "calls",
+            from: callerNode,
+            to: targetNode,
+            line: edge.line,
+            uncertain,
+          });
+          addEdge({
+            relation: "called_by",
+            from: targetNode,
+            to: callerNode,
+            line: edge.line,
+            uncertain,
+          });
         }
       }
 
@@ -1619,20 +1728,72 @@ function collectGitPaths(cwd: string, args: string[]): { paths: string[] } | { e
 }
 
 function toWorkspaceRelativePath(cwd: string, gitRoot: string, gitPath: string): string | null {
-  const absolutePath = resolve(gitRoot, gitPath);
   const workspaceRoot = realpathSync.native(cwd);
-  const resolvedPath = realpathSync.native(absolutePath);
-  const workspaceRelative = normalizeRelativePath(relative(workspaceRoot, resolvedPath));
+  const normalizedGitRoot = realpathSync.native(gitRoot);
+  const absolutePath = resolve(normalizedGitRoot, gitPath);
+  const workspaceRelative = normalizeRelativePath(relative(workspaceRoot, absolutePath));
   if (!workspaceRelative || workspaceRelative.startsWith("../")) {
     return null;
   }
   return workspaceRelative;
 }
 
+function collectGitText(cwd: string, args: string[]): { text: string } | { error: string } {
+  const result = spawnSync("git", args, { cwd, encoding: "utf-8" });
+  if (result.status !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim();
+    return {
+      error: detail
+        ? `E_GIT_DIFF_UNAVAILABLE: ${detail}`
+        : "E_GIT_DIFF_UNAVAILABLE: Não foi possível ler o diff Git atual.",
+    };
+  }
+  return { text: result.stdout };
+}
+
+function parseChangedHunks(cwd: string, gitRoot: string, diffText: string): DiffChangedHunk[] {
+  const hunks: DiffChangedHunk[] = [];
+  let currentPath: string | null = null;
+  let previousPath: string | null = null;
+  for (const line of diffText.split("\n")) {
+    if (line.startsWith("--- a/")) {
+      previousPath = toWorkspaceRelativePath(cwd, gitRoot, line.slice(6));
+      continue;
+    }
+    if (line.startsWith("+++ b/")) {
+      currentPath = toWorkspaceRelativePath(cwd, gitRoot, line.slice(6));
+      continue;
+    }
+    if (line === "+++ /dev/null") {
+      currentPath = previousPath;
+      continue;
+    }
+    if (!currentPath || !line.startsWith("@@")) {
+      continue;
+    }
+    const match = /-(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))?/.exec(line);
+    if (!match) {
+      continue;
+    }
+    const addedCount = Number(match[4] ?? "1");
+    const usesRemovedRange = addedCount === 0;
+    hunks.push({
+      path: currentPath,
+      start_line: Number(usesRemovedRange ? match[1] : match[3]),
+      line_count: Math.max(1, Number(usesRemovedRange ? (match[2] ?? "1") : addedCount)),
+    });
+  }
+  return hunks;
+}
+
 function readChangedFilesFromGit(
   cwd: string,
   args?: DiffImpactArgs,
-): { changedFiles: string[]; scope: NonNullable<DiffImpactArgs["scope"]> } | { error: string } {
+): {
+  changedFiles: string[];
+  changedHunks: DiffChangedHunk[];
+  scope: NonNullable<DiffImpactArgs["scope"]>;
+} | { error: string } {
   const scope = args?.scope ?? "all";
   if (scope === "compare" && !args?.base_ref?.trim()) {
     return { error: "E_BASE_REF_REQUIRED: `base_ref` é obrigatório quando `scope=compare`." };
@@ -1646,18 +1807,24 @@ function readChangedFilesFromGit(
   const gitRoot = gitRootResult.root;
   const collected = new Set<string>();
   const segments: string[][] = [];
+  const diffSegments: string[][] = [];
 
   if (scope === "unstaged") {
     segments.push(["diff", "--name-only"]);
     segments.push(["ls-files", "--others", "--exclude-standard"]);
+    diffSegments.push(["diff", "--unified=0", "--no-color"]);
   } else if (scope === "staged") {
     segments.push(["diff", "--cached", "--name-only"]);
+    diffSegments.push(["diff", "--cached", "--unified=0", "--no-color"]);
   } else if (scope === "compare") {
     segments.push(["diff", "--name-only", `${args!.base_ref!.trim()}...HEAD`]);
+    diffSegments.push(["diff", "--unified=0", "--no-color", `${args!.base_ref!.trim()}...HEAD`]);
   } else {
     segments.push(["diff", "--name-only"]);
     segments.push(["diff", "--cached", "--name-only"]);
     segments.push(["ls-files", "--others", "--exclude-standard"]);
+    diffSegments.push(["diff", "--unified=0", "--no-color"]);
+    diffSegments.push(["diff", "--cached", "--unified=0", "--no-color"]);
   }
 
   for (const segment of segments) {
@@ -1673,21 +1840,51 @@ function readChangedFilesFromGit(
     }
   }
 
+  const changedHunks: DiffChangedHunk[] = [];
+  for (const segment of diffSegments) {
+    const output = collectGitText(gitRoot, segment);
+    if ("error" in output) {
+      return output;
+    }
+    changedHunks.push(...parseChangedHunks(cwd, gitRoot, output.text));
+  }
+
   return {
     changedFiles: Array.from(collected).sort((left, right) => left.localeCompare(right)),
+    changedHunks,
     scope,
   };
 }
 
-function extractChangedSymbols(index: StructuralIndex, changedFiles: string[]): DiffImpactSymbol[] {
+function extractChangedSymbols(
+  index: StructuralIndex,
+  changedFiles: string[],
+  changedHunks: DiffChangedHunk[],
+): DiffImpactSymbol[] {
   const byPath = new Set(changedFiles);
+  const hunksByPath = new Map<string, DiffChangedHunk[]>();
+  for (const hunk of changedHunks) {
+    const current = hunksByPath.get(hunk.path) ?? [];
+    current.push(hunk);
+    hunksByPath.set(hunk.path, current);
+  }
   const symbols: DiffImpactSymbol[] = [];
 
   for (const file of index.files) {
     if (!byPath.has(file.relative_path)) {
       continue;
     }
+    const hunks = hunksByPath.get(file.relative_path) ?? [];
     for (const symbol of file.symbols) {
+      if (
+        hunks.length > 0 &&
+        !hunks.some((hunk) => {
+          const hunkEnd = hunk.start_line + hunk.line_count - 1;
+          return symbol.start_line <= hunkEnd && symbol.end_line >= hunk.start_line;
+        })
+      ) {
+        continue;
+      }
       symbols.push({
         name: symbol.name,
         path: file.relative_path,
@@ -1735,6 +1932,10 @@ function getPackedHandlePath(cwd: string, handle: string): string {
   return join(getPackedHandlesDir(cwd), handle);
 }
 
+function isValidRetrieveHandle(handle: string): boolean {
+  return /^rh_[a-f0-9]{16}$/.test(handle);
+}
+
 function compareReversibility(
   left: ReadStoredPackHandleResult["reversibility"],
   right: ReadStoredPackHandleResult["reversibility"],
@@ -1760,6 +1961,14 @@ function registerPackedHandleInIndex(cwd: string, handle: string, createdAt: str
 }
 
 function readStoredPackHandle(cwd: string, handle: string): ReadStoredPackHandleResult {
+  if (!isValidRetrieveHandle(handle)) {
+    return {
+      found: false,
+      segments: [],
+      limitations: ["Retrieve handle inválido."],
+      reversibility: "none",
+    };
+  }
   const handleDir = getPackedHandlePath(cwd, handle);
   const manifestPath = join(handleDir, "manifest.json");
   if (!existsSync(manifestPath)) {
@@ -1782,13 +1991,36 @@ function readStoredPackHandle(cwd: string, handle: string): ReadStoredPackHandle
       reversibility: "none",
     };
   }
+  if (!Array.isArray(manifest.segments)) {
+    return {
+      found: true,
+      segments: [],
+      limitations: [`Retrieve handle corrompido: ${handle}.`],
+      reversibility: "none",
+    };
+  }
 
   const limitations: string[] = [];
   const segments: PackSegment[] = [];
   let reversibility: ReadStoredPackHandleResult["reversibility"] = "full";
 
   for (const segment of manifest.segments) {
+    if (
+      !segment ||
+      typeof segment.ref !== "string" ||
+      !Array.isArray(segment.originRefs) ||
+      typeof segment.body_file !== "string"
+    ) {
+      limitations.push(`Segmento inválido no retrieve_handle ${handle}.`);
+      reversibility = compareReversibility(reversibility, "partial");
+      continue;
+    }
     const bodyPath = join(handleDir, segment.body_file);
+    if (!isWithinPath(handleDir, bodyPath) || !isWithinPath(cwd, bodyPath)) {
+      limitations.push(`Segmento fora do workspace rejeitado para retrieve_handle ${handle}.`);
+      reversibility = compareReversibility(reversibility, "partial");
+      continue;
+    }
     if (!existsSync(bodyPath)) {
       limitations.push(`Segmento ausente para retrieve_handle ${handle}: ${segment.ref}.`);
       reversibility = compareReversibility(reversibility, "partial");
@@ -1817,6 +2049,59 @@ function readStoredPackHandle(cwd: string, handle: string): ReadStoredPackHandle
     segments,
     limitations,
     reversibility,
+  };
+}
+
+function buildRetrieveStub(cwd: string, args?: RetrieveArgs): ToolStubPayload {
+  const handle = args?.handle?.trim() ?? "";
+  if (!isValidRetrieveHandle(handle)) {
+    return {
+      handle,
+      content: "",
+      origin_refs: [],
+      reversibility: "none",
+      ...stubResponse("falha", "E_RETRIEVE_INVALID: Handle inválido."),
+    };
+  }
+
+  const stored = readStoredPackHandle(cwd, handle);
+  if (!stored.found) {
+    return {
+      handle,
+      content: "",
+      origin_refs: [],
+      reversibility: "none",
+      ...stubResponse("falha", "E_RETRIEVE_NOT_FOUND: Handle não encontrado neste workspace."),
+    };
+  }
+
+  const originRefs = uniqueOriginRefs(stored.segments.flatMap((segment) => segment.originRefs));
+  const content = stored.segments.map((segment) => segment.text).join("\n\n");
+  if (!content) {
+    return {
+      handle,
+      content: "",
+      origin_refs: originRefs,
+      reversibility: "none",
+      ...stubResponse("falha", "E_RETRIEVE_UNAVAILABLE: Conteúdo original indisponível.", {
+        limitations: stored.limitations,
+      }),
+    };
+  }
+
+  return {
+    handle,
+    content,
+    origin_refs: originRefs,
+    segment_count: stored.segments.length,
+    reversibility: stored.reversibility,
+    ...stubResponse(
+      stored.reversibility === "full" ? "sucesso" : "parcial",
+      stored.reversibility === "full"
+        ? "Conteúdo original recuperado."
+        : "Conteúdo recuperado parcialmente.",
+      { limitations: stored.limitations },
+    ),
   };
 }
 
@@ -2251,7 +2536,7 @@ function buildDiffImpactStub(
   }
 
   const index = semanticStub.structuralIndex;
-  const changedSymbols = extractChangedSymbols(index, changedFiles);
+  const changedSymbols = extractChangedSymbols(index, changedFiles, diffResult.changedHunks);
   const affectedPaths = new Set<string>(changedFiles);
   const affectedTests = new Set<string>();
   const limitations = new Set<string>();
@@ -2323,6 +2608,7 @@ function buildDiffImpactStub(
 
   return {
     changed_files: changedFiles,
+    changed_hunks: diffResult.changedHunks,
     changed_symbols: changedSymbols,
     affected_areas: affectedAreas,
     affected_tests: Array.from(affectedTests).sort((left, right) => left.localeCompare(right)),
@@ -2653,8 +2939,8 @@ function buildExploreStub(
       ? [`Cobertura ${entry.language} é parcial para explore v1; callers/callees podem estar incompletos.`]
       : []),
     ...(targetSymbol
-      ? ["Chamadas ainda são inferidas por arquivo/nome; trace preciso por símbolo fica para S10."]
-      : ["Explore v1 está ancorado em contexto estrutural do arquivo; rastreio profundo fica para S10."]),
+      ? ["Chamadas sem import resolvido podem degradar para correspondência global por nome."]
+      : ["Exploração de arquivo combina símbolos, imports e relações estruturais indexadas."]),
   ];
 
   const targetLabel = targetSymbol ? `Símbolo ${targetSymbol.name}` : `Arquivo ${entry.relative_path}`;
@@ -2682,7 +2968,7 @@ function buildExploreStub(
     callees,
     snippets,
     suggested_next_action: targetSymbol
-      ? "Use `trace`/`impact` nas próximas sprints para aprofundar fluxo e blast radius; por ora, refine com `search` ou abra o arquivo alvo."
+      ? "Use `trace` para fluxo ou `impact` para blast radius do símbolo."
       : "Refine para um símbolo com `search` se precisar entendimento mais específico dentro do arquivo.",
     ...stubResponse(state, "Exploração estrutural composta concluída.", {
       limitations,
@@ -2730,12 +3016,52 @@ function applyFilesFilters(
   return filtered;
 }
 
+function isWithinPath(rootPath: string, candidatePath: string): boolean {
+  const canonicalPath = (path: string): string => {
+    const absolutePath = resolve(path);
+    if (existsSync(absolutePath)) {
+      return realpathSync.native(absolutePath);
+    }
+    const missingParts: string[] = [];
+    let ancestor = absolutePath;
+    while (!existsSync(ancestor)) {
+      missingParts.unshift(basename(ancestor));
+      const parent = dirname(ancestor);
+      if (parent === ancestor) {
+        return absolutePath;
+      }
+      ancestor = parent;
+    }
+    return join(realpathSync.native(ancestor), ...missingParts);
+  };
+  const relativePath = normalizeRelativePath(
+    relative(canonicalPath(rootPath), canonicalPath(candidatePath)),
+  );
+  return relativePath === "" || (!relativePath.startsWith("../") && relativePath !== "..");
+}
+
 /** Stubs honestos por tool — campos vazios alinhados a SURFACE_MCP_CLI.md (S02) */
 export function buildToolStub(
   tool: McpToolName,
   cwd: string = process.cwd(),
   args?: Record<string, unknown>,
 ): ToolStubPayload {
+  if (tool === "status" && !isWithinPath(process.cwd(), cwd)) {
+    const currentWorkspace = readWorkspaceMetadata(process.cwd());
+    if (!currentWorkspace || !isWithinPath(currentWorkspace.root_path, cwd)) {
+      return {
+        initialized: false,
+        staleness: "unknown",
+        pending_files_count: 0,
+        coverage_by_language: {},
+        ...stubResponse(
+          "falha",
+          "E_PATH_OUTSIDE_WORKSPACE: `path` precisa permanecer no workspace atual.",
+        ),
+      };
+    }
+  }
+
   if (!readWorkspaceMetadata(cwd) && tool !== "status") {
     return {
       ...stubResponse("falha", WORKSPACE_MISSING),
@@ -2768,6 +3094,8 @@ export function buildToolStub(
       }
     case "pack_context":
       return buildPackContextStub(cwd, semanticStub, args as PackContextArgs | undefined);
+    case "retrieve":
+      return buildRetrieveStub(cwd, args as RetrieveArgs | undefined);
     case "status":
       return buildStatusStub(cwd);
   }

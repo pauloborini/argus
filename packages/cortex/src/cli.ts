@@ -7,18 +7,20 @@ import { runImpact } from "./commands/impact.js";
 import { runInit } from "./commands/init.js";
 import { runIndex } from "./commands/index-cmd.js";
 import { runPackContext } from "./commands/pack-context.js";
+import { runRetrieve } from "./commands/retrieve.js";
 import { runSearch } from "./commands/search.js";
 import { runStatus } from "./commands/status.js";
 import { runSync } from "./commands/sync.js";
 import { runTrace } from "./commands/trace.js";
 import { runServeMcp } from "./commands/serve.js";
+import { CORTEX_VERSION } from "./version.js";
 
 const program = new Command();
 
 program
   .name("cortex")
   .description("Atlas Cortex — CLI local de retrieval e context packing")
-  .version("0.1.0");
+  .version(CORTEX_VERSION);
 
 program
   .command("init")
@@ -45,8 +47,10 @@ program
   .command("search")
   .description("Buscar símbolos indexados via FTS local")
   .argument("<query>", "Query textual para localizar símbolos")
+  .option("--scope <path>", "Restringir candidatos por path")
+  .option("--kind <kind>", "Restringir por tipo de símbolo")
   .option("--limit <n>", "Máximo de candidatos", (value) => Number(value))
-  .action((query: string, opts: { limit?: number }) => {
+  .action((query: string, opts: { scope?: string; kind?: string; limit?: number }) => {
     process.exit(runSearch(query, opts));
   });
 
@@ -132,6 +136,14 @@ program
   });
 
 program
+  .command("retrieve")
+  .description("Recuperar conteúdo original persistido por retrieve_handle")
+  .argument("<handle>", "Handle opaco no formato rh_<16 hex>")
+  .action((handle: string) => {
+    process.exit(runRetrieve(handle));
+  });
+
+program
   .command("status")
   .description("Saúde e staleness do manifest local")
   .option("--path <path>", "Subpath ou workspace a inspecionar")
@@ -149,7 +161,9 @@ program
       process.exit(1);
     }
     const code = await runServeMcp();
-    process.exit(code);
+    if (code !== 0) {
+      process.exit(code);
+    }
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

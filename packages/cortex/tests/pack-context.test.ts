@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { openIndexDb } from "../src/storage/sqlite-index-store.js";
@@ -84,6 +84,63 @@ describe("pack context tool", () => {
     });
     expect(["sucesso", "parcial", "stale"]).toContain(replay.state);
     expect(String(replay.packed_context)).toContain("utils.ts");
+
+    const retrieved = buildToolStub("retrieve", root, { handle });
+    expect(retrieved.state).toBe("sucesso");
+    expect(retrieved.reversibility).toBe("full");
+    expect(String(retrieved.content)).toContain("utils.ts");
+  });
+
+  it("retrieve rejeita traversal e handles de outro workspace", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const traversal = buildToolStub("retrieve", root, { handle: "../manifest" });
+    expect(traversal.state).toBe("falha");
+    expect(String(traversal.message)).toContain("E_RETRIEVE_INVALID");
+
+    const missing = buildToolStub("retrieve", root, { handle: "rh_0123456789abcdef" });
+    expect(missing.state).toBe("falha");
+    expect(String(missing.message)).toContain("E_RETRIEVE_NOT_FOUND");
+  });
+
+  it("retrieve rejeita body_file adulterado fora do workspace", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    const external = join(tmpdir(), `cortex-secret-${Date.now()}.txt`);
+    const handle = "rh_0123456789abcdef";
+    const handleDir = join(root, ".cortex", "packed-handles", handle);
+    mkdirSync(handleDir, { recursive: true });
+    writeFileSync(external, "segredo externo\n", "utf-8");
+    writeFileSync(
+      join(handleDir, "manifest.json"),
+      JSON.stringify({
+        segments: [{ ref: "externo", originRefs: [], body_file: relative(handleDir, external) }],
+      }),
+      "utf-8",
+    );
+
+    try {
+      const payload = buildToolStub("retrieve", root, { handle });
+      expect(payload.state).toBe("falha");
+      expect(String(payload.content)).not.toContain("segredo externo");
+      expect((payload.limitations as string[]).some((item) => item.includes("fora do workspace"))).toBe(true);
+    } finally {
+      rmSync(external, { force: true });
+    }
+  });
+
+  it("retrieve degrada manifesto estruturalmente inválido sem lançar exceção", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    const handle = "rh_0123456789abcdef";
+    const handleDir = join(root, ".cortex", "packed-handles", handle);
+    mkdirSync(handleDir, { recursive: true });
+    writeFileSync(join(handleDir, "manifest.json"), "{}", "utf-8");
+
+    const payload = buildToolStub("retrieve", root, { handle });
+    expect(payload.state).toBe("falha");
+    expect(String(payload.message)).toContain("E_RETRIEVE_UNAVAILABLE");
   });
 
   it("pack-context degrada para partial quando handle perde segmento persistido", async () => {

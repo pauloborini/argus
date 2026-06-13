@@ -41,6 +41,19 @@ describe("status stub e staleness", () => {
     expect(payload.storage_backend).toBeNull();
   });
 
+  it("status rejeita path fora do workspace atual", () => {
+    const root = setupWorkspace();
+    const outside = mkdtempSync(join(tmpdir(), "cortex-status-outside-"));
+    try {
+      const payload = buildToolStub("status", outside);
+      expect(payload.state).toBe("falha");
+      expect(String(payload.message)).toContain("E_PATH_OUTSIDE_WORKSPACE");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+    expect(root).toBeTruthy();
+  });
+
   it("status reporta limitations quando há arquivos não suportados no manifest", async () => {
     const root = setupWorkspace();
     writeFileSync(join(root, "notes.md"), "# notes\n", "utf-8");
