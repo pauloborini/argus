@@ -28,6 +28,7 @@ import {
   getIndexDbPath,
   getManifestPath,
   readWorkspaceMetadata,
+  resolveRespectGitignore,
 } from "../../workspace/workspace.js";
 import type { McpToolName } from "../tool-registry.js";
 
@@ -378,7 +379,9 @@ function buildStatusStub(cwd: string): ToolStubPayload {
     throw err;
   }
 
-  const staleness = computeManifestStaleness(metadata.root_path, manifest);
+  const staleness = computeManifestStaleness(metadata.root_path, manifest, {
+    respect_gitignore: resolveRespectGitignore(metadata),
+  });
   const coverage = structural?.coverage_by_language ?? {};
   const dirtyFlag = readDirtyFlag(metadata.root_path);
   const basePayload = {
@@ -505,7 +508,9 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
   const storage_backend = structural ? ("sqlite" as const) : null;
   const schema_version = structural?.schema_version ?? null;
 
-  const staleness = computeManifestStaleness(metadata.root_path, manifest);
+  const staleness = computeManifestStaleness(metadata.root_path, manifest, {
+    respect_gitignore: resolveRespectGitignore(metadata),
+  });
   if (staleness.staleness === "stale") {
     return {
       state: "stale",

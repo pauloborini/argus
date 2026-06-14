@@ -8,12 +8,20 @@ export interface StalenessResult {
   pending_files_count: number;
 }
 
+export interface ComputeStalenessOptions {
+  /** Deve casar com o valor usado na indexação, senão o recheck gera falso stale. */
+  respect_gitignore?: boolean;
+}
+
 export function computeManifestStaleness(
   rootPath: string,
   manifest: DiscoveryManifest,
+  options: ComputeStalenessOptions = {},
 ): StalenessResult {
   try {
-    const discovery = discoverFiles(rootPath);
+    const discovery = discoverFiles(rootPath, {
+      respect_gitignore: options.respect_gitignore,
+    });
     // Só limitações que comprometem a integridade da comparação geram "unknown".
     // MAX_FILE_SIZE é exclusão determinística e simétrica: o mesmo arquivo grande
     // é omitido na indexação e no recheck (todos usam discoverFiles com o mesmo

@@ -1,4 +1,4 @@
-import { requireWorkspace } from "../workspace/workspace.js";
+import { requireWorkspace, resolveRespectGitignore } from "../workspace/workspace.js";
 import { gitDelta } from "../discovery/git-delta.js";
 import { markDirty } from "../discovery/dirty-flag.js";
 
@@ -17,8 +17,11 @@ export interface MarkDirtyOptions {
 export function runMarkDirty(options: MarkDirtyOptions = {}): number {
   const cwd = options.cwd ?? process.cwd();
   let rootPath: string;
+  let respectGitignore: boolean;
   try {
-    rootPath = requireWorkspace(cwd).root_path;
+    const metadata = requireWorkspace(cwd);
+    rootPath = metadata.root_path;
+    respectGitignore = resolveRespectGitignore(metadata);
   } catch (err) {
     // Hook em repo sem workspace cortex: silencioso, não trava git.
     const message = err instanceof Error ? err.message : String(err);
@@ -31,7 +34,7 @@ export function runMarkDirty(options: MarkDirtyOptions = {}): number {
     return 0;
   }
 
-  const delta = gitDelta(rootPath, options.since);
+  const delta = gitDelta(rootPath, options.since, { respect_gitignore: respectGitignore });
   if (!delta) {
     markDirty([], { cwd, forceFull: true });
     return 0;

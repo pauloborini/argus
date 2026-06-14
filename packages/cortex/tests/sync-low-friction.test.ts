@@ -179,9 +179,9 @@ describe("S28 — sync de baixo atrito", () => {
       expect(structural?.files.map((f) => f.relative_path)).toContain("c.ts");
     });
 
-    it("equivale ao walk para arquivo coberto por .gitignore (cortex não lê .gitignore)", async () => {
+    it("equivale ao walk respeitando .gitignore (untracked ignorado fica fora em ambos)", async () => {
       const root = useWorkspace(true);
-      // .gitignore esconde local.ts do git, mas o walk do cortex o indexa.
+      // .gitignore esconde local.ts: untracked + ignorado → não indexado (default).
       writeFileSync(join(root, ".gitignore"), "local.ts\n", "utf-8");
       writeFileSync(join(root, "local.ts"), "export const local = 1;\n", "utf-8");
       git(root, ["add", ".gitignore"]);
@@ -202,8 +202,8 @@ describe("S28 — sync de baixo atrito", () => {
         ?.files.map((f) => f.relative_path)
         .sort();
 
-      // Ambos indexam local.ts apesar do .gitignore; conjuntos idênticos.
-      expect(viaGit).toContain("local.ts");
+      // Default respeita .gitignore: nenhum dos caminhos indexa local.ts; sets iguais.
+      expect(viaGit).not.toContain("local.ts");
       expect(viaGit).toEqual(viaWalk);
     });
 

@@ -28,6 +28,24 @@ function finish(code: number): void {
   process.exitCode = code;
 }
 
+/**
+ * Tri-state do respeito a `.gitignore` a partir das flags CLI: `--gitignore`
+ * força respeitar, `--include-gitignored` força indexar ignorados, nenhuma →
+ * `undefined` (usa o default persistido no workspace).
+ */
+function resolveGitignoreOverride(opts: {
+  gitignore?: boolean;
+  includeGitignored?: boolean;
+}): boolean | undefined {
+  if (opts.gitignore) {
+    return true;
+  }
+  if (opts.includeGitignored) {
+    return false;
+  }
+  return undefined;
+}
+
 program
   .name("cortex")
   .description("Atlas Cortex — CLI local de retrieval e context packing")
@@ -43,8 +61,10 @@ program
 program
   .command("index")
   .description("Indexação completa do inventário local de arquivos")
-  .action(async () => {
-    finish(await runIndex());
+  .option("--gitignore", "Respeitar .gitignore neste run (sobrepõe o workspace)")
+  .option("--include-gitignored", "Indexar arquivos gitignored neste run")
+  .action(async (opts: { gitignore?: boolean; includeGitignored?: boolean }) => {
+    finish(await runIndex({ respectGitignore: resolveGitignoreOverride(opts) }));
   });
 
 program
@@ -52,9 +72,24 @@ program
   .description("Sincronização incremental do manifest local")
   .option("--since <ref>", "Delta via git desde <ref> (pula walk completo)")
   .option("--full", "Forçar walk completo (ignora git-delta e dirty-flag)")
-  .action(async (opts: { since?: string; full?: boolean }) => {
-    finish(await runSync({ since: opts.since, full: opts.full }));
-  });
+  .option("--gitignore", "Respeitar .gitignore neste run (sobrepõe o workspace)")
+  .option("--include-gitignored", "Indexar arquivos gitignored neste run")
+  .action(
+    async (opts: {
+      since?: string;
+      full?: boolean;
+      gitignore?: boolean;
+      includeGitignored?: boolean;
+    }) => {
+      finish(
+        await runSync({
+          since: opts.since,
+          full: opts.full,
+          respectGitignore: resolveGitignoreOverride(opts),
+        }),
+      );
+    },
+  );
 
 program
   .command("search")

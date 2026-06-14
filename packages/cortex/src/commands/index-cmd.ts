@@ -3,13 +3,24 @@ import { writeManifestAtomic } from "../discovery/manifest.js";
 import { discoverFiles } from "../discovery/walk.js";
 import { buildStructuralIndex } from "../extraction/pipeline.js";
 import { persistFullStructuralIndex } from "../storage/index-persistence.js";
-import { getManifestPath, requireWorkspace } from "../workspace/workspace.js";
+import {
+  getManifestPath,
+  requireWorkspace,
+  resolveRespectGitignore,
+} from "../workspace/workspace.js";
 
-export async function runIndex(): Promise<number> {
+export interface IndexOptions {
+  /** Override por execução do respeito a `.gitignore` (workspace é o default). */
+  respectGitignore?: boolean;
+}
+
+export async function runIndex(options: IndexOptions = {}): Promise<number> {
   let rootPath: string;
+  let respectGitignore: boolean;
   try {
     const metadata = requireWorkspace();
     rootPath = metadata.root_path;
+    respectGitignore = resolveRespectGitignore(metadata, options.respectGitignore);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(message);
@@ -17,7 +28,7 @@ export async function runIndex(): Promise<number> {
   }
 
   try {
-    const discovery = discoverFiles(rootPath);
+    const discovery = discoverFiles(rootPath, { respect_gitignore: respectGitignore });
     const fingerprints = fingerprintDiscoveredFiles(discovery.files);
     const manifest = buildDiscoveryManifest(rootPath, fingerprints);
     const { index, summary } = await buildStructuralIndex(manifest, rootPath);

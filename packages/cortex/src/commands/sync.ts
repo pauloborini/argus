@@ -24,7 +24,11 @@ import {
   persistFullStructuralIndex,
   persistStructuralIndexDelta,
 } from "../storage/index-persistence.js";
-import { getManifestPath, requireWorkspace } from "../workspace/workspace.js";
+import {
+  getManifestPath,
+  requireWorkspace,
+  resolveRespectGitignore,
+} from "../workspace/workspace.js";
 
 export type SyncedVia = "full" | "git-delta" | "dirty-flag";
 
@@ -33,6 +37,8 @@ export interface SyncOptions {
   since?: string;
   /** Força walk completo, ignorando git-delta e dirty-flag. */
   full?: boolean;
+  /** Override por execução do respeito a `.gitignore` (workspace é o default). */
+  respectGitignore?: boolean;
   cwd?: string;
 }
 
@@ -78,9 +84,10 @@ function resolveDelta(
   previousManifest: DiscoveryManifest,
   options: SyncOptions,
   cwd: string,
+  respectGitignore: boolean,
 ): ResolvedDelta {
   const walkPath = (): ResolvedDelta => {
-    const discovery = discoverFiles(rootPath);
+    const discovery = discoverFiles(rootPath, { respect_gitignore: respectGitignore });
     const plan = planManifestSync(previousManifest, discovery.files);
     return {
       changed: [...plan.changed, ...plan.added],
@@ -96,7 +103,7 @@ function resolveDelta(
   }
 
   if (options.since) {
-    const delta = gitDelta(rootPath, options.since);
+    const delta = gitDelta(rootPath, options.since, { respect_gitignore: respectGitignore });
     if (delta) {
       return {
         changed: delta.changed,
@@ -113,7 +120,7 @@ function resolveDelta(
   const dirty = readDirtyFlag(cwd);
   const dirtyCount = dirty ? dirty.paths.length : 0;
   if (dirty && !dirty.force_full && dirty.paths.length > 0 && dirty.since_ref) {
-    const delta = gitDelta(rootPath, dirty.since_ref);
+    const delta = gitDelta(rootPath, dirty.since_ref, { respect_gitignore: respectGitignore });
     if (delta) {
       // Delta veio do consumo da dirty-flag (não de um `--since` explícito):
       // reporta `dirty-flag` como origem honesta do sync.
@@ -137,9 +144,11 @@ function resolveDelta(
 export async function runSync(options: SyncOptions = {}): Promise<number> {
   const cwd = options.cwd ?? process.cwd();
   let rootPath: string;
+  let respectGitignore: boolean;
   try {
     const metadata = requireWorkspace(cwd);
     rootPath = metadata.root_path;
+    respectGitignore = resolveRespectGitignore(metadata, options.respectGitignore);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(message);
@@ -164,7 +173,7 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
   }
 
   try {
-    const resolved = resolveDelta(rootPath, previousManifest, options, cwd);
+    const resolved = resolveDelta(rootPath, previousManifest, options, cwd, respectGitignore);
     const nextFingerprints = applyDeltaFingerprints(
       previousManifest,
       resolved.changed,

@@ -8,6 +8,7 @@ import {
   normalizeRelativePath,
   shouldIgnore,
 } from "./ignores.js";
+import { buildIgnoreContext } from "./gitignore.js";
 
 export interface DiscoveryLimitation {
   code: "MAX_FILE_SIZE" | "MAX_FILE_COUNT" | "READ_ERROR";
@@ -23,6 +24,8 @@ export interface DiscoverFilesResult {
 export interface DiscoverFilesOptions {
   max_file_size_bytes?: number;
   max_file_count?: number;
+  /** Default `true`: não indexa arquivos cobertos por `.gitignore`. */
+  respect_gitignore?: boolean;
 }
 
 export function discoverFiles(
@@ -31,6 +34,9 @@ export function discoverFiles(
 ): DiscoverFilesResult {
   const maxFileSize = options.max_file_size_bytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
   const maxFileCount = options.max_file_count ?? DEFAULT_MAX_FILE_COUNT;
+  const ignoreContext = buildIgnoreContext(rootPath, {
+    respect_gitignore: options.respect_gitignore,
+  });
   const files: DiscoveredFile[] = [];
   const limitations: DiscoveryLimitation[] = [];
   const queue: string[] = [""];
@@ -63,11 +69,18 @@ export function discoverFiles(
       const childAbsolute = join(rootPath, childRelative);
 
       if (entry.isDirectory()) {
+        if (ignoreContext.isIgnoredDir(childRelative)) {
+          continue;
+        }
         queue.push(childRelative);
         continue;
       }
 
       if (!entry.isFile()) {
+        continue;
+      }
+
+      if (ignoreContext.isIgnoredFile(childRelative)) {
         continue;
       }
 

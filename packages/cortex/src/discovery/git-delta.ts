@@ -20,6 +20,8 @@ export interface GitDeltaResult {
 
 export interface GitDeltaOptions {
   max_file_size_bytes?: number;
+  /** Default `true`: não indexa untracked cobertos por `.gitignore`. */
+  respect_gitignore?: boolean;
 }
 
 /**
@@ -73,6 +75,7 @@ export function gitDelta(
   }
 
   const maxFileSize = options.max_file_size_bytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
+  const respectGitignore = options.respect_gitignore ?? true;
 
   let raw: string;
   try {
@@ -151,12 +154,14 @@ export function gitDelta(
   // `git diff` não lista arquivos untracked; capturá-los explicitamente como
   // adicionados, senão um arquivo novo não commitado escaparia do delta.
   //
-  // Crucial para a equivalência git-delta ≡ walk: NÃO usamos `--exclude-standard`
-  // (que respeitaria `.gitignore`), porque o walk só ignora a lista fixa do
-  // cortex (`shouldIgnore`), não o `.gitignore`. Em vez disso listamos todos os
-  // untracked e aplicamos `shouldIgnore` — mesmo conjunto que o walk indexaria.
-  // Pathspecs `:(exclude)` cortam os diretórios pesados conhecidos por
-  // performance; `shouldIgnore` é o backstop de correção em qualquer profundidade.
+  // Equivalência git-delta ≡ walk sobre a base `tracked ∪ untracked-não-ignorado`:
+  // com `respect_gitignore` (default), passamos `--exclude-standard` para o git
+  // remover os untracked ignorados via engine nativo — exatamente o conjunto que
+  // o walk subtrai (ver `gitignore.ts`). Com `respect_gitignore=false` repetimos
+  // o comportamento histórico (lista todos os untracked, só `shouldIgnore`
+  // filtra), alinhado ao walk sem `.gitignore`. Pathspecs `:(exclude)` cortam os
+  // diretórios pesados conhecidos por performance; `shouldIgnore` é o backstop de
+  // correção em qualquer profundidade.
   try {
     const excludeSpecs = DEFAULT_IGNORED_DIRECTORIES.flatMap((dir) => [
       `:(exclude)${dir}`,
@@ -164,7 +169,15 @@ export function gitDelta(
     ]);
     const untracked = execFileSync(
       "git",
-      ["ls-files", "--others", "-z", "--", ".", ...excludeSpecs],
+      [
+        "ls-files",
+        "--others",
+        ...(respectGitignore ? ["--exclude-standard"] : []),
+        "-z",
+        "--",
+        ".",
+        ...excludeSpecs,
+      ],
       { cwd: rootPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
     for (const rawPath of untracked.split("\0").filter((token) => token.length > 0)) {

@@ -15,6 +15,22 @@ export interface WorkspaceMetadata {
   product_id: typeof PRODUCT_ID;
   initialized_at: string;
   root_path: string;
+  /**
+   * Respeitar `.gitignore` no discovery (não indexar arquivos ignorados).
+   * Ausente em workspaces antigos → tratado como `true` (default de produto).
+   */
+  respect_gitignore?: boolean;
+}
+
+/** Default de produto: respeitar `.gitignore`. Override por CLI vence. */
+export function resolveRespectGitignore(
+  metadata: Pick<WorkspaceMetadata, "respect_gitignore"> | null,
+  cliOverride?: boolean,
+): boolean {
+  if (cliOverride !== undefined) {
+    return cliOverride;
+  }
+  return metadata?.respect_gitignore ?? true;
 }
 
 export interface WorkspaceResult {
@@ -97,6 +113,7 @@ export function initWorkspace(cwd: string = process.cwd()): WorkspaceResult {
       product_id: PRODUCT_ID,
       initialized_at: new Date().toISOString(),
       root_path: root,
+      respect_gitignore: true,
     };
 
     writeFileSync(metaPath, JSON.stringify(metadata, null, 2) + "\n", "utf-8");
