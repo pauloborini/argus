@@ -13,6 +13,9 @@ import { runStatus } from "./commands/status.js";
 import { runSync } from "./commands/sync.js";
 import { runTrace } from "./commands/trace.js";
 import { runServeMcp } from "./commands/serve.js";
+import { runMarkDirty } from "./commands/mark-dirty.js";
+import { runHookInstall, runHookUninstall } from "./commands/hooks.js";
+import { runAgentRulesInstall, runAgentRulesUninstall } from "./commands/agent-rules.js";
 import { CORTEX_VERSION } from "./version.js";
 
 const program = new Command();
@@ -47,8 +50,10 @@ program
 program
   .command("sync")
   .description("Sincronização incremental do manifest local")
-  .action(async () => {
-    finish(await runSync());
+  .option("--since <ref>", "Delta via git desde <ref> (pula walk completo)")
+  .option("--full", "Forçar walk completo (ignora git-delta e dirty-flag)")
+  .action(async (opts: { since?: string; full?: boolean }) => {
+    finish(await runSync({ since: opts.since, full: opts.full }));
   });
 
 program
@@ -163,15 +168,54 @@ program
   .command("serve")
   .description("Expor servidor MCP stdio com surface congelada")
   .option("--mcp", "Iniciar servidor MCP stdio (atlas-cortex)")
-  .action(async (opts: { mcp?: boolean }) => {
+  .option("--no-auto-sync", "Desligar o sync automático antes de cada tool call")
+  .action(async (opts: { mcp?: boolean; autoSync?: boolean }) => {
     if (!opts.mcp) {
       console.error("Use --mcp para iniciar o servidor MCP stdio.");
       process.exit(1);
     }
-    const code = await runServeMcp();
+    const code = await runServeMcp({ autoSync: opts.autoSync !== false });
     if (code !== 0) {
       process.exit(code);
     }
+  });
+
+program
+  .command("mark-dirty")
+  .description("Marcar o índice como sujo (uso interno dos hooks git)")
+  .option("--since <ref>", "Ref git base do evento")
+  .action((opts: { since?: string }) => {
+    finish(runMarkDirty({ since: opts.since }));
+  });
+
+const hook = program.command("hook").description("Gerenciar hooks git de baixo atrito");
+hook
+  .command("install")
+  .description("Instalar hooks git que marcam o índice como sujo")
+  .action(() => {
+    finish(runHookInstall());
+  });
+hook
+  .command("uninstall")
+  .description("Remover hooks git do cortex (preserva hooks do usuário)")
+  .action(() => {
+    finish(runHookUninstall());
+  });
+
+const agentRules = program
+  .command("agent-rules")
+  .description("Gerenciar regras de agente em CLAUDE.md / AGENTS.md");
+agentRules
+  .command("install")
+  .description("Escrever bloco de regras cortex em CLAUDE.md e AGENTS.md")
+  .action(() => {
+    finish(runAgentRulesInstall());
+  });
+agentRules
+  .command("uninstall")
+  .description("Remover bloco de regras cortex de CLAUDE.md e AGENTS.md")
+  .action(() => {
+    finish(runAgentRulesUninstall());
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

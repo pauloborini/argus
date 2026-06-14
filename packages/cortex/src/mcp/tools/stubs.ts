@@ -8,6 +8,7 @@ import type { OperationalEnvelope } from "../../contracts/response-state.js";
 import type { DiscoveryManifest } from "../../discovery/types.js";
 import { ManifestCorruptedError, readManifest } from "../../discovery/manifest.js";
 import { computeManifestStaleness } from "../../discovery/staleness.js";
+import { readDirtyFlag } from "../../discovery/dirty-flag.js";
 import { collectIndexedLanguages, buildFilesTree } from "../../extraction/files-tree.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import type { ExtractedSymbol, FileStructuralEntry } from "../../extraction/types.js";
@@ -379,6 +380,7 @@ function buildStatusStub(cwd: string): ToolStubPayload {
 
   const staleness = computeManifestStaleness(metadata.root_path, manifest);
   const coverage = structural?.coverage_by_language ?? {};
+  const dirtyFlag = readDirtyFlag(metadata.root_path);
   const basePayload = {
     initialized: true,
     staleness: staleness.staleness,
@@ -387,6 +389,9 @@ function buildStatusStub(cwd: string): ToolStubPayload {
     index_version: buildIndexVersion(manifest, structural),
     storage_backend: structural ? ("sqlite" as const) : null,
     schema_version: structural?.schema_version ?? null,
+    dirty_pending: dirtyFlag
+      ? { paths: dirtyFlag.paths.length, force_full: dirtyFlag.force_full, since_ref: dirtyFlag.since_ref }
+      : null,
   };
 
   if (!structural) {

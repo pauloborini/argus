@@ -6,6 +6,7 @@ export const WORKSPACE_METADATA_FILE = "workspace.json";
 export const FILE_MANIFEST_FILE = "file-manifest.json";
 export const STRUCTURAL_INDEX_FILE = "structural-index.json";
 export const INDEX_DB_FILE = "index.db";
+export const DIRTY_FLAG_FILE = "dirty.json";
 export const PRODUCT_ID = "atlas-cortex";
 export const SCHEMA_VERSION = "1.0.0";
 
@@ -41,6 +42,10 @@ export function getStructuralIndexPath(cwd: string = process.cwd()): string {
 
 export function getIndexDbPath(cwd: string = process.cwd()): string {
   return join(getWorkspacePath(cwd), INDEX_DB_FILE);
+}
+
+export function getDirtyFlagPath(cwd: string = process.cwd()): string {
+  return join(getWorkspacePath(cwd), DIRTY_FLAG_FILE);
 }
 
 export function workspaceExists(cwd: string = process.cwd()): boolean {

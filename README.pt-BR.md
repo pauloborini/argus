@@ -97,6 +97,23 @@ estado local.
 
 ---
 
+## Manter o índice fresco (opcional)
+
+Você pode deixar o índice se manter fresco sozinho, para o agente nunca
+consultar estado velho e você nunca rodar `cortex sync` na mão:
+
+```bash
+cortex hook install         # hooks git marcam o que mudou (sem travar commit)
+cortex agent-rules install  # instrui agentes a usar o cortex (CLAUDE.md + AGENTS.md)
+```
+
+Os hooks git só *marcam* o índice como sujo; o servidor MCP roda um sync
+incremental e git-aware de forma preguiçosa antes de responder. O commit nunca
+trava, e erro de sync degrada honestamente para `parcial` + `staleness_hint`.
+Veja [COMMANDS → Sync de baixo atrito](COMMANDS.pt-BR.md#sync-de-baixo-atrito).
+
+---
+
 ## Lendo as respostas
 
 Toda tool retorna JSON com o mesmo envelope de honestidade, então o agente

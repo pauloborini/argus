@@ -8,8 +8,11 @@ import {
   writeManifestAtomic,
 } from "../discovery/manifest.js";
 import { discoverFiles } from "../discovery/walk.js";
-import type { DiscoveryManifest } from "../discovery/types.js";
+import type { DiscoveredFile, DiscoveryManifest, FileFingerprint } from "../discovery/types.js";
 import { diffManifest, planManifestSync } from "../discovery/delta.js";
+import { gitDelta } from "../discovery/git-delta.js";
+import { clearDirtyFlag, readDirtyFlag } from "../discovery/dirty-flag.js";
+import type { DiscoveryLimitation } from "../discovery/walk.js";
 import {
   buildStructuralIndex,
   updateStructuralIndexDelta,
@@ -23,10 +26,119 @@ import {
 } from "../storage/index-persistence.js";
 import { getManifestPath, requireWorkspace } from "../workspace/workspace.js";
 
-export async function runSync(): Promise<number> {
+export type SyncedVia = "full" | "git-delta" | "dirty-flag";
+
+export interface SyncOptions {
+  /** Ref git base; ativa o caminho de delta git pulando o walk completo. */
+  since?: string;
+  /** Força walk completo, ignorando git-delta e dirty-flag. */
+  full?: boolean;
+  cwd?: string;
+}
+
+interface ResolvedDelta {
+  changed: DiscoveredFile[];
+  removed: string[];
+  limitations: DiscoveryLimitation[];
+  syncedVia: SyncedVia;
+  dirtyPathsConsumed: number;
+}
+
+/**
+ * Reaplica um delta (changed/removed) sobre o manifest anterior, produzindo a
+ * nova lista de fingerprints. Arquivos não tocados preservam o fingerprint
+ * antigo (sem re-hash); só os alterados/adicionados são re-fingerprinted.
+ */
+function applyDeltaFingerprints(
+  previousManifest: DiscoveryManifest,
+  changed: DiscoveredFile[],
+  removed: string[],
+): FileFingerprint[] {
+  const byPath = new Map(
+    previousManifest.files.map((file) => [file.relative_path, file] as const),
+  );
+  for (const path of removed) {
+    byPath.delete(path);
+  }
+  for (const file of changed) {
+    byPath.set(file.relative_path, fingerprintFile(file));
+  }
+  return [...byPath.values()];
+}
+
+/**
+ * Decide a estratégia de detecção de mudança e produz o delta concreto:
+ *  - `--full` ou git-delta indisponível → walk completo.
+ *  - `--since <ref>` → git-delta.
+ *  - sem `--since`, com dirty-flag presente e git-delta resolvível pelo
+ *    `since_ref` da flag → git-delta barato; senão walk.
+ */
+function resolveDelta(
+  rootPath: string,
+  previousManifest: DiscoveryManifest,
+  options: SyncOptions,
+  cwd: string,
+): ResolvedDelta {
+  const walkPath = (): ResolvedDelta => {
+    const discovery = discoverFiles(rootPath);
+    const plan = planManifestSync(previousManifest, discovery.files);
+    return {
+      changed: [...plan.changed, ...plan.added],
+      removed: plan.removed.map((file) => file.relative_path),
+      limitations: discovery.limitations,
+      syncedVia: "full",
+      dirtyPathsConsumed: 0,
+    };
+  };
+
+  if (options.full) {
+    return walkPath();
+  }
+
+  if (options.since) {
+    const delta = gitDelta(rootPath, options.since);
+    if (delta) {
+      return {
+        changed: delta.changed,
+        removed: delta.removed,
+        limitations: delta.limitations,
+        syncedVia: "git-delta",
+        dirtyPathsConsumed: 0,
+      };
+    }
+    // Fallback honesto: git ausente ou ref inválido.
+    return walkPath();
+  }
+
+  const dirty = readDirtyFlag(cwd);
+  const dirtyCount = dirty ? dirty.paths.length : 0;
+  if (dirty && !dirty.force_full && dirty.paths.length > 0 && dirty.since_ref) {
+    const delta = gitDelta(rootPath, dirty.since_ref);
+    if (delta) {
+      // Delta veio do consumo da dirty-flag (não de um `--since` explícito):
+      // reporta `dirty-flag` como origem honesta do sync.
+      return {
+        changed: delta.changed,
+        removed: delta.removed,
+        limitations: delta.limitations,
+        syncedVia: "dirty-flag",
+        dirtyPathsConsumed: dirty.paths.length,
+      };
+    }
+    // since_ref morto (rebase/gc) ou git ausente: cai no walk, mas a flag ainda
+    // foi consumida — propaga o consumo para o sinal honesto não mentir.
+  }
+
+  const walked = walkPath();
+  walked.dirtyPathsConsumed = dirtyCount;
+  return walked;
+}
+
+export async function runSync(options: SyncOptions = {}): Promise<number> {
+  const cwd = options.cwd ?? process.cwd();
   let rootPath: string;
   try {
-    const metadata = requireWorkspace();
+    const metadata = requireWorkspace(cwd);
     rootPath = metadata.root_path;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -34,7 +146,7 @@ export async function runSync(): Promise<number> {
     return 1;
   }
 
-  const manifestPath = getManifestPath(rootPath);
+  const manifestPath = getManifestPath(cwd);
   let previousManifest: DiscoveryManifest | null;
   try {
     previousManifest = readManifest(manifestPath);
@@ -52,13 +164,12 @@ export async function runSync(): Promise<number> {
   }
 
   try {
-    const discovery = discoverFiles(rootPath);
-    const syncPlan = planManifestSync(previousManifest, discovery.files);
-    const nextFingerprints = [
-      ...syncPlan.preserved,
-      ...syncPlan.changed.map((file) => fingerprintFile(file)),
-      ...syncPlan.added.map((file) => fingerprintFile(file)),
-    ];
+    const resolved = resolveDelta(rootPath, previousManifest, options, cwd);
+    const nextFingerprints = applyDeltaFingerprints(
+      previousManifest,
+      resolved.changed,
+      resolved.removed,
+    );
     const delta = diffManifest(previousManifest, nextFingerprints);
     const nextManifest = buildDiscoveryManifest(rootPath, nextFingerprints);
     writeManifestAtomic(manifestPath, nextManifest);
@@ -74,12 +185,14 @@ export async function runSync(): Promise<number> {
       throw err;
     }
 
+    const viaLabel = `via ${resolved.syncedVia}`;
+
     if (!previousStructural) {
       const { index, summary } = await buildStructuralIndex(nextManifest, rootPath);
       persistFullStructuralIndex(rootPath, index);
 
       console.log(
-        `Sync concluído: +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
+        `Sync concluído (${viaLabel}): +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
       );
       console.log(
         `Extração estrutural (rebuild): ${summary.files_parsed} arquivos, ${summary.symbol_count} símbolos (${summary.duration_ms}ms).`,
@@ -109,18 +222,24 @@ export async function runSync(): Promise<number> {
       });
 
       console.log(
-        `Sync concluído: +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
+        `Sync concluído (${viaLabel}): +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
       );
       console.log(
         `Extração estrutural (delta): ${summary.files_parsed} arquivos reprocessados, ${summary.symbol_count} símbolos (${summary.duration_ms}ms).`,
       );
     } else {
-      console.log("Sync concluído: índice já estava atualizado (0 alterações).");
+      console.log(`Sync concluído (${viaLabel}): índice já estava atualizado (0 alterações).`);
     }
 
-    if (discovery.limitations.length > 0) {
+    if (resolved.dirtyPathsConsumed > 0) {
+      console.log(`Dirty-flag consumida: ${resolved.dirtyPathsConsumed} path(s) pendente(s).`);
+    }
+    // O sync reconciliou o estado: limpa a dirty-flag em qualquer caminho.
+    clearDirtyFlag(cwd);
+
+    if (resolved.limitations.length > 0) {
       console.warn("Sync parcial: limites de discovery atingidos.");
-      for (const limitation of discovery.limitations) {
+      for (const limitation of resolved.limitations) {
         console.warn(`- ${limitation.code}: ${limitation.path ?? "-"} ${limitation.message}`);
       }
     }

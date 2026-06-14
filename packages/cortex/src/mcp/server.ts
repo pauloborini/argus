@@ -8,6 +8,13 @@ import { z } from "zod";
 import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "./tool-registry.js";
 import { buildToolStub } from "./tools/stubs.js";
 import { CORTEX_VERSION } from "../version.js";
+import { hasDirtyPaths } from "../discovery/dirty-flag.js";
+import { runSync } from "../commands/sync.js";
+
+export interface McpServerOptions {
+  /** Roda sync incremental antes de cada tool call quando há dirty pendente. */
+  autoSync?: boolean;
+}
 
 const TOOL_INPUT_SCHEMAS = {
   search: z.object({
@@ -165,7 +172,48 @@ const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
   status: "Saúde, staleness e confiança do índice local",
 };
 
-export function createMcpServer(): Server {
+export function createMcpServer(options: McpServerOptions = {}): Server {
+  const autoSync = options.autoSync !== false;
+  // Ancora o auto-sync no cwd do server (onde o workspace foi validado em
+  // `runServeMcp`), não no cwd do momento da tool call — mantém a leitura da
+  // dirty-flag e o sync sobre o mesmo workspace que as tools resolvem.
+  const rootCwd = process.cwd();
+  // Lock simples: serializa syncs e evita corrida entre tool calls paralelas.
+  let inFlight: Promise<void> | null = null;
+
+  async function autoSyncIfDirty(): Promise<void> {
+    if (!autoSync) {
+      return;
+    }
+    // Loop até a flag estar limpa: cobre a corrida em que um novo evento sujo
+    // chega enquanto outra tool call já tinha um sync em andamento. Quem aguarda
+    // um `inFlight` alheio re-checa a flag; se ainda houver trabalho, roda o seu.
+    while (hasDirtyPaths(rootCwd)) {
+      if (inFlight) {
+        await inFlight;
+        continue;
+      }
+      let cleared = false;
+      inFlight = (async () => {
+        try {
+          // Erro de sync nunca derruba o servidor: a query degrada para `parcial`
+          // + staleness_hint pela própria leitura do índice.
+          await runSync({ cwd: rootCwd });
+          cleared = true;
+        } catch {
+          /* deixa o estado de staleness sinalizar; não trava a tool call */
+        } finally {
+          inFlight = null;
+        }
+      })();
+      await inFlight;
+      // Sync falhou e não limpou a flag: pára para não entrar em loop infinito.
+      if (!cleared) {
+        break;
+      }
+    }
+  }
+
   const server = new Server(
     { name: MCP_SERVER_NAME, version: CORTEX_VERSION },
     { capabilities: { tools: {} } },
@@ -219,6 +267,9 @@ export function createMcpServer(): Server {
       };
     }
 
+    // Garante índice fresco antes de responder, consumindo a dirty-flag.
+    await autoSyncIfDirty();
+
     const pathArg = typeof args.path === "string" ? args.path : process.cwd();
     const payload = buildToolStub(toolName as (typeof MCP_TOOL_NAMES)[number], pathArg, args);
 
@@ -235,8 +286,8 @@ export function createMcpServer(): Server {
   return server;
 }
 
-export async function startMcpServer(): Promise<void> {
-  const server = createMcpServer();
+export async function startMcpServer(options: McpServerOptions = {}): Promise<void> {
+  const server = createMcpServer(options);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

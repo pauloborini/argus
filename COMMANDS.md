@@ -45,7 +45,17 @@ Incremental update — only the changed delta. Cheaper than `index`. Fails with
 
 ```bash
 cortex sync
+cortex sync --since HEAD~1   # git-delta: skip the full filesystem walk
+cortex sync --full           # force a full walk (ignore git-delta/dirty-flag)
 ```
+
+| Flag | Meaning |
+|---|---|
+| `--since <ref>` | Resolve the delta via `git diff` since `<ref>`, skipping the full walk. Falls back to a full walk if git is absent or the ref is invalid. |
+| `--full` | Force a full filesystem walk, ignoring git-delta and the dirty-flag. |
+
+Output reports the path taken — `via full` · `via git-delta` · `via dirty-flag`
+— and, when a dirty-flag was consumed, the number of pending paths.
 
 ### `cortex status`
 Health and staleness of the local index.
@@ -209,9 +219,57 @@ Start the stdio MCP server. Exposes nine tools (`search`, `explore`, `trace`,
 
 ```bash
 cortex serve --mcp
+cortex serve --mcp --no-auto-sync   # disable auto-sync before tool calls
 ```
 
+| Flag | Meaning |
+|---|---|
+| `--mcp` | **Required.** Start the stdio MCP server. |
+| `--no-auto-sync` | Disable the automatic incremental sync before each tool call. |
+
+By default the server consumes the dirty-flag and runs an incremental sync
+before answering, so the agent always queries a fresh index. Sync errors never
+crash the server — the result degrades to `parcial` + `staleness_hint`.
+
 Configure your agent/IDE (see [README → Use it as an MCP server](README.md#use-it-as-an-mcp-server)).
+
+---
+
+## Low-friction sync
+
+Keep the index fresh without thinking about it: git hooks mark what changed, and
+the MCP server syncs lazily before answering. Nothing blocks your commit.
+
+### `cortex hook install` / `cortex hook uninstall`
+Install (or remove) git hooks (`post-commit`, `post-merge`, `post-checkout`)
+that **only mark the index dirty** — they never run a sync, so commits never
+stall. The binary path is embedded in the script (works in GUI git clients and
+CI). Idempotent; pre-existing hooks are preserved (cortex writes a delimited
+block).
+
+```bash
+cortex hook install
+cortex hook uninstall
+```
+
+### `cortex agent-rules install` / `cortex agent-rules uninstall`
+Write (or remove) a delimited Atlas Cortex block in `CLAUDE.md` and `AGENTS.md`,
+instructing agents to use the cortex tools and trust the auto-sync. Append-only
+and idempotent — your existing content is never overwritten.
+
+```bash
+cortex agent-rules install
+cortex agent-rules uninstall
+```
+
+### `cortex mark-dirty`
+Internal command invoked by the installed hooks. Marks the index dirty from a
+git event; if the git delta cannot be resolved, marks `force_full` so the next
+sync falls back to a full walk. You normally never call this by hand.
+
+```bash
+cortex mark-dirty --since HEAD~1
+```
 
 ---
 

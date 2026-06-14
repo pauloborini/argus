@@ -97,6 +97,23 @@ local state only.
 
 ---
 
+## Keep the index fresh (optional)
+
+You can let the index stay fresh on its own, so the agent never queries stale
+state and you never run `cortex sync` by hand:
+
+```bash
+cortex hook install         # git hooks mark what changed (never block a commit)
+cortex agent-rules install  # tell agents to use cortex (CLAUDE.md + AGENTS.md)
+```
+
+Git hooks only *mark* the index dirty; the MCP server runs an incremental,
+git-aware sync lazily before answering. Commits never stall, and sync errors
+degrade honestly to `parcial` + `staleness_hint`. See
+[COMMANDS → Low-friction sync](COMMANDS.md#low-friction-sync).
+
+---
+
 ## Reading the answers
 
 Every tool returns JSON with the same honesty envelope, so an agent always

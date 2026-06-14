@@ -1,7 +1,7 @@
-import { startMcpServer } from "../mcp/server.js";
+import { startMcpServer, type McpServerOptions } from "../mcp/server.js";
 import { requireWorkspace } from "../workspace/workspace.js";
 
-export function runServeMcp(): Promise<number> {
+export function runServeMcp(options: McpServerOptions = {}): Promise<number> {
   try {
     requireWorkspace();
   } catch (err) {
@@ -10,7 +10,7 @@ export function runServeMcp(): Promise<number> {
     return Promise.resolve(1);
   }
 
-  return startMcpServer()
+  return startMcpServer(options)
     .then(() => 0)
     .catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
