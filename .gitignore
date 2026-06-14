@@ -3,12 +3,7 @@ headroom
 Understand-Anything
 codegraph
 .app-vault
-.atlas/*
-!.atlas/**/
-!.atlas/**/*.md
-.atlas/state/
-.atlas/history/
-.atlas/benchmark/latest/tmp/
+.atlas/
 .env
 .env.*
 
