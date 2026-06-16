@@ -1,6 +1,6 @@
 {
   "name": "atlas-cortex",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Local code retrieval and context packing for coding agents",
   "license": "MIT",
   "author": "Paulo Borini",
@@ -58,7 +58,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
-    "atlas-cortex": "^1.0.0",
     "eslint": "^9.28.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.33.1",
