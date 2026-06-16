@@ -35,6 +35,16 @@ try {
     throw new Error(`Smoke version mismatch: ${version} != ${expected}`);
   }
 
+  for (const bin of ["cortex", "atlas-cortex"]) {
+    const binVersion = execFileSync(join(workDir, "node_modules", ".bin", bin), ["--version"], {
+      cwd: workDir,
+      encoding: "utf8",
+    }).trim();
+    if (binVersion !== expected) {
+      throw new Error(`Smoke bin ${bin} version mismatch: ${binVersion} != ${expected}`);
+    }
+  }
+
   writeFileSync(join(workDir, "sample.ts"), "export function sample() { return 1; }\n");
   const cli = join(workDir, "node_modules", "atlas-cortex", "dist", "cli.js");
   execFileSync(process.execPath, [cli, "init"], { cwd: workDir, stdio: "inherit" });

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5 - 2026-06-16
+
+- adiciona binario npm homonimo `atlas-cortex`, mantendo alias `cortex`
+- corrige uso via `npx atlas-cortex`
+- reforca smoke do pacote para validar os dois bins
+
 ## 1.0.4 - 2026-06-16
 
 - corrige release npm para repositório privado, publicando com `NPM_TOKEN` sem provenance

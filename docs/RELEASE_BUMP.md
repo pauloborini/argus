@@ -127,6 +127,7 @@ rtk gh run view <run-id> --log-failed
 rtk npm view atlas-cortex version dist-tags --json
 rtk npm view atlas-cortex@X.Y.Z version dist.integrity --json
 rtk npx -y atlas-cortex@X.Y.Z --version
+rtk npx -y atlas-cortex@X.Y.Z init --help
 ```
 
 11. Confirmar GitHub release.
@@ -145,6 +146,7 @@ rtk gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,assets,url
 - Tag `vX.Y.Z` aponta para o commit do bump.
 - npm registry tem `atlas-cortex@X.Y.Z`.
 - `latest` aponta para `X.Y.Z`, exceto release pre-release intencional.
+- `npx -y atlas-cortex@X.Y.Z --version` retorna `X.Y.Z`.
 - GitHub release existe e contem tarball + `SHA256SUMS`.
 
 ## Falhas comuns
@@ -155,6 +157,7 @@ rtk gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,assets,url
 - Tag enviada antes do commit certo: release roda com conteudo antigo.
 - `NPM_TOKEN` ausente/expirado: tag existe, mas npm nao publica.
 - `--provenance` em repositorio privado: npm retorna `E422` porque provenance GitHub Actions so aceita source repo publico.
+- Bin npm sem alias homonimo: `npx atlas-cortex` falha com `could not determine executable to run`.
 - `node-gyp` falha localmente por path com espaco/parênteses: validar com cache em `/tmp`.
 
 ## Regra para IA
