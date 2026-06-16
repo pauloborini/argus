@@ -1,6 +1,6 @@
 {
   "name": "atlas-cortex",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Atlas Cortex — motor local de code retrieval e context packing para agentes",
   "workspaces": [
