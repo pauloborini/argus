@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2 - 2026-06-16
+
+- teste do CI de release com Automation token do npm (NPM_TOKEN via secret)
+- nenhuma mudança de código; bump de versão para validar o pipeline automatizado
+
 ## 1.0.1 - 2026-06-15
 
 - comando `cortex install` para fiação zero-toque do repo (workspace + índice + agent-rules + MCP + daemon)
