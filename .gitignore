@@ -10,5 +10,6 @@ codegraph
 # Node / TypeScript
 node_modules/
 dist/
+dist-release/
 .cortex/
 *.tsbuildinfo

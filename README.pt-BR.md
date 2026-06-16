@@ -83,7 +83,7 @@ Aponte seu agente ou IDE para o servidor MCP stdio:
   "mcpServers": {
     "atlas-cortex": {
       "command": "npx",
-      "args": ["-y", "atlas-cortex@1.0.0", "serve", "--mcp"]
+      "args": ["-y", "atlas-cortex@latest", "serve", "--mcp"]
     }
   }
 }

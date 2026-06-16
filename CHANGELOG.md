@@ -1,9 +1,17 @@
 # Changelog
 
+## 1.0.3 - 2026-06-16
+
+- corrige pipeline de release npm com `NPM_TOKEN` e provenance explicito
+- alinha `package-lock.json` ao bump e faz `release:check` bloquear drift futuro
+- atualiza exemplos MCP para `atlas-cortex@latest`
+- adiciona runbook de bump/release para IA em `docs/RELEASE_BUMP.md`
+
 ## 1.0.2 - 2026-06-16
 
 - teste do CI de release com Automation token do npm (NPM_TOKEN via secret)
 - nenhuma mudança de código; bump de versão para validar o pipeline automatizado
+- tag criada, mas versao nao publicada no npm; usar `1.0.3` como release corrigido
 
 ## 1.0.1 - 2026-06-15
 
