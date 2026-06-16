@@ -57,6 +57,8 @@ rtk npm run release:check
 
 Regra: exemplos publicos devem usar `atlas-cortex@latest`, exceto quando a doc estiver ensinando pin explicito.
 
+Nota: `release:check` valida todos os pontos de versao (root, runtime, plugin, `version.ts`/`CORTEX_VERSION`, e as tres entradas do lockfile). A checagem de tag so dispara quando `GITHUB_REF_TYPE=tag`; em push/PR de branch (`GITHUB_REF_TYPE=branch`) o script roda sem exigir match de tag, entao a CI passa normalmente.
+
 5. Validar codigo e pacote.
 
 ```bash
@@ -90,7 +92,7 @@ Release por tag deve cobrir:
 - smoke package
 - release check
 - `npm publish --workspace=atlas-cortex --access public`
-- `--provenance` somente se o repositorio GitHub for publico.
+- `--provenance` somente se o repositorio GitHub for publico (hoje o repo e privado, entao o publish roda sem provenance; ao tornar publico, adicionar `--provenance` ao comando de publish).
 - GitHub release com assets `dist-release/*`
 
 7. Commitar bump.
@@ -159,6 +161,8 @@ rtk gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,assets,url
 - `--provenance` em repositorio privado: npm retorna `E422` porque provenance GitHub Actions so aceita source repo publico.
 - Bin npm sem alias homonimo: `npx atlas-cortex` falha com `could not determine executable to run`.
 - `node-gyp` falha localmente por path com espaco/parênteses: validar com cache em `/tmp`.
+- `release:check` falhando na CI com "Tag main não corresponde": versao antiga do script comparava `GITHUB_REF_NAME` (nome da branch) com a tag. Corrigido para so checar quando `GITHUB_REF_TYPE=tag`.
+- `version.ts`/`CORTEX_VERSION` esquecido no bump: agora `release:check` pega o drift; antes so o `smoke:package` detectava.
 
 ## Regra para IA
 
