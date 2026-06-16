@@ -54,7 +54,7 @@ try {
   transport.stderr?.on("data", (chunk) => {
     mcpStderr += String(chunk);
   });
-  const client = new Client({ name: "atlas-cortex-package-smoke", version: "1.0.0" });
+  const client = new Client({ name: "atlas-cortex-package-smoke", version: expected });
   try {
     await client.connect(transport);
     const tools = await client.listTools();
