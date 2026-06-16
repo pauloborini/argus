@@ -11,7 +11,8 @@ Gerar uma nova versao publicada em npm, com tag Git, release GitHub, tarball ver
 - Branch limpa ou com mudancas conhecidas.
 - `gh auth status` autenticado, se for preciso inspecionar Actions/release.
 - Secret `NPM_TOKEN` configurado no GitHub repo com token npm Automation valido.
-- Workflow `.github/workflows/release.yml` com `permissions.id-token: write`.
+- Workflow `.github/workflows/release.yml` com `NPM_TOKEN` via `NODE_AUTH_TOKEN`.
+- Provenance npm so deve ser usado quando o repositorio GitHub for publico.
 - Node suportado pelo projeto (`>=20`); release CI usa Node 24.
 
 ## Passo a passo
@@ -88,7 +89,8 @@ Release por tag deve cobrir:
 - validate
 - smoke package
 - release check
-- `npm publish --workspace=atlas-cortex --access public --provenance`
+- `npm publish --workspace=atlas-cortex --access public`
+- `--provenance` somente se o repositorio GitHub for publico.
 - GitHub release com assets `dist-release/*`
 
 7. Commitar bump.
@@ -152,6 +154,7 @@ rtk gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,assets,url
 - `dist-release/` stale: tarball antigo aparece como untracked ou asset errado.
 - Tag enviada antes do commit certo: release roda com conteudo antigo.
 - `NPM_TOKEN` ausente/expirado: tag existe, mas npm nao publica.
+- `--provenance` em repositorio privado: npm retorna `E422` porque provenance GitHub Actions so aceita source repo publico.
 - `node-gyp` falha localmente por path com espaco/parênteses: validar com cache em `/tmp`.
 
 ## Regra para IA

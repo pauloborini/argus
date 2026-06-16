@@ -32,7 +32,7 @@ jobs:
       - name: Publish npm with provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --workspace=atlas-cortex --access public --provenance
+        run: npm publish --workspace=atlas-cortex --access public
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
