@@ -1,6 +1,6 @@
 {
   "name": "atlas-cortex",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Local code retrieval and context packing for coding agents",
   "license": "MIT",
   "author": "Paulo Borini",
@@ -23,7 +23,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "cortex": "./dist/cli.js"
+    "cortex": "dist/cli.js"
   },
   "files": [
     "dist",
