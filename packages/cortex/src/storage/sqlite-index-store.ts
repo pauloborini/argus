@@ -65,6 +65,17 @@ export function openIndexDb(dbPath: string, options?: { readonly?: boolean }): D
   try {
     db = new BetterSqlite3(dbPath, { readonly: options?.readonly ?? false });
     db.pragma("foreign_keys = ON");
+    // `busy_timeout`: faz um leitor (search readonly) e um escritor (sync)
+    // esperarem o lock em vez de receberem SQLITE_BUSY imediato — que o catch
+    // abaixo mapearia como E_INDEX_CORRUPTED e mandaria o usuário reindexar por
+    // um lock transitório.
+    db.pragma("busy_timeout = 5000");
+    // WAL permite leitor e escritor concorrentes (índice servido durante o
+    // sync). Só pode ser ativado por uma conexão de escrita; o modo persiste no
+    // header do arquivo, então conexões readonly seguintes já o herdam.
+    if (!options?.readonly) {
+      db.pragma("journal_mode = WAL");
+    }
     applyMigrations(db);
     assertCompatibleIndexSchema(db);
   } catch (err) {

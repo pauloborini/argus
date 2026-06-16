@@ -29,6 +29,7 @@ import {
 } from "./commands/daemon.js";
 import { SUPPORTED_HOSTS, type McpHostId } from "./install/mcp-hosts.js";
 import { CORTEX_VERSION } from "./version.js";
+import { setPrettyOutput } from "./output.js";
 
 /** Parse e valida a flag `--hosts a,b`; vazio → todos os suportados. */
 function parseHosts(value?: string): McpHostId[] | undefined {
@@ -79,7 +80,14 @@ function resolveGitignoreOverride(opts: {
 program
   .name("cortex")
   .description("Atlas Cortex — CLI local de retrieval e context packing")
-  .version(CORTEX_VERSION);
+  .version(CORTEX_VERSION)
+  .option("--pretty", "Saída JSON identada para leitura humana (default: compacto)");
+
+// Default compacto: pretty-print desperdiça ~30-40% de tokens; o consumidor
+// primário é máquina (agente / `jq`). `--pretty` reativa a identação.
+program.hook("preAction", (thisCommand) => {
+  setPrettyOutput(thisCommand.optsWithGlobals().pretty === true);
+});
 
 program
   .command("init")

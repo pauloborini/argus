@@ -1,4 +1,5 @@
 import { buildToolStub } from "../mcp/tools/stubs.js";
+import { serializePayload } from "../output.js";
 
 export function runPackContext(options: {
   sources?: string[];
@@ -13,7 +14,7 @@ export function runPackContext(options: {
       token_budget: options.tokenBudget,
       style: options.style,
     });
-    console.log(JSON.stringify(payload, null, 2));
+    console.log(serializePayload(payload));
     return payload.state === "falha" ? 1 : 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

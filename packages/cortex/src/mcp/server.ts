@@ -198,7 +198,10 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         try {
           // Erro de sync nunca derruba o servidor: a query degrada para `parcial`
           // + staleness_hint pela própria leitura do índice.
-          await runSync({ cwd: rootCwd });
+          // `quiet`: o transporte stdio do MCP é dono do stdout; qualquer
+          // `console.log` do sync intercalaria texto não-JSON no stream JSON-RPC
+          // e derrubaria a sessão. Diagnose vai para stderr.
+          await runSync({ cwd: rootCwd, quiet: true });
           cleared = true;
         } catch {
           /* deixa o estado de staleness sinalizar; não trava a tool call */
@@ -235,11 +238,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(
-              { state: "falha", message: `Tool desconhecida: ${toolName}` },
-              null,
-              2,
-            ),
+            text: JSON.stringify({ state: "falha", message: `Tool desconhecida: ${toolName}` }),
           },
         ],
         isError: true,
@@ -256,11 +255,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(
-              { state: "falha", message: "Input inválido para a tool" },
-              null,
-              2,
-            ),
+            text: JSON.stringify({ state: "falha", message: "Input inválido para a tool" }),
           },
         ],
         isError: true,
@@ -277,7 +272,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(payload, null, 2),
+          text: JSON.stringify(payload),
         },
       ],
     };

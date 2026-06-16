@@ -1,4 +1,5 @@
 import { buildToolStub } from "../mcp/tools/stubs.js";
+import { serializePayload } from "../output.js";
 
 export function runExplore(
   target: string,
@@ -12,7 +13,7 @@ export function runExplore(
       include_tests: options?.includeTests,
       budget: options?.budget,
     });
-    console.log(JSON.stringify(payload, null, 2));
+    console.log(serializePayload(payload));
     return payload.state === "falha" ? 1 : 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
