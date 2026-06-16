@@ -1,6 +1,6 @@
 {
   "name": "atlas-cortex",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Local code retrieval and context packing for coding agents",
   "author": {
     "name": "Paulo Borini",
