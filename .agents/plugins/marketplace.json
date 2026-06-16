@@ -1,0 +1,20 @@
+{
+  "name": "atlas-cortex",
+  "interface": {
+    "displayName": "Atlas Cortex"
+  },
+  "plugins": [
+    {
+      "name": "atlas-cortex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/atlas-cortex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
