@@ -30,7 +30,9 @@ jobs:
           npm pack --workspace=atlas-cortex --pack-destination dist-release
           (cd dist-release && shasum -a 256 *.tgz > SHA256SUMS)
       - name: Publish npm with provenance
-        run: npm publish --workspace=atlas-cortex --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace=atlas-cortex --access public --provenance
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
