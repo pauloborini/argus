@@ -3,4 +3,12 @@ headroom
 Understand-Anything
 codegraph
 .app-vault
-.atlas
+.atlas/
+.env
+.env.*
+
+# Node / TypeScript
+node_modules/
+dist/
+.cortex/
+*.tsbuildinfo

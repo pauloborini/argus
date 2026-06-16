@@ -1,0 +1,362 @@
+<!-- Language: **English** · [Português](COMMANDS.pt-BR.md) -->
+
+# Atlas Cortex — Command reference
+
+The complete, no-prose list of commands. For *what it is* and *why*, read the
+**[README](README.md)**.
+
+All examples assume the `cortex` binary (from `npm install -g atlas-cortex`).
+Without a global install, prefix any command with `npx atlas-cortex …`.
+
+## Conventions
+
+- Every tool prints **JSON** to stdout.
+- Shared fields: `state` (`sucesso` · `ambigua` · `parcial` · `stale` ·
+  `falha`), `confidence` (`high` · `medium` · `low`), and, when relevant,
+  `limitations[]` and `staleness_hint`.
+- Exit code is non-zero only when `state` is `falha`.
+- Commands are scriptable: pipe stdout into `jq` freely.
+
+---
+
+## Lifecycle
+
+### `cortex install` ⭐ (entry-point command)
+Zero-touch wiring of a repository, in **one command**: prepares the workspace,
+builds the index, writes the agent rules (CLAUDE.md/AGENTS.md), registers the
+MCP server in detected hosts (Claude Code, Cursor) and registers the repo with
+the auto-sync daemon (with an auto-start user service). Idempotent.
+
+```bash
+cortex install                     # full wiring
+cortex install --no-daemon         # index + MCP only (no daemon/service)
+cortex install --no-mcp            # don't register MCP in hosts
+cortex install --hosts claude-code # restrict MCP hosts (CSV)
+cortex install --with-hooks        # add git hooks as a daemon-down fallback
+```
+
+After this you just code — the daemon keeps the index fresh on its own.
+
+### `cortex uninstall`
+Reverts the repo wiring: removes the MCP registration from hosts, the agent-rules
+block, git hooks and the daemon registration. `--purge` also removes `.cortex/`.
+
+```bash
+cortex uninstall
+cortex uninstall --purge
+```
+
+### `cortex init`
+Low-level primitive. Prepares the workspace — creates `.cortex/` in the target
+repo (`workspace.json`, `file-manifest.json`). Idempotent. Prefer
+`cortex install` for full wiring.
+
+```bash
+cortex init
+```
+
+### `cortex index`
+Full rebuild of the file manifest and the SQLite + FTS structural index
+(`.cortex/index.db`). Run once after `init`, and again whenever you want a
+clean rebuild.
+
+```bash
+cortex index
+```
+
+### `cortex sync`
+Incremental update — only the changed delta. Cheaper than `index`. Fails with
+`E_INDEX_MISSING` if no manifest exists yet (run `cortex index` first).
+
+```bash
+cortex sync
+cortex sync --since HEAD~1   # git-delta: skip the full filesystem walk
+cortex sync --full           # force a full walk (ignore git-delta/dirty-flag)
+```
+
+| Flag | Meaning |
+|---|---|
+| `--since <ref>` | Resolve the delta via `git diff` since `<ref>`, skipping the full walk. Falls back to a full walk if git is absent or the ref is invalid. |
+| `--full` | Force a full filesystem walk, ignoring git-delta and the dirty-flag. |
+
+Output reports the path taken — `via full` · `via git-delta` · `via dirty-flag`
+· `via watch` (explicit-paths delta from the daemon) — and, when a dirty-flag
+was consumed, the number of pending paths.
+
+### `cortex status`
+Health and staleness of the local index.
+
+```bash
+cortex status
+cortex status --path src/billing
+```
+
+| Flag | Meaning |
+|---|---|
+| `--path <path>` | Inspect a subpath / workspace. |
+
+Key output: `staleness` (`fresh` · `stale` · `unknown`), `pending_files_count`,
+`coverage_by_language`, `storage_backend`, `schema_version`.
+
+---
+
+## Retrieval
+
+### `cortex search <query>`
+Lexical + structural symbol search over the local FTS index.
+
+```bash
+cortex search "calculateTotal"
+cortex search "calculate" --scope src/ --kind function --limit 5
+```
+
+| Flag | Meaning |
+|---|---|
+| `--scope <path>` | Restrict candidates to a path/dir. |
+| `--kind <kind>` | Restrict by symbol kind (`function`, `class`, …). |
+| `--limit <n>` | Max candidates. |
+
+Each candidate: `id`, `kind`, `name`, `path`, `start_line`, `end_line`,
+`score`, `match_reason`. `start_line`/`end_line` distinguish same-named symbols
+in one file and let you jump straight to them.
+
+### `cortex files`
+List the indexed structure of the workspace.
+
+```bash
+cortex files
+cortex files --pattern src --max-depth 3
+```
+
+| Flag | Meaning |
+|---|---|
+| `--pattern <pattern>` | Substring filter on paths. |
+| `--max-depth <n>` | Max path depth. |
+
+Output: a `tree` of paths with `symbol_counts`.
+
+### `cortex explore <target>`
+Composite structural context for a symbol, file, or topic — central symbols,
+imports, relevant files, and line-ranged snippets in one shot. This is the
+go-to tool for "understand this area".
+
+```bash
+cortex explore src/mcp/engine.ts --mode file
+cortex explore calculateTotal --mode symbol --depth 2
+cortex explore "billing" --mode topic --include-tests
+```
+
+| Flag | Meaning |
+|---|---|
+| `--mode <mode>` | `symbol` · `file` · `topic`. |
+| `--depth <n>` | Exploration depth (short). |
+| `--include-tests` | Include test files when relevant. |
+| `--budget <n>` | Internal candidate budget. |
+
+### `cortex trace --from <target>`
+Likely flow between indexed points, with explicit uncertainty.
+
+```bash
+cortex trace --from calculateTotal
+cortex trace --from calculateTotal --to renderInvoice --direction forward --max-hops 4
+```
+
+| Flag | Meaning |
+|---|---|
+| `--from <target>` | **Required.** Source symbol or file. |
+| `--to <target>` | Destination symbol or file. |
+| `--direction <dir>` | `forward` · `backward` · `both`. |
+| `--max-hops <n>` | Max hops. |
+
+Output: `paths`, `files`, `symbols`, `uncertainty_points`.
+
+### `cortex impact <target>`
+Likely blast radius of changing a symbol or file.
+
+```bash
+cortex impact calculateTotal --direction dependents
+cortex impact src/billing.ts --depth 2 --include-tests --summary-only
+```
+
+| Flag | Meaning |
+|---|---|
+| `--direction <dir>` | `dependents` · `dependencies` · `both`. |
+| `--depth <n>` | Max impact depth. |
+| `--include-tests` | Include test files. |
+| `--summary-only` | Return aggregates / risk summary only. |
+
+Output: `direct_affected`, `indirect_affected`, `files`, `tests`,
+`risk_summary`.
+
+### `cortex diff-impact`
+Likely impact of the current Git diff — changed symbols and affected tests.
+
+```bash
+cortex diff-impact --scope all
+cortex diff-impact --scope compare --base-ref main
+```
+
+| Flag | Meaning |
+|---|---|
+| `--scope <scope>` | `unstaged` · `staged` · `all` · `compare`. |
+| `--base-ref <ref>` | Git base when `--scope compare`. |
+
+Output: `changed_files`, `changed_symbols`, `affected_areas`,
+`affected_tests`, `risk_summary`.
+
+---
+
+## Context packing
+
+### `cortex pack-context`
+Pack short, useful context for the model. May return a `retrieve_handle` when
+the budget forces truncation.
+
+```bash
+cortex pack-context \
+  --sources utils.ts,src/billing.ts \
+  --goal "understand the refactor" \
+  --token-budget 400 \
+  --style balanced
+```
+
+| Flag | Meaning |
+|---|---|
+| `--sources <list>` | **Required.** CSV of paths, symbols, or handles. |
+| `--goal <text>` | **Required.** What the pack is for. |
+| `--token-budget <n>` | **Required.** Approx. max pack size. |
+| `--style <style>` | `brief` · `balanced` · `deep`. |
+
+### `cortex retrieve <handle>`
+Rehydrate the original content stored behind a `retrieve_handle`. Confined to
+the same workspace; handle format is `rh_<16 hex>`.
+
+```bash
+cortex retrieve rh_0123456789abcdef
+```
+
+---
+
+## MCP server
+
+### `cortex serve --mcp`
+Start the stdio MCP server. Exposes nine tools (`search`, `explore`, `trace`,
+`impact`, `diff_impact`, `files`, `pack_context`, `retrieve`, `status`).
+
+```bash
+cortex serve --mcp
+cortex serve --mcp --no-auto-sync   # disable auto-sync before tool calls
+```
+
+| Flag | Meaning |
+|---|---|
+| `--mcp` | **Required.** Start the stdio MCP server. |
+| `--no-auto-sync` | Disable the automatic incremental sync before each tool call. |
+
+By default the server consumes the dirty-flag and runs an incremental sync
+before answering, so the agent always queries a fresh index. Sync errors never
+crash the server — the result degrades to `parcial` + `staleness_hint`.
+
+Configure your agent/IDE (see [README → Use it as an MCP server](README.md#use-it-as-an-mcp-server)).
+
+---
+
+## Auto-sync daemon
+
+The daemon watches the filesystem (FSEvents/inotify) and keeps the index fresh
+in real time — no manual command, editor-agnostic. A single user daemon watches
+**all** repos registered via `cortex install`. Bursts of saves or branch switches
+are coalesced into a single incremental sync (explicit-paths delta, never a full
+walk).
+
+```bash
+cortex daemon status     # watched workspaces and each one's last sync
+cortex daemon start      # run in background (the service usually does this)
+cortex daemon stop
+cortex daemon restart
+cortex daemon reload     # reload the registry without restarting (after a new install)
+```
+
+`cortex install` already installs and starts the user service (launchd on macOS,
+systemd --user on Linux) with login auto-start. To manage the service directly:
+
+```bash
+cortex daemon install-service
+cortex daemon uninstall-service
+```
+
+If the daemon is stopped the index does **not** go stale: the optional git hooks
+and the MCP server's lazy auto-sync remain as a safety net.
+
+---
+
+## Low-friction sync
+
+Keep the index fresh without thinking about it: the daemon syncs on each event;
+as a fallback, git hooks mark what changed and the MCP server syncs lazily before
+answering. Nothing blocks your commit.
+
+### `cortex hook install` / `cortex hook uninstall`
+Install (or remove) git hooks (`post-commit`, `post-merge`, `post-checkout`)
+that **only mark the index dirty** — they never run a sync, so commits never
+stall. The binary path is embedded in the script (works in GUI git clients and
+CI). Idempotent; pre-existing hooks are preserved (cortex writes a delimited
+block).
+
+```bash
+cortex hook install
+cortex hook uninstall
+```
+
+### `cortex agent-rules install` / `cortex agent-rules uninstall`
+Write (or remove) a delimited Atlas Cortex block in `CLAUDE.md` and `AGENTS.md`,
+instructing agents to use the cortex tools and trust the auto-sync. Append-only
+and idempotent — your existing content is never overwritten.
+
+```bash
+cortex agent-rules install
+cortex agent-rules uninstall
+```
+
+### `cortex mark-dirty`
+Internal command invoked by the installed hooks. Marks the index dirty from a
+git event; if the git delta cannot be resolved, marks `force_full` so the next
+sync falls back to a full walk. You normally never call this by hand.
+
+```bash
+cortex mark-dirty --since HEAD~1
+```
+
+---
+
+## Development & release
+
+Run from the monorepo root.
+
+| Command | Purpose |
+|---|---|
+| `npm run build` | Compile `packages/cortex`. |
+| `npm run typecheck` | `tsc --noEmit`. |
+| `npm run test` | Unit tests (vitest). |
+| `npm run lint` | ESLint. |
+| `npm run validate` | typecheck + test + lint + build. |
+| `npm run benchmark:mvp` | Internal benchmark → `.atlas/benchmark/latest/`. |
+| `npm run smoke:package` | Install & exercise the tarball in a clean dir. |
+| `npm run homologate` | Validate external local repos (real retrieval probe). |
+| `npm run release:check` | Assert version consistency across root/runtime/plugin. |
+
+Tags `v*` run CI, tarball smoke, npm publish with provenance, and a GitHub
+Release with `SHA256SUMS`. The tag version must match root, runtime and plugin.
+
+---
+
+## Recovery cheatsheet
+
+| Symptom | Fix |
+|---|---|
+| Index stale | `cortex sync` |
+| Index missing/corrupted | delete `.cortex/index.db`, then `cortex index` |
+| Invalid workspace | keep code, delete `.cortex/`, then `cortex init` + `cortex index` |
+| Corrupted handle | re-pack with `cortex pack-context` (don't edit `.cortex/packed-handles`) |
+
+> Project files are never modified by recovery — only `.cortex/` is touched.
