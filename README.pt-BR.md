@@ -55,24 +55,22 @@ npx atlas-cortex init
 
 ## Início rápido
 
-Três passos levam de um repo frio a respostas úteis.
+Um comando fia o repo de ponta a ponta — depois é só codar.
 
 ```bash
-# 1. Preparar o workspace (cria a pasta local .cortex/)
-cortex init
+# Fia o repo: workspace + índice + MCP nos seus hosts + daemon de auto-sync
+cortex install
 
-# 2. Construir o índice (arquivos, símbolos, imports, relações)
-cortex index
-
-# 3. Fazer perguntas
+# Fazer perguntas
 cortex search "calculateTotal"            # achar um símbolo rápido
 cortex explore src/billing.ts --mode file # contexto estruturado de um arquivo
 ```
 
-Esse é o ciclo central. Após mudar código, rode `cortex sync` (incremental) e
-veja `cortex status` para staleness. **Todo o resto — `trace`, `impact`,
-`diff-impact`, `pack-context`, `retrieve` — está no
-[COMMANDS.pt-BR.md](COMMANDS.pt-BR.md) com flags e exemplos completos.**
+Após o `install`, o daemon de auto-sync mantém o índice fresco a cada save — sem
+`sync` manual. Veja `cortex daemon status` para o que está sendo observado e
+`cortex status` para staleness. **Todo o resto — `trace`, `impact`,
+`diff-impact`, `pack-context`, `retrieve`, mais os controles de `daemon` — está
+no [COMMANDS.pt-BR.md](COMMANDS.pt-BR.md) com flags e exemplos completos.**
 
 ---
 

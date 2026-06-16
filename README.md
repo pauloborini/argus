@@ -55,23 +55,21 @@ npx atlas-cortex init
 
 ## Quickstart
 
-Three steps take you from a cold repo to useful answers.
+One command wires the repo end to end, then you just code.
 
 ```bash
-# 1. Prepare the workspace (creates a local .cortex/ folder)
-cortex init
+# Wire the repo: workspace + index + MCP in your hosts + auto-sync daemon
+cortex install
 
-# 2. Build the index (files, symbols, imports, relations)
-cortex index
-
-# 3. Ask questions
+# Ask questions
 cortex search "calculateTotal"            # find a symbol fast
 cortex explore src/billing.ts --mode file # structured context for a file
 ```
 
-That's the core loop. After code changes, run `cortex sync` (incremental) and
-check `cortex status` for staleness. **Every other command — `trace`,
-`impact`, `diff-impact`, `pack-context`, `retrieve` — lives in
+After `install`, the auto-sync daemon keeps the index fresh on every save — no
+manual `sync`. Check `cortex daemon status` to see what's being watched, and
+`cortex status` for staleness. **Every other command — `trace`, `impact`,
+`diff-impact`, `pack-context`, `retrieve`, plus the `daemon` controls — lives in
 [COMMANDS.md](COMMANDS.md) with full flags and examples.**
 
 ---

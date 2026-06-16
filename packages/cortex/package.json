@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@parcel/watcher": "^2.5.6",
     "better-sqlite3": "^11.10.0",
     "commander": "^13.1.0",
     "ignore": "^7.0.5",
@@ -57,6 +58,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
+    "atlas-cortex": "^1.0.0",
     "eslint": "^9.28.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.33.1",

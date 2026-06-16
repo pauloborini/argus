@@ -16,7 +16,37 @@ import { runServeMcp } from "./commands/serve.js";
 import { runMarkDirty } from "./commands/mark-dirty.js";
 import { runHookInstall, runHookUninstall } from "./commands/hooks.js";
 import { runAgentRulesInstall, runAgentRulesUninstall } from "./commands/agent-rules.js";
+import { runInstall, runUninstall } from "./commands/install.js";
+import {
+  runDaemon,
+  runDaemonStart,
+  runDaemonStop,
+  runDaemonRestart,
+  runDaemonStatus,
+  runDaemonReload,
+  runDaemonInstallService,
+  runDaemonUninstallService,
+} from "./commands/daemon.js";
+import { SUPPORTED_HOSTS, type McpHostId } from "./install/mcp-hosts.js";
 import { CORTEX_VERSION } from "./version.js";
+
+/** Parse e valida a flag `--hosts a,b`; vazio → todos os suportados. */
+function parseHosts(value?: string): McpHostId[] | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const ids = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const invalid = ids.filter((id) => !SUPPORTED_HOSTS.includes(id as McpHostId));
+  if (invalid.length > 0) {
+    throw new Error(
+      `Host(s) MCP não suportado(s): ${invalid.join(", ")}. Suportados: ${SUPPORTED_HOSTS.join(", ")}.`,
+    );
+  }
+  return ids as McpHostId[];
+}
 
 const program = new Command();
 
@@ -53,9 +83,43 @@ program
 
 program
   .command("init")
-  .description("Preparar workspace e metadados locais em .cortex/")
+  .description("Preparar workspace e metadados locais em .cortex/ (use 'install' para fiação completa)")
   .action(() => {
     finish(runInit());
+  });
+
+program
+  .command("install")
+  .description("Fiação zero-toque do repo: workspace + índice + MCP + daemon (um comando)")
+  .option("--hosts <lista>", "Hosts MCP a registrar (CSV); default: todos suportados")
+  .option("--no-daemon", "Não registrar/subir o daemon (apenas índice + MCP)")
+  .option("--no-mcp", "Não registrar MCP nos hosts")
+  .option("--with-hooks", "Instalar hooks git como fallback de daemon down")
+  .action(
+    async (opts: {
+      hosts?: string;
+      daemon?: boolean;
+      mcp?: boolean;
+      withHooks?: boolean;
+    }) => {
+      finish(
+        await runInstall({
+          hosts: parseHosts(opts.hosts),
+          noDaemon: opts.daemon === false,
+          noMcp: opts.mcp === false,
+          withHooks: opts.withHooks === true,
+        }),
+      );
+    },
+  );
+
+program
+  .command("uninstall")
+  .description("Reverter a fiação do repo (MCP, agent-rules, hooks, daemon)")
+  .option("--hosts <lista>", "Hosts MCP a limpar (CSV); default: todos suportados")
+  .option("--purge", "Remover também o diretório .cortex/ (índice local)")
+  .action((opts: { hosts?: string; purge?: boolean }) => {
+    finish(runUninstall({ hosts: parseHosts(opts.hosts), purge: opts.purge === true }));
   });
 
 program
@@ -221,6 +285,56 @@ program
   .option("--since <ref>", "Ref git base do evento")
   .action((opts: { since?: string }) => {
     finish(runMarkDirty({ since: opts.since }));
+  });
+
+const daemon = program
+  .command("daemon")
+  .description("Daemon de auto-sync: observa o FS e mantém o índice fresco")
+  .action(async () => {
+    // `cortex daemon` sem subcomando roda em foreground (alvo do serviço).
+    finish(await runDaemon());
+  });
+daemon
+  .command("start")
+  .description("Subir o daemon em background")
+  .action(async () => {
+    finish(await runDaemonStart());
+  });
+daemon
+  .command("stop")
+  .description("Parar o daemon")
+  .action(() => {
+    finish(runDaemonStop());
+  });
+daemon
+  .command("restart")
+  .description("Reiniciar o daemon")
+  .action(async () => {
+    finish(await runDaemonRestart());
+  });
+daemon
+  .command("status")
+  .description("Saúde do daemon e workspaces observados")
+  .action(() => {
+    finish(runDaemonStatus());
+  });
+daemon
+  .command("reload")
+  .description("Recarregar o registry no daemon vivo (sem reiniciar)")
+  .action(() => {
+    finish(runDaemonReload());
+  });
+daemon
+  .command("install-service")
+  .description("Instalar o serviço de usuário (launchd/systemd) com auto-start")
+  .action(() => {
+    finish(runDaemonInstallService());
+  });
+daemon
+  .command("uninstall-service")
+  .description("Remover o serviço de usuário do daemon")
+  .action(() => {
+    finish(runDaemonUninstallService());
   });
 
 const hook = program.command("hook").description("Gerenciar hooks git de baixo atrito");

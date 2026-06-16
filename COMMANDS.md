@@ -21,10 +21,35 @@ Without a global install, prefix any command with `npx atlas-cortex …`.
 
 ## Lifecycle
 
+### `cortex install` ⭐ (entry-point command)
+Zero-touch wiring of a repository, in **one command**: prepares the workspace,
+builds the index, writes the agent rules (CLAUDE.md/AGENTS.md), registers the
+MCP server in detected hosts (Claude Code, Cursor) and registers the repo with
+the auto-sync daemon (with an auto-start user service). Idempotent.
+
+```bash
+cortex install                     # full wiring
+cortex install --no-daemon         # index + MCP only (no daemon/service)
+cortex install --no-mcp            # don't register MCP in hosts
+cortex install --hosts claude-code # restrict MCP hosts (CSV)
+cortex install --with-hooks        # add git hooks as a daemon-down fallback
+```
+
+After this you just code — the daemon keeps the index fresh on its own.
+
+### `cortex uninstall`
+Reverts the repo wiring: removes the MCP registration from hosts, the agent-rules
+block, git hooks and the daemon registration. `--purge` also removes `.cortex/`.
+
+```bash
+cortex uninstall
+cortex uninstall --purge
+```
+
 ### `cortex init`
-Prepare the workspace. Creates `.cortex/` in the target repo
-(`workspace.json`, `file-manifest.json`). Idempotent — re-running warns instead
-of failing.
+Low-level primitive. Prepares the workspace — creates `.cortex/` in the target
+repo (`workspace.json`, `file-manifest.json`). Idempotent. Prefer
+`cortex install` for full wiring.
 
 ```bash
 cortex init
@@ -55,7 +80,8 @@ cortex sync --full           # force a full walk (ignore git-delta/dirty-flag)
 | `--full` | Force a full filesystem walk, ignoring git-delta and the dirty-flag. |
 
 Output reports the path taken — `via full` · `via git-delta` · `via dirty-flag`
-— and, when a dirty-flag was consumed, the number of pending paths.
+· `via watch` (explicit-paths delta from the daemon) — and, when a dirty-flag
+was consumed, the number of pending paths.
 
 ### `cortex status`
 Health and staleness of the local index.
@@ -235,10 +261,40 @@ Configure your agent/IDE (see [README → Use it as an MCP server](README.md#use
 
 ---
 
+## Auto-sync daemon
+
+The daemon watches the filesystem (FSEvents/inotify) and keeps the index fresh
+in real time — no manual command, editor-agnostic. A single user daemon watches
+**all** repos registered via `cortex install`. Bursts of saves or branch switches
+are coalesced into a single incremental sync (explicit-paths delta, never a full
+walk).
+
+```bash
+cortex daemon status     # watched workspaces and each one's last sync
+cortex daemon start      # run in background (the service usually does this)
+cortex daemon stop
+cortex daemon restart
+cortex daemon reload     # reload the registry without restarting (after a new install)
+```
+
+`cortex install` already installs and starts the user service (launchd on macOS,
+systemd --user on Linux) with login auto-start. To manage the service directly:
+
+```bash
+cortex daemon install-service
+cortex daemon uninstall-service
+```
+
+If the daemon is stopped the index does **not** go stale: the optional git hooks
+and the MCP server's lazy auto-sync remain as a safety net.
+
+---
+
 ## Low-friction sync
 
-Keep the index fresh without thinking about it: git hooks mark what changed, and
-the MCP server syncs lazily before answering. Nothing blocks your commit.
+Keep the index fresh without thinking about it: the daemon syncs on each event;
+as a fallback, git hooks mark what changed and the MCP server syncs lazily before
+answering. Nothing blocks your commit.
 
 ### `cortex hook install` / `cortex hook uninstall`
 Install (or remove) git hooks (`post-commit`, `post-merge`, `post-checkout`)
