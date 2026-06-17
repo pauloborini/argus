@@ -1028,23 +1028,36 @@ function buildSymbolNode(entry: FileStructuralEntry, symbol: ExtractedSymbol): T
   };
 }
 
-function findFilesBySymbolName(
-  index: StructuralIndex,
-  symbolName: string,
-  includeTests: boolean,
-): Array<{ entry: FileStructuralEntry; symbol: ExtractedSymbol }> {
-  const matches: Array<{ entry: FileStructuralEntry; symbol: ExtractedSymbol }> = [];
+type SymbolMatch = { entry: FileStructuralEntry; symbol: ExtractedSymbol };
+type SymbolNameIndex = Map<string, SymbolMatch[]>;
+
+/**
+ * Índice name→ocorrências construído **uma vez** por travessia. Antes,
+ * `findFilesBySymbolName` varria index.files×símbolos a cada call-edge resolvida
+ * (O(edges×arquivos×símbolos)); com o índice, cada resolução é O(1) e a
+ * construção é O(arquivos×símbolos) uma só vez. Mesma ordem (arquivo→símbolo) e
+ * mesmo filtro de testes do scan anterior.
+ */
+function buildSymbolNameIndex(index: StructuralIndex, includeTests: boolean): SymbolNameIndex {
+  const map: SymbolNameIndex = new Map();
   for (const entry of index.files) {
     if (!includeTests && fileMatchesTests(entry.relative_path)) {
       continue;
     }
     for (const symbol of entry.symbols) {
-      if (symbol.name === symbolName) {
-        matches.push({ entry, symbol });
+      const list = map.get(symbol.name);
+      if (list) {
+        list.push({ entry, symbol });
+      } else {
+        map.set(symbol.name, [{ entry, symbol }]);
       }
     }
   }
-  return matches;
+  return map;
+}
+
+function findFilesBySymbolName(symbolIndex: SymbolNameIndex, symbolName: string): SymbolMatch[] {
+  return symbolIndex.get(symbolName) ?? [];
 }
 
 function callTargetName(rawTarget: string): string {
@@ -1070,12 +1083,11 @@ function findOwningSymbol(
 }
 
 function resolveCallTargets(
-  index: StructuralIndex,
+  symbolIndex: SymbolNameIndex,
   source: FileStructuralEntry,
   rawTarget: string,
-  includeTests: boolean,
 ): {
-  matches: Array<{ entry: FileStructuralEntry; symbol: ExtractedSymbol }>;
+  matches: SymbolMatch[];
   resolution: "local" | "import" | "global" | "unresolved";
 } {
   const target = callTargetName(rawTarget);
@@ -1095,14 +1107,14 @@ function resolveCallTargets(
       )
       .map((item) => item.resolved_path!),
   );
-  const imported = findFilesBySymbolName(index, target, includeTests).filter((match) =>
+  const imported = findFilesBySymbolName(symbolIndex, target).filter((match) =>
     importedPaths.has(match.entry.relative_path),
   );
   if (imported.length > 0) {
     return { matches: imported, resolution: "import" };
   }
 
-  const global = findFilesBySymbolName(index, target, includeTests);
+  const global = findFilesBySymbolName(symbolIndex, target);
   return {
     matches: global,
     resolution: global.length > 0 ? "global" : "unresolved",
@@ -1213,6 +1225,9 @@ function buildTraceAdjacency(
     adjacency.set(edge.from.id, current);
   };
 
+  // Índice name→ocorrências construído uma vez: elimina o scan O(arquivos×
+  // símbolos) que ocorria por call-edge/herança resolvida.
+  const symbolIndex = buildSymbolNameIndex(index, includeTests);
   const fileNodes = new Map<string, TraceNode>();
 
   for (const entry of index.files) {
@@ -1251,7 +1266,7 @@ function buildTraceAdjacency(
 
     for (const edge of entry.edges) {
       if (edge.kind === "calls") {
-        const resolved = resolveCallTargets(index, entry, edge.to, includeTests);
+        const resolved = resolveCallTargets(symbolIndex, entry, edge.to);
         const caller = edge.from_symbol
           ? entry.symbols.find((symbol) => symbol.name === edge.from_symbol) ?? null
           : findOwningSymbol(entry, edge.line);
@@ -1289,7 +1304,7 @@ function buildTraceAdjacency(
           continue;
         }
         const originNode = buildSymbolNode(entry, originSymbol);
-        const targetMatches = findFilesBySymbolName(index, edge.to, includeTests);
+        const targetMatches = findFilesBySymbolName(symbolIndex, edge.to);
         for (const match of targetMatches) {
           const targetNode = buildSymbolNode(match.entry, match.symbol);
           const uncertain =
@@ -1316,6 +1331,107 @@ function buildTraceAdjacency(
   }
 
   return adjacency;
+}
+
+/**
+ * PageRank **personalizado** sobre a adjacency de trace. O vetor de
+ * teleporte concentra massa nos `seeds` (o alvo da query), então o score
+ * mede centralidade *relativa ao ponto de partida*: nós estruturalmente
+ * próximos do seed E bem conectados pontuam alto. Usado para ordenar o
+ * blast radius do impact antes do corte — o slice passa a preservar os nós
+ * mais centrais em vez da ordem arbitrária de descoberta do BFS.
+ *
+ * Grafo quase-simétrico (toda relação tem inversa: calls/called_by,
+ * imports/imported_by, declares/defined_in), então o PR converge para uma
+ * centralidade de proximidade ponderada. Iteração de potência com damping
+ * 0.85, massa dangling redistribuída pelo vetor de personalização.
+ */
+function personalizedPageRank(
+  adjacency: Map<string, TraceEdgeStep[]>,
+  seeds: string[],
+  options?: { damping?: number; iterations?: number; tolerance?: number },
+): Map<string, number> {
+  const damping = options?.damping ?? 0.85;
+  const maxIterations = options?.iterations ?? 30;
+  const tolerance = options?.tolerance ?? 1e-6;
+
+  // Conjunto de nós = união de origens (chaves) e destinos de cada aresta.
+  const nodeIds = new Set<string>();
+  const outNeighbors = new Map<string, string[]>();
+  for (const [from, edges] of adjacency) {
+    nodeIds.add(from);
+    const targets = outNeighbors.get(from) ?? [];
+    for (const edge of edges) {
+      nodeIds.add(edge.to.id);
+      targets.push(edge.to.id);
+    }
+    outNeighbors.set(from, targets);
+  }
+
+  if (nodeIds.size === 0) {
+    return new Map();
+  }
+
+  // Personalização: massa uniforme nos seeds presentes no grafo; se nenhum
+  // seed pertence ao grafo, cai para teleporte uniforme (PR global).
+  const seedSet = seeds.filter((id) => nodeIds.has(id));
+  const personalization = new Map<string, number>();
+  if (seedSet.length > 0) {
+    const mass = 1 / seedSet.length;
+    for (const id of seedSet) {
+      personalization.set(id, mass);
+    }
+  } else {
+    const mass = 1 / nodeIds.size;
+    for (const id of nodeIds) {
+      personalization.set(id, mass);
+    }
+  }
+
+  let pr = new Map<string, number>();
+  for (const id of nodeIds) {
+    pr.set(id, personalization.get(id) ?? 0);
+  }
+
+  for (let iter = 0; iter < maxIterations; iter += 1) {
+    const next = new Map<string, number>();
+    // Massa dangling (nós sem saída) redistribuída pela personalização.
+    let danglingMass = 0;
+    for (const id of nodeIds) {
+      const out = outNeighbors.get(id);
+      if (!out || out.length === 0) {
+        danglingMass += pr.get(id) ?? 0;
+      }
+    }
+    for (const id of nodeIds) {
+      const teleport = (1 - damping) * (personalization.get(id) ?? 0);
+      const dangling = damping * danglingMass * (personalization.get(id) ?? 0);
+      next.set(id, teleport + dangling);
+    }
+    for (const [id, out] of outNeighbors) {
+      if (out.length === 0) {
+        continue;
+      }
+      const share = (damping * (pr.get(id) ?? 0)) / out.length;
+      if (share === 0) {
+        continue;
+      }
+      for (const target of out) {
+        next.set(target, (next.get(target) ?? 0) + share);
+      }
+    }
+
+    let delta = 0;
+    for (const id of nodeIds) {
+      delta += Math.abs((next.get(id) ?? 0) - (pr.get(id) ?? 0));
+    }
+    pr = next;
+    if (delta < tolerance) {
+      break;
+    }
+  }
+
+  return pr;
 }
 
 function bfsTracePath(
@@ -1647,8 +1763,8 @@ function buildImpactStub(
   const startNode = resolved.node!;
   const queue: Array<{ node: TraceNode; depth: number; via?: string }> = [{ node: startNode, depth: 0 }];
   const visited = new Set<string>([startNode.id]);
-  const directAffected: ImpactRef[] = [];
-  const indirectAffected: ImpactRef[] = [];
+  const directAffected: Array<{ id: string; ref: ImpactRef }> = [];
+  const indirectAffected: Array<{ id: string; ref: ImpactRef }> = [];
   const uncertaintyPoints: TraceUncertaintyPoint[] = [...collectTraceUncertainty([], resolved.limitations)];
 
   while (queue.length > 0) {
@@ -1672,9 +1788,9 @@ function buildImpactStub(
       const nextDepth = current.depth + 1;
       const ref = impactRefFromNode(edge.to, nextDepth, edge.relation);
       if (nextDepth === 1) {
-        directAffected.push(ref);
+        directAffected.push({ id: edge.to.id, ref });
       } else {
-        indirectAffected.push(ref);
+        indirectAffected.push({ id: edge.to.id, ref });
       }
       if (edge.uncertain) {
         uncertaintyPoints.push({
@@ -1689,8 +1805,23 @@ function buildImpactStub(
     }
   }
 
-  const directUnique = uniqueByKey(directAffected, (item) => `${item.node_type}:${item.path}:${item.name}`).slice(0, 50);
-  const indirectUnique = uniqueByKey(indirectAffected, (item) => `${item.node_type}:${item.path}:${item.name}`).slice(0, 100);
+  // PageRank personalizado no alvo: ordena o blast radius por centralidade
+  // relativa ao seed antes do corte, então o slice preserva os afetados mais
+  // estruturalmente relevantes em vez da ordem de descoberta do BFS. Empate
+  // resolvido por profundidade (mais raso primeiro) e ordem de descoberta.
+  const pageRank = personalizedPageRank(adjacency, [startNode.id]);
+  const rankRefs = (items: Array<{ id: string; ref: ImpactRef }>): ImpactRef[] =>
+    items
+      .map((item, index) => ({ item, index, score: pageRank.get(item.id) ?? 0 }))
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          left.item.ref.depth - right.item.ref.depth ||
+          left.index - right.index,
+      )
+      .map((scored) => scored.item.ref);
+  const directUnique = uniqueByKey(rankRefs(directAffected), (item) => `${item.node_type}:${item.path}:${item.name}`).slice(0, 50);
+  const indirectUnique = uniqueByKey(rankRefs(indirectAffected), (item) => `${item.node_type}:${item.path}:${item.name}`).slice(0, 100);
   const allFiles = uniqueByKey(
     [startNode.path, ...directUnique.map((item) => item.path), ...indirectUnique.map((item) => item.path)],
     (item) => item,
@@ -2468,6 +2599,32 @@ function buildPackContextStub(
       segments.push(segment);
     }
     sourceReversibility = compareReversibility(sourceReversibility, result.reversibility);
+  }
+
+  // Item 14: reordena segmentos por PageRank personalizado nas fontes da
+  // query antes do preenchimento guloso do budget, então o material mais
+  // central sobrevive ao corte. Seeds = nós-arquivo das próprias fontes do
+  // pack. Fallback silencioso para ordem original se o grafo estiver
+  // indisponível/vazio (ex.: fontes só de retrieve_handle).
+  if (semanticStub.structuralIndex && segments.length > 1) {
+    const adjacency = buildTraceAdjacency(semanticStub.structuralIndex, true);
+    if (adjacency.size > 0) {
+      const seedIds = uniqueByKey(
+        segments.flatMap((segment) => segment.originRefs.map((ref) => `file:${ref.path}`)),
+        (id) => id,
+      );
+      const pageRank = personalizedPageRank(adjacency, seedIds);
+      const scoreSegment = (segment: PackSegment): number =>
+        segment.originRefs.reduce(
+          (max, ref) => Math.max(max, pageRank.get(`file:${ref.path}`) ?? 0),
+          0,
+        );
+      const ranked = segments
+        .map((segment, index) => ({ segment, index, score: scoreSegment(segment) }))
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .map((scored) => scored.segment);
+      segments.splice(0, segments.length, ...ranked);
+    }
   }
 
   if (segments.length === 0) {

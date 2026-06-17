@@ -1,6 +1,12 @@
 import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
-import { endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+import { enclosingSymbolName, endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+
+const JAVA_CALL_DEFINERS: ReadonlySet<string> = new Set([
+  "method_declaration",
+  "constructor_declaration",
+  "compact_constructor_declaration",
+]);
 
 export function extractJava(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
@@ -74,7 +80,13 @@ export function extractJava(root: SyntaxNode): FileExtractionResult {
       case "method_invocation": {
         const name = node.childForFieldName("name")?.text;
         if (name) {
-          edges.push({ kind: "calls", to: name, line: startLine(node) });
+          const from = enclosingSymbolName(node, JAVA_CALL_DEFINERS);
+          edges.push({
+            kind: "calls",
+            from_symbol: from ?? undefined,
+            to: name,
+            line: startLine(node),
+          });
         }
         break;
       }

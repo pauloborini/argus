@@ -55,6 +55,34 @@ function resolveTypeScriptImports(
   });
 }
 
+/**
+ * Resolve imports **relativos** de Dart (`import 'widgets/foo.dart'`). URIs
+ * `package:`/`dart:` não mapeiam para arquivo do workspace e ficam undefined.
+ * O source já traz a extensão `.dart`, então não há adivinhação de extensão.
+ */
+function resolveDartImportPath(
+  rootPath: string,
+  fromRelativePath: string,
+  importSource: string,
+): string | undefined {
+  if (importSource.startsWith("package:") || importSource.startsWith("dart:")) {
+    return undefined;
+  }
+  const candidate = normalize(join(dirname(join(rootPath, fromRelativePath)), importSource));
+  return existsSync(candidate) ? relative(rootPath, candidate) : undefined;
+}
+
+function resolveDartImports(
+  rootPath: string,
+  fromRelativePath: string,
+  imports: ExtractedImport[],
+): ExtractedImport[] {
+  return imports.map((entry) => {
+    const resolved_path = resolveDartImportPath(rootPath, fromRelativePath, entry.source);
+    return resolved_path ? { ...entry, resolved_path } : entry;
+  });
+}
+
 function extractBySupportedLanguage(
   language: SupportedLanguage,
   rootNode: SyntaxNode,
@@ -149,7 +177,9 @@ export function extractFile(rootPath: string, relativePath: string): FileStructu
     const imports =
       detection.language === "typescript" || detection.language === "javascript"
         ? resolveTypeScriptImports(rootPath, relativePath, result.imports)
-        : result.imports;
+        : detection.language === "dart"
+          ? resolveDartImports(rootPath, relativePath, result.imports)
+          : result.imports;
     return {
       relative_path: relativePath,
       language: detection.language,
