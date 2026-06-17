@@ -21,13 +21,21 @@ Agents burn tokens and tool calls re-discovering a codebase: `grep`, open file,
 `grep` again, open three more. Atlas Cortex collapses that into single,
 structured answers backed by a local index.
 
-On the internal benchmark (real engineering tasks, 6 repos):
+On the internal benchmark (6 real-repo engineering tasks, **scripted — not a live
+agent**, tokens via a documented offline heuristic):
 
-| Metric | Baseline | Atlas Cortex |
-|---|---|---|
-| Tool calls | 24 | **14** (−41.7%) |
-| Approx. tokens | 76,209 | **8,940** (−88.1%) |
-| Average usefulness | — | **4.17 / 5** |
+| Metric (baseline → Atlas) | Result |
+|---|---|
+| Approx. tokens | **−92.7%** |
+| Tool calls | **−11.8%** |
+| Ground-truth answered (Atlas arm) | **6/6** |
+
+The token win is almost entirely the **index returning less content** (ranges +
+handles instead of whole files), not formatting — isolated, the format-only gain is
+**~0%**. It pays off most on **surgical lookups** (−97.8%) and less on **broad
+sweeps** (−55.7%), where an agent reads many files regardless. This is an **internal
+scripted upper bound** until a live-agent run lands; full method and per-task numbers
+in [`.atlas/benchmark/latest/SUMMARY.md`](.atlas/benchmark/latest/SUMMARY.md).
 
 It is **local-first**: nothing is indexed or sent to a remote service, and
 recovered context never leaves the workspace.

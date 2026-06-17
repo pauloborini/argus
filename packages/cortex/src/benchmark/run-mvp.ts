@@ -9,8 +9,17 @@ import { buildToolResponse } from "../mcp/tools/response.js";
 import { persistFullStructuralIndex } from "../storage/index-persistence.js";
 import { getManifestPath, initWorkspace } from "../workspace/workspace.js";
 
-type BenchmarkArm = "baseline" | "atlas-cortex";
+// ===========================================================================
+// Benchmark honesto (item 21). Três arms por task, ground-truth verificável,
+// tokens por heurística aproximada offline. NÃO mede agente vivo — os números
+// são "limite superior interno scriptado" (ver writeSummary §Metodologia).
+// ===========================================================================
+
+type BenchmarkArm = "baseline" | "formato-so" | "atlas";
+type TaskKind = "cirurgica" | "varredura";
 type ToolName = "status" | "files" | "search" | "explore" | "trace" | "impact" | "diff_impact" | "pack_context";
+
+const ARMS: BenchmarkArm[] = ["baseline", "formato-so", "atlas"];
 
 interface StepResult {
   title: string;
@@ -18,44 +27,68 @@ interface StepResult {
   ok: boolean;
 }
 
+/** Resposta correta da task, independente do arm. Cada arm é medido contra ela. */
+interface GroundTruth {
+  /** Arquivos que a resposta correta precisa citar (substring nas saídas reais). */
+  mustCite: string[];
+  /** Símbolo-âncora que deve aparecer na saída real do arm (opcional). */
+  mustContainSymbol?: string;
+}
+
 interface BenchmarkTaskResult {
   id: string;
   title: string;
+  kind: TaskKind;
   arm: BenchmarkArm;
   repo_label: string;
   repo_path: string;
-  snapshot_label: string;
   tool_calls: number;
-  tokens_aproximados: number;
+  tokens: number;
   tempo_ms: number;
-  utilidade_percebida: number;
-  arquivos_citados: string[];
-  resposta_final: string;
-  incertezas: string[];
-  observacoes: string[];
+  /** Mediu objetivamente se o arm surfou o ground-truth (mustCite + símbolo). */
+  correct: boolean;
+  cited_expected: number;
+  expected_total: number;
+  /** Medido (não fixado): o arm declarou incerteza/staleness na saída real? */
+  uncertainty_disclosed: boolean;
   steps: StepResult[];
+}
+
+interface ArmTotals {
+  tool_calls: number;
+  tokens: number;
+  correct_count: number;
+  uncertainty_disclosed_count: number;
+  task_count: number;
 }
 
 interface BenchmarkSummary {
   generated_at: string;
   output_dir: string;
-  criteria: {
-    min_tool_call_reduction_pct: number;
-    min_token_reduction_pct: number;
-    min_average_utility: number;
-    min_task_utility: number;
+  methodology: {
+    token_counter: string;
+    arms: string;
+    utility: string;
+    live_agent: string;
+    label: string;
   };
-  totals: {
-    baseline_tool_calls: number;
-    atlas_tool_calls: number;
+  totals: Record<BenchmarkArm, ArmTotals>;
+  gains: {
+    /** baseline → formato-so: ganho de pura serialização. */
+    format_token_pct: number;
+    /** formato-so → atlas: ganho incremental do índice estruturado. */
+    index_token_pct: number;
+    /** baseline → atlas: headline honesto (qualificado). */
+    headline_token_pct: number;
+    headline_tool_call_pct: number;
+  };
+  by_kind: Record<TaskKind, {
     baseline_tokens: number;
+    formato_so_tokens: number;
     atlas_tokens: number;
-    tool_call_reduction_pct: number;
-    token_reduction_pct: number;
-    baseline_average_utility: number;
-    atlas_average_utility: number;
-    minimum_atlas_utility: number;
-  };
+    headline_token_pct: number;
+    index_token_pct: number;
+  }>;
   pass: boolean;
   tasks: BenchmarkTaskResult[];
 }
@@ -72,25 +105,113 @@ interface TaskContext {
   };
 }
 
-interface TaskDefinition {
+interface AtlasStep {
+  title: string;
+  tool: ToolName;
+  args?: Record<string, unknown>;
+}
+
+interface TaskSpec {
   id: string;
   title: string;
-  runBaseline: (ctx: TaskContext) => BenchmarkTaskResult;
-  runAtlas: (ctx: TaskContext) => BenchmarkTaskResult;
+  kind: TaskKind;
+  groundTruth: GroundTruth;
+  /** Resolve a raiz do repo-alvo (corpus indexado). */
+  repo: (ctx: TaskContext) => { label: string; path: string };
+  /** Primeiro passo realista do agente sem índice. */
+  baselineGrep: string;
+  /** Arquivos que o agente abre por inteiro para confirmar a resposta. */
+  baselineFiles: string[];
+  /** Chamadas reais de tool no arm com índice (já em `concise`). */
+  atlasSteps: AtlasStep[];
+  /**
+   * Hook para o follow-up de agente vivo (loop real com/sem tools). Não
+   * implementado nesta fase — ver writeSummary §Metodologia.
+   */
+  runLiveAgent?: (ctx: TaskContext) => StepResult[];
 }
 
-const TOOL_CALL_REDUCTION_TARGET = 35;
-const TOKEN_REDUCTION_TARGET = 25;
-const MIN_AVERAGE_UTILITY = 4;
-const MIN_TASK_UTILITY = 3;
+// --- Tokenizer (aproximação documentada) -----------------------------------
 
-function estimateTokens(text: string): number {
-  // Code-aware (alinhado a approximateTokenCount do pack_context): conta tokens
-  // lexicais com piso chars/4 — mais honesto que chars/4 puro para output de
-  // código. Tokenizer real segue como melhoria futura (ver docs/ANALISE §5).
-  const lexical = text.match(/[A-Za-z0-9_$]+|[^\sA-Za-z0-9_$]/g)?.length ?? 0;
-  return Math.max(1, lexical, Math.ceil(text.length / 4));
+/**
+ * APROXIMAÇÃO DOCUMENTADA — NÃO é o tokenizer do modelo alvo. Conta subpalavras
+ * (quebra camelCase, dígitos e símbolos) tratando cada pontuação como 1 token.
+ * Determinística e offline; substitui o antigo `chars/4` (que subestimava código
+ * denso). Os números do benchmark são, portanto, estimativas — não contagem real.
+ */
+export function approxTokens(text: string): number {
+  if (!text) {
+    return 0;
+  }
+  const atoms = text.match(/[A-Za-z]+|[0-9]+|[^\sA-Za-z0-9]/g);
+  if (!atoms) {
+    return 0;
+  }
+  let count = 0;
+  for (const atom of atoms) {
+    if (/^[A-Za-z]+$/.test(atom)) {
+      // Quebra camelCase e divide runs longos (~6 chars/subtoken, como BPE faz).
+      const parts = atom.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/);
+      for (const part of parts) {
+        count += Math.max(1, Math.ceil(part.length / 6));
+      }
+    } else {
+      count += 1;
+    }
+  }
+  return count;
 }
+
+/**
+ * Re-serialização compacta usada no arm `formato-so`: mesma informação do
+ * baseline, sem o overhead de formato — remove prefixos de linha (`123:`),
+ * indentação à esquerda, espaços à direita e colapsa runs de linhas em branco.
+ * O payload de código é preservado. Isola o ganho de "não vazar tokens no
+ * formato" do ganho do índice.
+ */
+export function compactSerialize(text: string): string {
+  const lines = text.split("\n").map((line) =>
+    line
+      .replace(/^\s*\d+[:\t]/, "")
+      .replace(/^\s+/, "")
+      .replace(/\s+$/, ""),
+  );
+  const collapsed: string[] = [];
+  for (const line of lines) {
+    if (line === "" && collapsed[collapsed.length - 1] === "") {
+      continue;
+    }
+    collapsed.push(line);
+  }
+  return collapsed.join("\n").trim();
+}
+
+/**
+ * Avaliação objetiva contra ground-truth: substitui a `scoreUtility` antiga
+ * (auto-pontuada pelo autor). Mede se as saídas REAIS do arm contêm os arquivos
+ * esperados e o símbolo-âncora — não se a prosa escrita pelo autor passa em
+ * barras. Sem juiz, reprodutível.
+ */
+export function evaluateAnswer(
+  stepOutputs: string,
+  groundTruth: GroundTruth,
+): { correct: boolean; citedExpected: number; expectedTotal: number; uncertaintyDisclosed: boolean } {
+  const haystack = stepOutputs;
+  const citedExpected = groundTruth.mustCite.filter((path) => haystack.includes(path)).length;
+  const symbolOk = !groundTruth.mustContainSymbol || haystack.includes(groundTruth.mustContainSymbol);
+  const correct = citedExpected === groundTruth.mustCite.length && symbolOk;
+  const uncertaintyDisclosed = /\bstale\b|staleness|limitations|incomplet|parcial|pending|E_[A-Z]|W_[A-Z]/i.test(
+    haystack,
+  );
+  return {
+    correct,
+    citedExpected,
+    expectedTotal: groundTruth.mustCite.length,
+    uncertaintyDisclosed,
+  };
+}
+
+// --- Infra ------------------------------------------------------------------
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -127,94 +248,28 @@ function runShellStep(cwd: string, title: string, command: string): StepResult {
   const result = spawnSync("zsh", ["-lc", command], {
     cwd,
     encoding: "utf-8",
-    maxBuffer: 8 * 1024 * 1024,
+    maxBuffer: 16 * 1024 * 1024,
   });
   const output = [result.stdout, result.stderr].filter(Boolean).join("").trim();
-  return {
-    title,
-    output,
-    ok: result.status === 0,
-  };
+  return { title, output, ok: result.status === 0 };
+}
+
+/**
+ * Baseline realista: o agente abre o arquivo inteiro (não recola `sed`). O custo
+ * é o corpo completo, com um header `// FILE:` como um agente real recebe.
+ */
+function readFullFileStep(cwd: string, relPath: string): StepResult {
+  const abs = join(cwd, relPath);
+  if (!existsSync(abs)) {
+    return { title: `read ${relPath}`, output: `// FILE: ${relPath}\n(arquivo ausente no snapshot)`, ok: false };
+  }
+  const body = readFileSync(abs, "utf-8");
+  return { title: `read ${relPath}`, output: `// FILE: ${relPath}\n${body}`, ok: true };
 }
 
 function runToolStep(cwd: string, title: string, tool: ToolName, args?: Record<string, unknown>): StepResult {
-  const payload = buildToolResponse(tool, cwd, args);
-  return {
-    title,
-    output: JSON.stringify(payload, null, 2),
-    ok: payload.state !== "falha",
-  };
-}
-
-function extractJson(step: StepResult): Record<string, unknown> {
-  try {
-    return JSON.parse(step.output) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
-}
-
-function parseLinesMatching(output: string, matcher: RegExp): string[] {
-  return output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => matcher.test(line));
-}
-
-function buildResult(params: {
-  id: string;
-  title: string;
-  arm: BenchmarkArm;
-  repoLabel: string;
-  repoPath: string;
-  snapshotLabel: string;
-  startedAt: number;
-  steps: StepResult[];
-  refs: string[];
-  finalAnswer: string;
-  uncertainties: string[];
-  notes: string[];
-}): BenchmarkTaskResult {
-  const tokens = params.steps.reduce((sum, step) => sum + estimateTokens(step.output), 0);
-  const utility = scoreUtility(params.finalAnswer, params.refs, params.uncertainties, true);
-
-  return {
-    id: params.id,
-    title: params.title,
-    arm: params.arm,
-    repo_label: params.repoLabel,
-    repo_path: params.repoPath,
-    snapshot_label: params.snapshotLabel,
-    tool_calls: params.steps.length,
-    tokens_aproximados: tokens,
-    tempo_ms: Date.now() - params.startedAt,
-    utilidade_percebida: utility,
-    arquivos_citados: uniqueStrings(params.refs),
-    resposta_final: params.finalAnswer,
-    incertezas: uniqueStrings(params.uncertainties),
-    observacoes: params.notes,
-    steps: params.steps,
-  };
-}
-
-export function scoreUtility(
-  finalAnswer: string,
-  refs: string[],
-  uncertainties: string[],
-  uncertaintyDisclosure: boolean,
-): number {
-  let score = 1;
-  if (finalAnswer.length >= 100) score += 1;
-  if (refs.length >= 2) score += 1;
-  if (refs.length >= 4) score += 1;
-  if (uncertaintyDisclosure || uncertainties.length > 0) score += 1;
-  if (refs.length === 0) return Math.min(score, 2);
-  if (refs.length < 2) return Math.min(score, 3);
-  return Math.min(5, score);
+  const payload = buildToolResponse(tool, cwd, { ...args, response_format: "concise" });
+  return { title, output: JSON.stringify(payload), ok: payload.state !== "falha" };
 }
 
 async function ensureIndexed(rootPath: string): Promise<void> {
@@ -250,96 +305,7 @@ function prepareBenchmarkCorpus(workspaceRoot: string, outputDir: string): TaskC
   copyCorpusSnapshot(join(workspaceRoot, ".app-vault/archive/headroom"), headroom);
   copyCorpusSnapshot(join(workspaceRoot, ".app-vault/archive/Understand-Anything"), understandAnything);
 
-  return {
-    codegraph,
-    gitnexus,
-    headroom,
-    understandAnything,
-  };
-}
-
-function writeEvidence(outputDir: string, task: BenchmarkTaskResult): void {
-  const filename = `${task.id}-${task.arm}.md`;
-  const pathValue = join(outputDir, filename);
-  const content = [
-    `### ${task.id} - ${task.arm}`,
-    "",
-    `- Data: ${nowIso()}`,
-    "- Operador/agente: Codex",
-    `- Repo alvo: ${task.repo_label}`,
-    `- Commit ou snapshot: ${task.snapshot_label}`,
-    `- Tool calls: ${task.tool_calls}`,
-    `- Tokens aproximados: ${task.tokens_aproximados}`,
-    `- Tempo: ${task.tempo_ms}ms`,
-    `- Utilidade percebida (1-5): ${task.utilidade_percebida}`,
-    `- Arquivos citados: ${task.arquivos_citados.join(", ") || "nenhum"}`,
-    "- Resposta final:",
-    "",
-    task.resposta_final,
-    "",
-    `- Incertezas: ${task.incertezas.join(" | ") || "nenhuma relevante"}`,
-    `- Observacoes: ${task.observacoes.join(" | ") || "nenhuma"}`,
-    "",
-    "#### Evidência bruta",
-    "",
-    ...task.steps.flatMap((step) => [
-      `##### ${step.title}`,
-      "",
-      "```text",
-      step.output || "(sem saída)",
-      "```",
-      "",
-    ]),
-  ].join("\n");
-  writeFileSync(pathValue, content + "\n", "utf-8");
-}
-
-function writeSummary(outputDir: string, summary: BenchmarkSummary): void {
-  writeFileSync(join(outputDir, "summary.json"), JSON.stringify(summary, null, 2) + "\n", "utf-8");
-
-  const content = [
-    "# Benchmark interno S16 — Atlas Cortex",
-    "",
-    `Gerado em: ${summary.generated_at}`,
-    "",
-    "## Resultado",
-    "",
-    `- Tool calls baseline: ${summary.totals.baseline_tool_calls}`,
-    `- Tool calls atlas-cortex: ${summary.totals.atlas_tool_calls}`,
-    `- Redução de tool calls: ${summary.totals.tool_call_reduction_pct.toFixed(1)}%`,
-    `- Tokens baseline: ${summary.totals.baseline_tokens}`,
-    `- Tokens atlas-cortex: ${summary.totals.atlas_tokens}`,
-    `- Redução de tokens: ${summary.totals.token_reduction_pct.toFixed(1)}%`,
-    `- Utilidade média baseline: ${summary.totals.baseline_average_utility.toFixed(2)}`,
-    `- Utilidade média atlas-cortex: ${summary.totals.atlas_average_utility.toFixed(2)}`,
-    `- Menor utilidade atlas-cortex: ${summary.totals.minimum_atlas_utility}`,
-    `- Gate S16: ${summary.pass ? "PASS" : "FAIL"}`,
-    "",
-    "## Tarefas",
-    "",
-    ...summary.tasks
-      .filter((task) => task.arm === "atlas-cortex")
-      .map(
-        (task) =>
-          `- ${task.id}: ${task.tool_calls} calls, ${task.tokens_aproximados} tokens aprox., utilidade ${task.utilidade_percebida}/5`,
-      ),
-    "",
-    "## Notas",
-    "",
-    "- Utilidade foi rubricada deterministicamente com piso de referências mínimas, completude da resposta e declaração explícita de incerteza.",
-    "- BT-05 usa snapshot temporário git-inicializado do archive CodeGraph porque o corpus arquivado não carrega `.git`.",
-  ].join("\n");
-
-  writeFileSync(join(outputDir, "SUMMARY.md"), content + "\n", "utf-8");
-}
-
-function metricTotals(tasks: BenchmarkTaskResult[], arm: BenchmarkArm, field: "tool_calls" | "tokens_aproximados"): number {
-  return tasks.filter((task) => task.arm === arm).reduce((sum, task) => sum + task[field], 0);
-}
-
-function averageUtility(tasks: BenchmarkTaskResult[], arm: BenchmarkArm): number {
-  const items = tasks.filter((task) => task.arm === arm);
-  return items.reduce((sum, task) => sum + task.utilidade_percebida, 0) / items.length;
+  return { codegraph, gitnexus, headroom, understandAnything };
 }
 
 function createCodegraphDiffSnapshot(workspaceRoot: string, outputDir: string): string {
@@ -361,457 +327,335 @@ function createCodegraphDiffSnapshot(workspaceRoot: string, outputDir: string): 
   return target;
 }
 
-function buildBt01Baseline(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.codegraph;
+// --- Execução das tasks -----------------------------------------------------
+
+function buildArmResult(
+  spec: TaskSpec,
+  ctx: TaskContext,
+  arm: BenchmarkArm,
+): BenchmarkTaskResult {
+  const repo = spec.repo(ctx);
+  const root = repo.path;
   const startedAt = Date.now();
-  const steps = [
-    runShellStep(
-      root,
-      "rg impacto",
+
+  let steps: StepResult[];
+  if (arm === "atlas") {
+    steps = spec.atlasSteps.map((step) => runToolStep(root, step.title, step.tool, step.args));
+  } else {
+    const raw: StepResult[] = [
+      runShellStep(root, "rg localizar", spec.baselineGrep),
+      ...spec.baselineFiles.map((file) => readFullFileStep(root, file)),
+    ];
+    steps = arm === "formato-so"
+      ? raw.map((step) => ({ ...step, output: compactSerialize(step.output) }))
+      : raw;
+  }
+
+  const combined = steps.map((step) => step.output).join("\n");
+  const tokens = steps.reduce((sum, step) => sum + approxTokens(step.output), 0);
+  const evalResult = evaluateAnswer(combined, spec.groundTruth);
+
+  return {
+    id: spec.id,
+    title: spec.title,
+    kind: spec.kind,
+    arm,
+    repo_label: repo.label,
+    repo_path: root,
+    tool_calls: steps.length,
+    tokens,
+    tempo_ms: Date.now() - startedAt,
+    correct: evalResult.correct,
+    cited_expected: evalResult.citedExpected,
+    expected_total: evalResult.expectedTotal,
+    uncertainty_disclosed: evalResult.uncertaintyDisclosed,
+    steps,
+  };
+}
+
+const TASKS: TaskSpec[] = [
+  {
+    id: "BT-01",
+    title: "Localizar área certa para uma tool MCP",
+    kind: "cirurgica",
+    groundTruth: { mustCite: ["src/mcp/tools.ts", "src/graph/traversal.ts"], mustContainSymbol: "getImpactRadius" },
+    repo: (ctx) => ({ label: "CodeGraph", path: ctx.corpusRoots.codegraph }),
+    baselineGrep:
       "rg -n \"codegraph_impact|handleImpact|getImpactRadius\" src/mcp/tools.ts src/bin/codegraph.ts src/graph/traversal.ts src/index.ts",
-    ),
-    runShellStep(root, "sed mcp tools", "sed -n '440,470p' src/mcp/tools.ts"),
-    runShellStep(root, "sed handler impact", "sed -n '1169,1205p' src/mcp/tools.ts"),
-    runShellStep(root, "sed cli impact", "sed -n '1355,1415p' src/bin/codegraph.ts"),
-    runShellStep(root, "sed traversal", "sed -n '458,530p' src/graph/traversal.ts"),
-  ];
-
-  return buildResult({
-    id: "BT-01",
-    title: "Localizar area certa para uma tool MCP",
-    arm: "baseline",
-    repoLabel: "CodeGraph",
-    repoPath: root,
-    snapshotLabel: "archive sem git",
-    startedAt,
-    steps,
-    refs: ["src/mcp/tools.ts", "src/bin/codegraph.ts", "src/graph/traversal.ts", "src/index.ts"],
-    finalAnswer:
-      "A tool MCP de impacto fica em src/mcp/tools.ts como codegraph_impact. A rota CLI passa por src/bin/codegraph.ts. O cálculo estrutural desce para getImpactRadius em src/graph/traversal.ts e é exposto também pelo índice em src/index.ts.",
-    uncertainties: [],
-    notes: ["Fluxo obtido por grep + leituras seletivas."],
-  });
-}
-
-function buildBt01Atlas(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.codegraph;
-  const startedAt = Date.now();
-  const steps = [
-    runToolStep(root, "search getImpactRadius", "search", { query: "getImpactRadius", limit: 3 }),
-    runToolStep(root, "explore src/mcp/tools.ts", "explore", { target: "src/mcp/tools.ts", mode: "file", depth: 2 }),
-    runToolStep(root, "impact src/mcp/tools.ts", "impact", {
-      target: "src/mcp/tools.ts",
-      direction: "dependencies",
-      depth: 2,
-      summary_only: true,
-    }),
-  ];
-
-  return buildResult({
-    id: "BT-01",
-    title: "Localizar area certa para uma tool MCP",
-    arm: "atlas-cortex",
-    repoLabel: "CodeGraph",
-    repoPath: root,
-    snapshotLabel: "archive indexado localmente",
-    startedAt,
-    steps,
-    refs: ["src/mcp/tools.ts", "src/graph/traversal.ts", "src/index.ts"],
-    finalAnswer:
-      "Atlas Cortex isolou src/mcp/tools.ts como ponto MCP relevante e apontou dependência estrutural para src/graph/traversal.ts e src/index.ts. Isso reduz navegação manual até a área onde o cálculo de impacto é servido e consumido.",
-    uncertainties: parseLinesMatching(steps.map((step) => step.output).join("\n"), /stale|incomplet/i),
-    notes: ["Busca/impacto ainda são estruturais; causalidade semântica profunda continua fora do MVP."],
-  });
-}
-
-function buildBt02Baseline(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.gitnexus;
-  const startedAt = Date.now();
-  const steps = [
-    runShellStep(
-      root,
-      "rg trace impact",
-      "rg -n \"impactCommand|backend.callTool\\('impact'|_impactImpl|safeLocalImpact|trace\" gitnexus/src/cli/tool.ts gitnexus/src/mcp/local/local-backend.ts gitnexus/src/core/group/cross-impact.ts gitnexus/src/core/ingestion/process-processor.ts",
-    ),
-    runShellStep(root, "sed cli tool", "sed -n '118,180p' gitnexus/src/cli/tool.ts"),
-    runShellStep(root, "sed local backend", "sed -n '2955,3095p' gitnexus/src/mcp/local/local-backend.ts"),
-    runShellStep(root, "sed cross impact", "sed -n '429,520p' gitnexus/src/core/group/cross-impact.ts"),
-  ];
-
-  return buildResult({
+    baselineFiles: ["src/mcp/tools.ts", "src/graph/traversal.ts"],
+    atlasSteps: [
+      { title: "search getImpactRadius", tool: "search", args: { query: "getImpactRadius", limit: 3 } },
+      { title: "explore tools.ts", tool: "explore", args: { target: "src/mcp/tools.ts", mode: "file", depth: 2 } },
+      { title: "impact tools.ts", tool: "impact", args: { target: "src/mcp/tools.ts", direction: "dependencies", depth: 2, summary_only: true } },
+    ],
+  },
+  {
     id: "BT-02",
     title: "Explicar fluxo de trace/impacto",
-    arm: "baseline",
-    repoLabel: "GitNexus",
-    repoPath: root,
-    snapshotLabel: "archive sem git",
-    startedAt,
-    steps,
-    refs: [
-      "gitnexus/src/cli/tool.ts",
-      "gitnexus/src/mcp/local/local-backend.ts",
-      "gitnexus/src/core/group/cross-impact.ts",
-      "gitnexus/src/core/ingestion/process-processor.ts",
+    kind: "cirurgica",
+    groundTruth: {
+      mustCite: ["gitnexus/src/mcp/local/local-backend.ts", "gitnexus/src/core/group/cross-impact.ts"],
+      mustContainSymbol: "_impactImpl",
+    },
+    repo: (ctx) => ({ label: "GitNexus", path: ctx.corpusRoots.gitnexus }),
+    baselineGrep:
+      "rg -n \"impactCommand|_impactImpl|safeLocalImpact|cross-impact|crossImpact\" gitnexus/src/cli/tool.ts gitnexus/src/mcp/local/local-backend.ts gitnexus/src/core/group/cross-impact.ts",
+    baselineFiles: ["gitnexus/src/mcp/local/local-backend.ts", "gitnexus/src/core/group/cross-impact.ts"],
+    atlasSteps: [
+      { title: "search _impactImpl", tool: "search", args: { query: "_impactImpl", limit: 5 } },
+      { title: "files cross-impact", tool: "files", args: { pattern: "cross-impact", max_depth: 6 } },
     ],
-    finalAnswer:
-      "O fluxo sai da CLI em gitnexus/src/cli/tool.ts, entra no backend MCP local em gitnexus/src/mcp/local/local-backend.ts e, quando cruza repos, passa por gitnexus/src/core/group/cross-impact.ts. O trace de processos vive em gitnexus/src/core/ingestion/process-processor.ts.",
-    uncertainties: [],
-    notes: ["Leitura manual exigiu abrir arquivos grandes."],
-  });
-}
-
-function buildBt02Atlas(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.gitnexus;
-  const startedAt = Date.now();
-  const steps = [
-    runToolStep(root, "search _impactImpl", "search", { query: "_impactImpl", limit: 5 }),
-    runToolStep(root, "files cross impact", "files", { pattern: "cross-impact", max_depth: 6 }),
-  ];
-
-  return buildResult({
-    id: "BT-02",
-    title: "Explicar fluxo de trace/impacto",
-    arm: "atlas-cortex",
-    repoLabel: "GitNexus",
-    repoPath: root,
-    snapshotLabel: "archive indexado localmente",
-    startedAt,
-    steps,
-    refs: [
-      "gitnexus/src/cli/tool.ts",
-      "gitnexus/src/mcp/local/local-backend.ts",
-      "gitnexus/src/core/group/cross-impact.ts",
-    ],
-    finalAnswer:
-      "Atlas Cortex localizou rápido a entrada CLI em gitnexus/src/cli/tool.ts e o fan-out cross-repo em gitnexus/src/core/group/cross-impact.ts. O backend local segue concentrado em gitnexus/src/mcp/local/local-backend.ts, suficiente para explicar o fluxo macro de impacto.",
-    uncertainties: parseLinesMatching(steps.map((step) => step.output).join("\n"), /stale|parcial|ambigua/i),
-    notes: ["Trace multi-hop continua parcial porque o grafo do MVP ainda é estrutural."],
-  });
-}
-
-function buildBt03Baseline(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.codegraph;
-  const startedAt = Date.now();
-  const steps = [
-    runShellStep(
-      root,
-      "rg watcher stale",
+  },
+  {
+    id: "BT-03",
+    title: "Avaliar impacto de mudança em sync/staleness",
+    kind: "varredura",
+    groundTruth: { mustCite: ["src/sync/index.ts", "src/mcp/engine.ts"], mustContainSymbol: "watchDisabledReason" },
+    repo: (ctx) => ({ label: "CodeGraph", path: ctx.corpusRoots.codegraph }),
+    baselineGrep:
       "rg -n \"watchDisabledReason|FileWatcher|pending sync|auto-sync|catch-up sync\" src/sync/index.ts src/mcp/engine.ts src/mcp/tools.ts src/index.ts",
-    ),
-    runShellStep(root, "sed sync index", "sed -n '1,80p' src/sync/index.ts"),
-    runShellStep(root, "sed mcp engine", "sed -n '178,254p' src/mcp/engine.ts"),
-    runShellStep(root, "sed stale banner", "sed -n '289,326p' src/mcp/tools.ts"),
-  ];
-
-  return buildResult({
-    id: "BT-03",
-    title: "Avaliar impacto de mudanca em sync/staleness",
-    arm: "baseline",
-    repoLabel: "CodeGraph",
-    repoPath: root,
-    snapshotLabel: "archive sem git",
-    startedAt,
-    steps,
-    refs: ["src/sync/index.ts", "src/mcp/engine.ts", "src/mcp/tools.ts", "src/index.ts"],
-    finalAnswer:
-      "Falha no watcher afeta a camada de sync em src/sync/index.ts, a inicialização/auto-sync do MCP em src/mcp/engine.ts e os banners de staleness em src/mcp/tools.ts. O efeito prático é índice envelhecido e respostas com pending sync ou stale.",
-    uncertainties: [],
-    notes: ["Blast radius construído manualmente por leitura de módulos correlatos."],
-  });
-}
-
-function buildBt03Atlas(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.codegraph;
-  const startedAt = Date.now();
-  const steps = [
-    runToolStep(root, "files sync", "files", { pattern: "src/sync", max_depth: 3 }),
-    runToolStep(root, "explore mcp engine", "explore", { target: "src/mcp/engine.ts", mode: "file", depth: 2 }),
-  ];
-
-  return buildResult({
-    id: "BT-03",
-    title: "Avaliar impacto de mudanca em sync/staleness",
-    arm: "atlas-cortex",
-    repoLabel: "CodeGraph",
-    repoPath: root,
-    snapshotLabel: "archive indexado localmente",
-    startedAt,
-    steps,
-    refs: ["src/sync/index.ts", "src/mcp/engine.ts", "src/mcp/tools.ts"],
-    finalAnswer:
-      "Atlas Cortex mostrou rápido o cluster de sync/watch e concentrou a análise em src/mcp/engine.ts. O blast radius aponta para consumo MCP e superfícies que exibem stale/pending sync, suficiente para mapear o efeito operacional da falha do watcher.",
-    uncertainties: parseLinesMatching(steps.map((step) => step.output).join("\n"), /stale|incomplet/i),
-    notes: ["Resultado suficiente para blast radius operacional, não para timing fino do debounce."],
-  });
-}
-
-function buildBt04Baseline(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.headroom;
-  const startedAt = Date.now();
-  const steps = [
-    runShellStep(
-      root,
-      "rg ccr",
-      "rg -n \"CCR|Compress-Cache-Retrieve|compress_with_store|headroom_retrieve|CompressionStore\" crates/headroom-core/src crates/headroom-py/src wiki",
-    ),
-    runShellStep(root, "sed ccr mod", "sed -n '1,110p' crates/headroom-core/src/ccr/mod.rs"),
-    runShellStep(root, "sed pipeline mod", "sed -n '1,80p' crates/headroom-core/src/transforms/pipeline/mod.rs"),
-    runShellStep(root, "sed diff offload", "sed -n '23,154p' crates/headroom-core/src/transforms/pipeline/offloads/diff_offload.rs"),
-  ];
-
-  return buildResult({
-    id: "BT-04",
-    title: "Identificar packing reversivel aplicavel",
-    arm: "baseline",
-    repoLabel: "Headroom",
-    repoPath: root,
-    snapshotLabel: "archive sem git",
-    startedAt,
-    steps,
-    refs: [
-      "crates/headroom-core/src/ccr/mod.rs",
-      "crates/headroom-core/src/transforms/pipeline/mod.rs",
-      "crates/headroom-core/src/transforms/pipeline/offloads/diff_offload.rs",
+    baselineFiles: ["src/sync/index.ts", "src/mcp/engine.ts"],
+    atlasSteps: [
+      { title: "files sync", tool: "files", args: { pattern: "src/sync", max_depth: 3 } },
+      { title: "explore engine.ts", tool: "explore", args: { target: "src/mcp/engine.ts", mode: "file", depth: 2 } },
+      { title: "search watchDisabledReason", tool: "search", args: { query: "watchDisabledReason", limit: 5 } },
     ],
-    finalAnswer:
-      "A inspiração mais reutilizável está no contrato CCR em crates/headroom-core/src/ccr/mod.rs, na orquestração lossless-first em transforms/pipeline/mod.rs e no offload reversível com compress_with_store em offloads/diff_offload.rs.",
-    uncertainties: [],
-    notes: ["Leitura puxou muita documentação bruta para uma resposta curta."],
-  });
-}
-
-function buildBt04Atlas(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.headroom;
-  const startedAt = Date.now();
-  const steps = [
-    runToolStep(root, "search CompressionStore", "search", { query: "CompressionStore", limit: 5 }),
-    runToolStep(root, "explore ccr mod", "explore", {
-      target: "crates/headroom-core/src/ccr/mod.rs",
-      mode: "file",
-      depth: 2,
-    }),
-    runToolStep(root, "pack context ccr", "pack_context", {
-      sources: [
-        "crates/headroom-core/src/ccr/mod.rs",
-        "crates/headroom-core/src/transforms/pipeline/mod.rs",
+  },
+  {
+    id: "BT-04",
+    title: "Identificar packing reversível aplicável",
+    kind: "varredura",
+    groundTruth: {
+      mustCite: ["crates/headroom-core/src/ccr/mod.rs", "crates/headroom-core/src/transforms/pipeline/mod.rs"],
+      mustContainSymbol: "CompressionStore",
+    },
+    repo: (ctx) => ({ label: "Headroom", path: ctx.corpusRoots.headroom }),
+    baselineGrep:
+      "rg -n \"CCR|compress_with_store|CompressionStore\" crates/headroom-core/src/ccr/mod.rs crates/headroom-core/src/transforms/pipeline/mod.rs",
+    baselineFiles: ["crates/headroom-core/src/ccr/mod.rs", "crates/headroom-core/src/transforms/pipeline/mod.rs"],
+    atlasSteps: [
+      { title: "search CompressionStore", tool: "search", args: { query: "CompressionStore", limit: 5 } },
+      { title: "explore ccr mod", tool: "explore", args: { target: "crates/headroom-core/src/ccr/mod.rs", mode: "file", depth: 2 } },
+      {
+        title: "pack ccr",
+        tool: "pack_context",
+        args: {
+          sources: ["crates/headroom-core/src/ccr/mod.rs", "crates/headroom-core/src/transforms/pipeline/mod.rs"],
+          goal: "extrair inspiracoes de packing reversivel",
+          token_budget: 420,
+          style: "balanced",
+        },
+      },
+    ],
+  },
+  {
+    id: "BT-05",
+    title: "Comparar diff e testes afetados",
+    kind: "cirurgica",
+    groundTruth: { mustCite: ["src/sync/watch-policy.ts"], mustContainSymbol: "watch-policy" },
+    repo: (ctx) => ({ label: "CodeGraph (diff)", path: ctx.codegraphDiffRoot }),
+    baselineGrep: "git diff --name-only && rg -n \"watch|sync|policy\" __tests__ src --glob '*.test.ts' || true",
+    baselineFiles: ["src/sync/watch-policy.ts"],
+    atlasSteps: [
+      { title: "diff_impact unstaged", tool: "diff_impact", args: { scope: "unstaged" } },
+      {
+        title: "pack changed file",
+        tool: "pack_context",
+        args: { sources: ["src/sync/watch-policy.ts"], goal: "testes e areas afetadas pelo diff", token_budget: 320, style: "brief" },
+      },
+    ],
+  },
+  {
+    id: "BT-06",
+    title: "Rejeitar escopo visual/plataforma",
+    kind: "varredura",
+    groundTruth: {
+      mustCite: [
+        "understand-anything-plugin/packages/dashboard/src/App.tsx",
+        "understand-anything-plugin/src/onboard-builder.ts",
       ],
-      goal: "extrair inspiracoes de packing reversivel para atlas-cortex",
-      token_budget: 420,
-      style: "balanced",
-    }),
-  ];
-
-  return buildResult({
-    id: "BT-04",
-    title: "Identificar packing reversivel aplicavel",
-    arm: "atlas-cortex",
-    repoLabel: "Headroom",
-    repoPath: root,
-    snapshotLabel: "archive indexado localmente",
-    startedAt,
-    steps,
-    refs: [
-      "crates/headroom-core/src/ccr/mod.rs",
-      "crates/headroom-core/src/transforms/pipeline/mod.rs",
-    ],
-    finalAnswer:
-      "Atlas Cortex reduziu a leitura ao contrato CCR e à pipeline principal, empacotando um resumo curto com refs rastreáveis. As inspirações centrais continuam: guardar original recuperável, compressão lossy no fio e contrato explícito de retrieve.",
-    uncertainties: parseLinesMatching(steps.map((step) => step.output).join("\n"), /stale|parcial|limita/i),
-    notes: ["Pack aproveitou reversibilidade por refs, não por retrieve público dedicado."],
-  });
-}
-
-function buildBt05Baseline(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.codegraphDiffRoot;
-  const startedAt = Date.now();
-  const steps = [
-    runShellStep(root, "git diff names", "git diff --name-only"),
-    runShellStep(
-      root,
-      "rg changed area",
-      "rg -n \"watchDisabledReason|watch-policy|sync|watcher\" src/sync/watch-policy.ts src/sync/index.ts src/mcp/engine.ts __tests__",
-    ),
-    runShellStep(root, "rg tests", "rg -n \"watch|sync|policy|mcp\" __tests__ src --glob '*.test.ts'"),
-    runShellStep(root, "sed changed file", "sed -n '1,120p' src/sync/watch-policy.ts"),
-  ];
-
-  return buildResult({
-    id: "BT-05",
-    title: "Comparar diff e testes afetados",
-    arm: "baseline",
-    repoLabel: "CodeGraph",
-    repoPath: root,
-    snapshotLabel: "snapshot git temporario com mudança unstaged",
-    startedAt,
-    steps,
-    refs: ["src/sync/watch-policy.ts", "src/sync/index.ts", "src/mcp/engine.ts"],
-    finalAnswer:
-      "O diff toca src/sync/watch-policy.ts, então a revisão manual precisa cruzar sync, watcher e engine MCP para levantar testes/áreas afetadas. Funciona, mas ainda depende de grep por nomes espalhados.",
-    uncertainties: ["Sem mapeamento semântico fino por hunk; inferência manual segue ancorada em arquivo."],
-    notes: ["Snapshot temporário criado só para suportar diff real sem mutar o archive."],
-  });
-}
-
-function buildBt05Atlas(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.codegraphDiffRoot;
-  const startedAt = Date.now();
-  const steps = [
-    runToolStep(root, "diff impact unstaged", "diff_impact", { scope: "unstaged" }),
-    runToolStep(root, "pack changed file", "pack_context", {
-      sources: ["src/sync/watch-policy.ts"],
-      goal: "avaliar testes e areas afetadas pelo diff atual",
-      token_budget: 320,
-      style: "brief",
-    }),
-  ];
-  const diffPayload = extractJson(steps[0]);
-  const affectedTests = Array.isArray(diffPayload.affected_tests)
-    ? (diffPayload.affected_tests as string[])
-    : [];
-
-  return buildResult({
-    id: "BT-05",
-    title: "Comparar diff e testes afetados",
-    arm: "atlas-cortex",
-    repoLabel: "CodeGraph",
-    repoPath: root,
-    snapshotLabel: "snapshot git temporario com mudança unstaged",
-    startedAt,
-    steps,
-    refs: uniqueStrings(["src/sync/watch-policy.ts", ...affectedTests]),
-    finalAnswer:
-      "Atlas Cortex leu o diff real em src/sync/watch-policy.ts e devolveu áreas/testes afetados em uma chamada principal, com um pacote curto do arquivo alterado para revisar contexto. Isso substitui a cadeia manual de grep + leitura do diff.",
-    uncertainties: parseLinesMatching(steps.map((step) => step.output).join("\n"), /stale|parcial|unresolved/i),
-    notes: ["affected_tests depende do grafo estrutural disponível no snapshot temporário."],
-  });
-}
-
-function buildBt06Baseline(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.understandAnything;
-  const startedAt = Date.now();
-  const steps = [
-    runShellStep(
-      root,
-      "rg visual scope",
-      "rg -n \"dashboard|homepage|onboard|wiki|knowledge graph\" README.md CLAUDE.md understand-anything-plugin/src understand-anything-plugin/packages/dashboard homepage",
-    ),
-    runShellStep(root, "sed readme", "sed -n '46,75p' README.md"),
-    runShellStep(root, "sed dashboard app", "sed -n '680,730p' understand-anything-plugin/packages/dashboard/src/App.tsx"),
-  ];
-
-  return buildResult({
-    id: "BT-06",
-    title: "Rejeitar escopo visual/plataforma",
-    arm: "baseline",
-    repoLabel: "Understand Anything",
-    repoPath: root,
-    snapshotLabel: "archive sem git",
-    startedAt,
-    steps,
-    refs: [
-      "README.md",
-      "understand-anything-plugin/packages/dashboard/src/App.tsx",
-      "homepage/src/layouts/Layout.astro",
-      "understand-anything-plugin/src/onboard-builder.ts",
-    ],
-    finalAnswer:
-      "O corpus mostra dashboard React, homepage Astro, onboarding e knowledge wiki como partes explícitas do produto. Isso reforça que o MVP do Atlas Cortex deve manter essas frentes fora do escopo.",
-    uncertainties: [],
-    notes: ["Resposta depende mais de nomenclatura/estrutura do que de grafo semântico."],
-  });
-}
-
-function buildBt06Atlas(ctx: TaskContext): BenchmarkTaskResult {
-  const root = ctx.corpusRoots.understandAnything;
-  const startedAt = Date.now();
-  const steps = [
-    runToolStep(root, "files dashboard", "files", { pattern: "packages/dashboard/src", max_depth: 6 }),
-    runToolStep(root, "search buildOnboardingGuide", "search", { query: "buildOnboardingGuide", limit: 3 }),
-  ];
-
-  return buildResult({
-    id: "BT-06",
-    title: "Rejeitar escopo visual/plataforma",
-    arm: "atlas-cortex",
-    repoLabel: "Understand Anything",
-    repoPath: root,
-    snapshotLabel: "archive indexado localmente",
-    startedAt,
-    steps,
-    refs: [
+      mustContainSymbol: "buildOnboardingGuide",
+    },
+    repo: (ctx) => ({ label: "Understand Anything", path: ctx.corpusRoots.understandAnything }),
+    baselineGrep:
+      "rg -n \"dashboard|onboard|buildOnboardingGuide\" understand-anything-plugin/packages/dashboard/src understand-anything-plugin/src",
+    baselineFiles: [
       "understand-anything-plugin/packages/dashboard/src/App.tsx",
       "understand-anything-plugin/src/onboard-builder.ts",
     ],
-    finalAnswer:
-      "Atlas Cortex confirmou rapidamente dois eixos fora do MVP: dashboard interativo e onboarding gerado. Esses caminhos indexados já bastam para sustentar a exclusão de uma plataforma visual no Atlas Cortex.",
-    uncertainties: parseLinesMatching(steps.map((step) => step.output).join("\n"), /stale|parcial|limita/i),
-    notes: ["Homepage Astro não entra inteira no índice semântico; decisão sai por estrutura indexada e refs de arquivo."],
-  });
-}
-
-const TASKS: TaskDefinition[] = [
-  {
-    id: "BT-01",
-    title: "Localizar area certa para uma tool MCP",
-    runBaseline: buildBt01Baseline,
-    runAtlas: buildBt01Atlas,
-  },
-  {
-    id: "BT-02",
-    title: "Explicar fluxo de trace/impacto",
-    runBaseline: buildBt02Baseline,
-    runAtlas: buildBt02Atlas,
-  },
-  {
-    id: "BT-03",
-    title: "Avaliar impacto de mudanca em sync/staleness",
-    runBaseline: buildBt03Baseline,
-    runAtlas: buildBt03Atlas,
-  },
-  {
-    id: "BT-04",
-    title: "Identificar packing reversivel aplicavel",
-    runBaseline: buildBt04Baseline,
-    runAtlas: buildBt04Atlas,
-  },
-  {
-    id: "BT-05",
-    title: "Comparar diff e testes afetados",
-    runBaseline: buildBt05Baseline,
-    runAtlas: buildBt05Atlas,
-  },
-  {
-    id: "BT-06",
-    title: "Rejeitar escopo visual/plataforma",
-    runBaseline: buildBt06Baseline,
-    runAtlas: buildBt06Atlas,
+    atlasSteps: [
+      { title: "files dashboard", tool: "files", args: { pattern: "packages/dashboard/src", max_depth: 6 } },
+      { title: "search buildOnboardingGuide", tool: "search", args: { query: "buildOnboardingGuide", limit: 3 } },
+    ],
   },
 ];
 
-export function computePass(summaryTasks: BenchmarkTaskResult[]): BenchmarkSummary["totals"] {
-  const baselineToolCalls = metricTotals(summaryTasks, "baseline", "tool_calls");
-  const atlasToolCalls = metricTotals(summaryTasks, "atlas-cortex", "tool_calls");
-  const baselineTokens = metricTotals(summaryTasks, "baseline", "tokens_aproximados");
-  const atlasTokens = metricTotals(summaryTasks, "atlas-cortex", "tokens_aproximados");
-  const toolCallReductionPct = baselineToolCalls === 0 ? 0 : ((baselineToolCalls - atlasToolCalls) / baselineToolCalls) * 100;
-  const tokenReductionPct = baselineTokens === 0 ? 0 : ((baselineTokens - atlasTokens) / baselineTokens) * 100;
-  const baselineAverageUtility = averageUtility(summaryTasks, "baseline");
-  const atlasAverageUtility = averageUtility(summaryTasks, "atlas-cortex");
-  const minimumAtlasUtility = Math.min(
-    ...summaryTasks.filter((task) => task.arm === "atlas-cortex").map((task) => task.utilidade_percebida),
-  );
+// --- Agregação e relatório --------------------------------------------------
+
+function emptyTotals(): ArmTotals {
+  return { tool_calls: 0, tokens: 0, correct_count: 0, uncertainty_disclosed_count: 0, task_count: 0 };
+}
+
+export function computeTotals(tasks: BenchmarkTaskResult[]): Record<BenchmarkArm, ArmTotals> {
+  const totals: Record<BenchmarkArm, ArmTotals> = {
+    baseline: emptyTotals(),
+    "formato-so": emptyTotals(),
+    atlas: emptyTotals(),
+  };
+  for (const task of tasks) {
+    const bucket = totals[task.arm];
+    bucket.tool_calls += task.tool_calls;
+    bucket.tokens += task.tokens;
+    bucket.correct_count += task.correct ? 1 : 0;
+    bucket.uncertainty_disclosed_count += task.uncertainty_disclosed ? 1 : 0;
+    bucket.task_count += 1;
+  }
+  return totals;
+}
+
+function pct(from: number, to: number): number {
+  return from === 0 ? 0 : ((from - to) / from) * 100;
+}
+
+export function computeSummary(tasks: BenchmarkTaskResult[], outputDir: string): BenchmarkSummary {
+  const totals = computeTotals(tasks);
+
+  const gains = {
+    format_token_pct: pct(totals.baseline.tokens, totals["formato-so"].tokens),
+    index_token_pct: pct(totals["formato-so"].tokens, totals.atlas.tokens),
+    headline_token_pct: pct(totals.baseline.tokens, totals.atlas.tokens),
+    headline_tool_call_pct: pct(totals.baseline.tool_calls, totals.atlas.tool_calls),
+  };
+
+  const byKind = {} as BenchmarkSummary["by_kind"];
+  for (const kind of ["cirurgica", "varredura"] as TaskKind[]) {
+    const sel = (arm: BenchmarkArm): number =>
+      tasks.filter((t) => t.kind === kind && t.arm === arm).reduce((s, t) => s + t.tokens, 0);
+    const baseTok = sel("baseline");
+    const fmtTok = sel("formato-so");
+    const atlasTok = sel("atlas");
+    byKind[kind] = {
+      baseline_tokens: baseTok,
+      formato_so_tokens: fmtTok,
+      atlas_tokens: atlasTok,
+      headline_token_pct: pct(baseTok, atlasTok),
+      index_token_pct: pct(fmtTok, atlasTok),
+    };
+  }
+
+  // Gate honesto: o índice precisa surfar o ground-truth em TODA task e o
+  // headline de tokens precisa ser positivo. Sem barras de utilidade fabricadas.
+  const atlasCorrect = totals.atlas.correct_count === totals.atlas.task_count;
+  const pass = atlasCorrect && gains.headline_token_pct > 0;
 
   return {
-    baseline_tool_calls: baselineToolCalls,
-    atlas_tool_calls: atlasToolCalls,
-    baseline_tokens: baselineTokens,
-    atlas_tokens: atlasTokens,
-    tool_call_reduction_pct: toolCallReductionPct,
-    token_reduction_pct: tokenReductionPct,
-    baseline_average_utility: baselineAverageUtility,
-    atlas_average_utility: atlasAverageUtility,
-    minimum_atlas_utility: minimumAtlasUtility,
+    generated_at: nowIso(),
+    output_dir: outputDir,
+    methodology: {
+      token_counter: "Heurística subword offline (approxTokens) — APROXIMAÇÃO, não o tokenizer do modelo alvo.",
+      arms: "baseline (file reads crus) → formato-so (mesma info, serialização compacta) → atlas (tools reais concise).",
+      utility: "Checagem objetiva contra ground-truth (mustCite + símbolo nas saídas REAIS); uncertainty medido.",
+      live_agent: "NÃO implementado — números são scriptados. Hook runLiveAgent reservado para follow-up.",
+      label: "LIMITE SUPERIOR INTERNO SCRIPTADO (sem agente vivo; tokens por heurística aproximada).",
+    },
+    totals,
+    gains,
+    by_kind: byKind,
+    pass,
+    tasks,
   };
+}
+
+function writeEvidence(outputDir: string, task: BenchmarkTaskResult): void {
+  const filename = `${task.id}-${task.arm}.md`;
+  const content = [
+    `### ${task.id} — ${task.arm} (${task.kind})`,
+    "",
+    `- Data: ${nowIso()}`,
+    `- Repo: ${task.repo_label}`,
+    `- Tool calls: ${task.tool_calls}`,
+    `- Tokens (aprox.): ${task.tokens}`,
+    `- Tempo: ${task.tempo_ms}ms`,
+    `- Correto (ground-truth): ${task.correct ? "sim" : "não"} (${task.cited_expected}/${task.expected_total} arquivos)`,
+    `- Incerteza declarada (medido): ${task.uncertainty_disclosed ? "sim" : "não"}`,
+    "",
+    "#### Evidência bruta",
+    "",
+    ...task.steps.flatMap((step) => [`##### ${step.title}`, "", "```text", step.output || "(sem saída)", "```", ""]),
+  ].join("\n");
+  writeFileSync(join(outputDir, filename), content + "\n", "utf-8");
+}
+
+function fmtPct(value: number): string {
+  if (Math.abs(value) < 0.05) {
+    return "~0%";
+  }
+  const sign = value >= 0 ? "−" : "+";
+  return `${sign}${Math.abs(value).toFixed(1)}%`;
+}
+
+function writeSummary(outputDir: string, summary: BenchmarkSummary): void {
+  writeFileSync(join(outputDir, "summary.json"), JSON.stringify(summary, null, 2) + "\n", "utf-8");
+
+  const taskRow = (t: BenchmarkTaskResult): string =>
+    `| ${t.id} | ${t.arm} | ${t.tool_calls} | ${t.tokens} | ${t.correct ? "✓" : "✗"} | ${t.uncertainty_disclosed ? "✓" : "—"} |`;
+
+  const content = [
+    "# Benchmark interno — Atlas Cortex (item 21, honesto)",
+    "",
+    `Gerado em: ${summary.generated_at}`,
+    "",
+    `> **${summary.methodology.label}**`,
+    "",
+    "## Headline (qualificado)",
+    "",
+    `- Tokens baseline → atlas: ${fmtPct(summary.gains.headline_token_pct)} (headline honesto)`,
+    `- Tool calls baseline → atlas: ${fmtPct(summary.gains.headline_tool_call_pct)}`,
+    "",
+    "### Decomposição formato vs índice",
+    "",
+    `- Ganho de **formato** (baseline → formato-só): ${fmtPct(summary.gains.format_token_pct)}`,
+    `- Ganho de **índice** (formato-só → atlas): ${fmtPct(summary.gains.index_token_pct)}`,
+    "",
+    "## Totais por arm",
+    "",
+    "| Arm | Tool calls | Tokens | Corretos | Incerteza declarada |",
+    "|---|---|---|---|---|",
+    ...ARMS.map(
+      (arm) =>
+        `| ${arm} | ${summary.totals[arm].tool_calls} | ${summary.totals[arm].tokens} | ${summary.totals[arm].correct_count}/${summary.totals[arm].task_count} | ${summary.totals[arm].uncertainty_disclosed_count}/${summary.totals[arm].task_count} |`,
+    ),
+    "",
+    "## Perfil cirúrgica × varredura (tokens)",
+    "",
+    "| Kind | Baseline | Formato-só | Atlas | Headline | Ganho índice |",
+    "|---|---|---|---|---|---|",
+    ...(["cirurgica", "varredura"] as TaskKind[]).map(
+      (k) =>
+        `| ${k} | ${summary.by_kind[k].baseline_tokens} | ${summary.by_kind[k].formato_so_tokens} | ${summary.by_kind[k].atlas_tokens} | ${fmtPct(summary.by_kind[k].headline_token_pct)} | ${fmtPct(summary.by_kind[k].index_token_pct)} |`,
+    ),
+    "",
+    "## Por task",
+    "",
+    "| Task | Arm | Tool calls | Tokens | Correto | Incerteza |",
+    "|---|---|---|---|---|---|",
+    ...summary.tasks.map(taskRow),
+    "",
+    `Gate: ${summary.pass ? "PASS" : "FAIL"} (índice surfa ground-truth em toda task + headline positivo)`,
+    "",
+    "## Metodologia",
+    "",
+    `- **Tokens**: ${summary.methodology.token_counter}`,
+    `- **Arms**: ${summary.methodology.arms}`,
+    `- **Utilidade**: ${summary.methodology.utility}`,
+    `- **Agente vivo**: ${summary.methodology.live_agent}`,
+    "- **formato-só é arm sintético construído**: aplica `compactSerialize` ao conteúdo do baseline (mesma informação), aproximando a disciplina de serialização do envelope `concise`.",
+    "- **Ground-truth por task**: arquivos/símbolo corretos verificados como substring nas saídas reais — não em prosa do autor.",
+    "- **Por que o ganho de formato ≈ 0**: sob um contador subword, disciplina de serialização (indentação, linhas em branco) custa ~0 token — whitespace praticamente não tokeniza. Todo o ganho vem de o índice entregar MENOS conteúdo (ranges/handles em vez de arquivos inteiros), não de reformatar. É um resultado honesto, não um bug.",
+    "- O perfil cirúrgica×varredura é reportado separado: o índice ganha mais em lookup pontual; em varredura ampla o ganho é menor.",
+  ].join("\n");
+
+  writeFileSync(join(outputDir, "SUMMARY.md"), content + "\n", "utf-8");
 }
 
 export async function runMvpBenchmark(workspaceRoot: string, outputDir: string): Promise<BenchmarkSummary> {
@@ -827,43 +671,18 @@ export async function runMvpBenchmark(workspaceRoot: string, outputDir: string):
   const codegraphDiffRoot = createCodegraphDiffSnapshot(workspaceRoot, outputDir);
   await ensureIndexed(codegraphDiffRoot);
 
-  const ctx: TaskContext = {
-    workspaceRoot,
-    outputDir,
-    codegraphDiffRoot,
-    corpusRoots,
-  };
+  const ctx: TaskContext = { workspaceRoot, outputDir, codegraphDiffRoot, corpusRoots };
 
   const tasks: BenchmarkTaskResult[] = [];
-  for (const task of TASKS) {
-    const baseline = task.runBaseline(ctx);
-    const atlas = task.runAtlas(ctx);
-    tasks.push(baseline, atlas);
-    writeEvidence(outputDir, baseline);
-    writeEvidence(outputDir, atlas);
+  for (const spec of TASKS) {
+    for (const arm of ARMS) {
+      const result = buildArmResult(spec, ctx, arm);
+      tasks.push(result);
+      writeEvidence(outputDir, result);
+    }
   }
 
-  const totals = computePass(tasks);
-  const pass =
-    totals.tool_call_reduction_pct >= TOOL_CALL_REDUCTION_TARGET &&
-    totals.token_reduction_pct >= TOKEN_REDUCTION_TARGET &&
-    totals.atlas_average_utility >= MIN_AVERAGE_UTILITY &&
-    totals.minimum_atlas_utility >= MIN_TASK_UTILITY;
-
-  const summary: BenchmarkSummary = {
-    generated_at: nowIso(),
-    output_dir: outputDir,
-    criteria: {
-      min_tool_call_reduction_pct: TOOL_CALL_REDUCTION_TARGET,
-      min_token_reduction_pct: TOKEN_REDUCTION_TARGET,
-      min_average_utility: MIN_AVERAGE_UTILITY,
-      min_task_utility: MIN_TASK_UTILITY,
-    },
-    totals,
-    pass,
-    tasks,
-  };
-
+  const summary = computeSummary(tasks, outputDir);
   writeSummary(outputDir, summary);
   return summary;
 }

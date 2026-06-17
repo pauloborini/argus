@@ -21,13 +21,21 @@ Agentes queimam tokens e tool calls redescobrindo o código: `grep`, abre
 arquivo, `grep` de novo, abre mais três. O Atlas Cortex colapsa isso em
 respostas únicas e estruturadas apoiadas num índice local.
 
-No benchmark interno (tarefas reais de engenharia, 6 repos):
+No benchmark interno (6 tarefas reais de engenharia, **scriptado — sem agente
+vivo**, tokens por heurística offline documentada):
 
-| Métrica | Baseline | Atlas Cortex |
-|---|---|---|
-| Tool calls | 24 | **14** (−41,7%) |
-| Tokens aprox. | 76.209 | **8.940** (−88,1%) |
-| Utilidade média | — | **4,17 / 5** |
+| Métrica (baseline → Atlas) | Resultado |
+|---|---|
+| Tokens aprox. | **−92,7%** |
+| Tool calls | **−11,8%** |
+| Ground-truth respondido (arm Atlas) | **6/6** |
+
+O ganho de tokens vem quase todo do **índice entregar menos conteúdo** (ranges +
+handles em vez de arquivos inteiros), não de formato — isolado, o ganho só-de-formato
+é **~0%**. Compensa mais em **lookup cirúrgico** (−97,8%) e menos em **varredura
+ampla** (−55,7%), onde o agente leria muitos arquivos de qualquer jeito. É um
+**limite superior interno scriptado** até rodar com agente vivo; metodologia e
+números por task em [`.atlas/benchmark/latest/SUMMARY.md`](.atlas/benchmark/latest/SUMMARY.md).
 
 É **local-first**: nada é indexado ou enviado para serviço remoto, e o contexto
 recuperado nunca sai do workspace.
