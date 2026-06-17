@@ -9,7 +9,7 @@ import type { DiscoveryManifest } from "../../discovery/types.js";
 import { ManifestCorruptedError, readManifest } from "../../discovery/manifest.js";
 import { computeManifestStaleness } from "../../discovery/staleness.js";
 import { readDirtyFlag } from "../../discovery/dirty-flag.js";
-import { collectIndexedLanguages, buildFilesTree } from "../../extraction/files-tree.js";
+import type { FileTreeNode } from "../../extraction/files-tree.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import type { ExtractedSymbol, FileStructuralEntry } from "../../extraction/types.js";
 import { STRUCTURAL_INDEX_SCHEMA_VERSION } from "../../extraction/types.js";
@@ -17,12 +17,16 @@ import {
   IndexDbCorruptedError,
   IndexDbSchemaError,
   loadStructuralIndexForRead,
+  loadStructuralMetaForRead,
 } from "../../storage/index-persistence.js";
 import {
   closeIndexDb,
   openIndexDb,
+  readFileTreeRows,
+  readLanguagesForPaths,
   searchFtsInternal,
 } from "../../storage/sqlite-index-store.js";
+import type { FileTreeRow } from "../../storage/sqlite-index-store.js";
 import { SQLITE_SCHEMA_VERSION } from "../../storage/sqlite-prepared.js";
 import {
   getIndexDbPath,
@@ -140,7 +144,9 @@ interface ExploreSnippetRef {
 }
 
 interface ExploreRef {
-  name: string;
+  // Omitido para refs file-level (`name` seria idêntico a `path`); presente só
+  // para refs de símbolo (callers/callees), onde carrega o nome do símbolo.
+  name?: string;
   path: string;
   kind?: string;
   reason?: string;
@@ -273,8 +279,17 @@ interface _TraceHop {
   kind?: string;
 }
 
-function loadStructuralIndex(rootPath: string): StructuralIndex | null {
-  return loadStructuralIndexForRead(rootPath);
+type StructuralLoadMode = "full" | "lite";
+
+function loadStructuralIndex(
+  rootPath: string,
+  mode: StructuralLoadMode = "full",
+): StructuralIndex | null {
+  // `lite`: meta-only (files: []) para search/files, que resolvem cobertura e
+  // tree por query alvo — evita o full-load (N+1 de símbolos/edges por arquivo).
+  return mode === "lite"
+    ? loadStructuralMetaForRead(rootPath)
+    : loadStructuralIndexForRead(rootPath);
 }
 
 function mergeStructuralLimitations(
@@ -446,7 +461,10 @@ function buildStatusStub(cwd: string): ToolStubPayload {
   };
 }
 
-function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
+function buildSemanticStubEnvelope(
+  cwd: string,
+  mode: StructuralLoadMode = "full",
+): SemanticStubEnvelope {
   const metadata = readWorkspaceMetadata(cwd);
   if (!metadata) {
     return {
@@ -490,7 +508,7 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
 
   let structural: StructuralIndex | null = null;
   try {
-    structural = loadStructuralIndex(metadata.root_path);
+    structural = loadStructuralIndex(metadata.root_path, mode);
   } catch (err) {
     if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
       return {
@@ -557,7 +575,26 @@ function buildSemanticStubEnvelope(cwd: string): SemanticStubEnvelope {
   };
 }
 
-function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
+/** Tree + languages a partir de linhas agregadas em SQL (sem materializar o grafo). */
+function fileTreeFromRows(rows: FileTreeRow[]): { tree: FileTreeNode[]; languages: string[] } {
+  const languages = new Set<string>();
+  const tree: FileTreeNode[] = [];
+  for (const row of rows) {
+    if (row.language === "unsupported") {
+      continue;
+    }
+    languages.add(row.language);
+    // Arquivo com erro de parse não tem contagem confiável: zera (mesma
+    // semântica de summarizeSymbolCounts).
+    const counts = row.has_parse_errors
+      ? { total: 0, functions: 0, classes: 0, other: 0 }
+      : { total: row.total, functions: row.functions, classes: row.classes, other: row.other };
+    tree.push({ path: row.relative_path, symbol_counts: counts });
+  }
+  return { tree, languages: [...languages].sort() };
+}
+
+function buildFilesStub(cwd: string, semanticStub: SemanticStubEnvelope): ToolStubPayload {
   const structural = semanticStub.structuralIndex;
 
   if (semanticStub.state === "falha" || !structural) {
@@ -573,8 +610,24 @@ function buildFilesStub(semanticStub: SemanticStubEnvelope): ToolStubPayload {
     };
   }
 
-  const tree = buildFilesTree(structural.files);
-  const languages = collectIndexedLanguages(structural.files);
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return {
+      tree: [],
+      languages: [],
+      storage_backend: semanticStub.storage_backend,
+      schema_version: semanticStub.schema_version,
+      ...stubResponse("falha", WORKSPACE_MISSING),
+    };
+  }
+  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  let tree: FileTreeNode[];
+  let languages: string[];
+  try {
+    ({ tree, languages } = fileTreeFromRows(readFileTreeRows(db)));
+  } finally {
+    closeIndexDb(db);
+  }
 
   if (semanticStub.state === "stale") {
     return {
@@ -739,11 +792,16 @@ function buildSearchStub(
       )
       .slice(0, requestedLimit);
 
+    // Cobertura por candidato sem o full-load: resolve language dos paths
+    // candidatos por query alvo e cruza com coverage_by_language do meta.
+    const coverageByLanguage = semanticStub.structuralIndex?.coverage_by_language ?? {};
+    const languageByPath = readLanguagesForPaths(
+      db,
+      candidates.map((candidate) => candidate.path),
+    );
     const partialCoverage = candidates.some((candidate) => {
-      const language = semanticStub.structuralIndex?.files.find(
-        (entry) => entry.relative_path === candidate.path,
-      )?.language;
-      return language ? semanticStub.structuralIndex?.coverage_by_language[language]?.coverage_level === "partial" : false;
+      const language = languageByPath.get(candidate.path);
+      return language ? coverageByLanguage[language]?.coverage_level === "partial" : false;
     });
     const baseState = buildSearchState(query, candidates);
     // O envelope sempre chega "parcial" (até fresh usa FTS_RETRIEVAL_PENDING).
@@ -824,13 +882,12 @@ function collectFileRelevantFiles(
   budget: number,
 ): ExploreRef[] {
   const refs: ExploreRef[] = [
-    { name: entry.relative_path, path: entry.relative_path, reason: "target_file" },
+    { path: entry.relative_path, reason: "target_file" },
   ];
 
   for (const imported of entry.imports) {
     if (imported.resolved_path) {
       refs.push({
-        name: imported.resolved_path,
         path: imported.resolved_path,
         reason: "resolved_import",
       });
@@ -846,7 +903,6 @@ function collectFileRelevantFiles(
     }
     if (candidate.imports.some((item) => item.resolved_path === entry.relative_path)) {
       refs.push({
-        name: candidate.relative_path,
         path: candidate.relative_path,
         reason: "importer_file",
       });
@@ -935,7 +991,6 @@ function selectFileTarget(
   return {
     entry: partial.length === 1 ? partial[0]! : null,
     candidates: partial.slice(0, 10).map((file) => ({
-      name: file.relative_path,
       path: file.relative_path,
       reason: "file_match",
     })),
@@ -1335,7 +1390,7 @@ function collectTraceUncertainty(
         symbol: edge.to.node_type === "symbol" ? edge.to.name : undefined,
         relation: edge.relation,
       })),
-    ...limitations.map((reason) => ({ reason, detail: reason })),
+    ...limitations.map((reason) => ({ reason })),
   ];
 }
 
@@ -1919,8 +1974,42 @@ function buildAffectedAreas(paths: string[]): string[] {
   return uniqueByKey(areas, (item) => item).sort((left, right) => left.localeCompare(right));
 }
 
+/**
+ * Estimador de tokens code-aware (sem dependência de tokenizer). `chars/4`
+ * subestima código (muitos tokens curtos + pontuação), arriscando estourar o
+ * budget real; contar tokens lexicais (identificadores/números/pontuação) é mais
+ * conservador. Mantém o piso `chars/4` para subdividir identificadores longos
+ * em prosa densa. (Um tokenizer real — tiktoken / token-count Anthropic — segue
+ * como opção futura, ao custo de dependência/rede.)
+ */
 function approximateTokenCount(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
+  const lexical = text.match(/[A-Za-z0-9_$]+|[^\sA-Za-z0-9_$]/g)?.length ?? 0;
+  return Math.max(1, lexical, Math.ceil(text.length / 4));
+}
+
+/**
+ * Resumo de segmento que **preserva o código**. As linhas de scaffolding em
+ * pt-br (`Fonte:`/`Objetivo local:`/`Resumo:`/…) vêm primeiro e os blocos de
+ * código (`Snippet …`) por último; truncar as primeiras N linhas — o bug
+ * anterior — descartava justamente o código e deixava o segmento "resumido" sem
+ * código nenhum. Aqui mantemos a 1ª linha (`Fonte:`, para rastreio) + o código,
+ * truncando pelo fim até caber no budget.
+ */
+function summarizeSegmentText(text: string, budget: number): string {
+  const lines = text.split("\n");
+  if (lines.length === 0) {
+    return text;
+  }
+  const snippetStart = lines.findIndex((line) => line.startsWith("Snippet "));
+  const head = [lines[0]!];
+  const candidate =
+    snippetStart >= 0 ? [...head, ...lines.slice(snippetStart)] : lines.slice(0, 4);
+
+  let kept = candidate;
+  while (kept.length > 1 && approximateTokenCount(`\n\n${kept.join("\n")}`) > budget) {
+    kept = kept.slice(0, -1);
+  }
+  return kept.join("\n");
 }
 
 function getPackStyleConfig(style: NonNullable<PackContextArgs["style"]>): {
@@ -2423,7 +2512,7 @@ function buildPackContextStub(
       continue;
     }
 
-    const summarizedLines = segment.text.split("\n").slice(0, 4).join("\n");
+    const summarizedLines = summarizeSegmentText(segment.text, remainingBudget);
     const summarizedText = `\n\n${summarizedLines}`;
     const summaryCost = approximateTokenCount(summarizedText);
     if (summaryCost <= remainingBudget) {
@@ -3056,7 +3145,76 @@ function isWithinPath(rootPath: string, candidatePath: string): boolean {
 }
 
 /** Stubs honestos por tool — campos vazios alinhados a SURFACE_MCP_CLI.md (S02) */
+export type ResponseFormat = "concise" | "detailed";
+
+// Default conciso: o envelope de honestidade (confidence/message/limitations em
+// prosa pt-br) custa ~50-70% dos tokens de envelope e quase tudo é derivável de
+// `state` ou de um código `E_*`. `detailed` restaura a prosa completa.
+let defaultResponseFormat: ResponseFormat = "concise";
+
+export function setDefaultResponseFormat(format: ResponseFormat): void {
+  defaultResponseFormat = format;
+}
+
+function resolveResponseFormat(args?: Record<string, unknown>): ResponseFormat {
+  const raw = args?.response_format;
+  return raw === "detailed" || raw === "concise" ? raw : defaultResponseFormat;
+}
+
+// Extrai o código de sinal (`E_…` / `W_…`) de uma string de envelope, descartando
+// a prosa que vem depois de `: `. Retorna `undefined` quando não há código.
+const ENVELOPE_CODE = /^([EW]_[A-Z0-9_]+)\b/;
+function envelopeCode(text: string | undefined): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const match = ENVELOPE_CODE.exec(text);
+  return match ? match[1] : undefined;
+}
+
+/**
+ * Pós-processa o envelope para o formato pedido. Em `concise` (default) o
+ * envelope cai ao sinal mínimo:
+ *  - `confidence` dropado (100% derivável de `state`);
+ *  - `message` mantém só o código `E_*`; prosa estática (sucesso) some;
+ *  - `limitations` e `staleness_hint` (prosa pt-br) saem — `state` já carrega o
+ *    sinal operacional; a prosa volta em `detailed`.
+ * Campos de domínio (candidates, hops, tree, …) são preservados intactos.
+ */
+function applyResponseFormat(
+  payload: ToolStubPayload,
+  format: ResponseFormat,
+): ToolStubPayload {
+  if (format === "detailed") {
+    return payload;
+  }
+
+  const { message, confidence, limitations, staleness_hint, ...rest } = payload;
+  void confidence;
+  void limitations;
+  void staleness_hint;
+  const out = rest as ToolStubPayload;
+
+  const messageCode = envelopeCode(typeof message === "string" ? message : undefined);
+  if (messageCode) {
+    out.message = messageCode;
+  }
+
+  return out;
+}
+
 export function buildToolStub(
+  tool: McpToolName,
+  cwd: string = process.cwd(),
+  args?: Record<string, unknown>,
+): ToolStubPayload {
+  return applyResponseFormat(
+    buildToolStubInner(tool, cwd, args),
+    resolveResponseFormat(args),
+  );
+}
+
+function buildToolStubInner(
   tool: McpToolName,
   cwd: string = process.cwd(),
   args?: Record<string, unknown>,
@@ -3083,7 +3241,10 @@ export function buildToolStub(
     };
   }
 
-  const semanticStub = buildSemanticStubEnvelope(cwd);
+  // search/files não precisam do grafo: carregam meta-only e resolvem
+  // cobertura/tree por query alvo, matando o full-load no caminho quente.
+  const mode: StructuralLoadMode = tool === "search" || tool === "files" ? "lite" : "full";
+  const semanticStub = buildSemanticStubEnvelope(cwd, mode);
 
   switch (tool) {
     case "search":
@@ -3098,7 +3259,7 @@ export function buildToolStub(
       return buildDiffImpactStub(cwd, semanticStub, args as DiffImpactArgs | undefined);
     case "files":
       {
-        const payload = buildFilesStub(semanticStub);
+        const payload = buildFilesStub(cwd, semanticStub);
         if (Array.isArray(payload.tree)) {
           payload.tree = applyFilesFilters(
             payload.tree as Array<{ path: string; symbol_counts?: unknown }>,

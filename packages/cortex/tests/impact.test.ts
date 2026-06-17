@@ -91,6 +91,7 @@ describe("impact tool", () => {
       target: "src/dep.ts",
       direction: "dependents",
       depth: 2,
+      response_format: "detailed",
     });
     expect(payload.state).toBe("stale");
     expect(String(payload.staleness_hint)).toContain("cortex sync");
@@ -107,6 +108,7 @@ describe("impact tool", () => {
       target: "lib/dep.dart",
       direction: "dependents",
       depth: 2,
+      response_format: "detailed",
     });
     expect(payload.state).toBe("parcial");
     expect((payload.limitations as string[]).some((item) => item.includes("Cobertura parcial"))).toBe(true);

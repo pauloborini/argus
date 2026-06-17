@@ -75,7 +75,7 @@ describe("tool-registry", () => {
   it("status com workspace preparado alinha shape SURFACE §8", () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
-    const payload = buildToolStub("status", dir);
+    const payload = buildToolStub("status", dir, { response_format: "detailed" });
     expect(payload.initialized).toBe(true);
     expect(payload.staleness).toBe("unknown");
     expect(payload.pending_files_count).toBe(0);

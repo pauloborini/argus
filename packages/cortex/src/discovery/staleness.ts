@@ -1,5 +1,8 @@
+import { statSync } from "node:fs";
 import type { DiscoveryManifest } from "./types.js";
 import { discoverFiles } from "./walk.js";
+import { readDirtyFlag } from "./dirty-flag.js";
+import { getDirtyFlagPath, getManifestPath } from "../workspace/workspace.js";
 
 export type ManifestStaleness = "fresh" | "stale" | "unknown";
 
@@ -13,7 +16,61 @@ export interface ComputeStalenessOptions {
   respect_gitignore?: boolean;
 }
 
+/** mtime do arquivo em ms, ou `0` se ausente/ilegível. */
+function mtimeMs(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+// Memo por workspace para coalescer o walk em rajadas de tool calls (o servidor
+// MCP é longevo: várias chamadas em sequência sobre o mesmo índice). Invalidado
+// por mudança de assinatura (mtime do manifest/dirty-flag) ou por TTL — o TTL
+// limita o mascaramento de edições de working-tree fora de daemon/hooks à
+// janela abaixo.
+const STALENESS_MEMO_TTL_MS = 1_000;
+interface StalenessMemo {
+  signature: string;
+  result: StalenessResult;
+  expiresAt: number;
+}
+const stalenessMemo = new Map<string, StalenessMemo>();
+
 export function computeManifestStaleness(
+  rootPath: string,
+  manifest: DiscoveryManifest,
+  options: ComputeStalenessOptions = {},
+): StalenessResult {
+  // Curto-circuito barato: dirty-flag pendente = stale conhecido, sem walk.
+  // Cobre o caminho CLI (sem auto-sync) e a janela em que um sync falhou.
+  const dirty = readDirtyFlag(rootPath);
+  if (dirty && (dirty.paths.length > 0 || dirty.force_full)) {
+    return { staleness: "stale", pending_files_count: dirty.paths.length };
+  }
+
+  // Memo: pula o walk quando nada mudou desde a última checagem (mesma
+  // assinatura) dentro do TTL.
+  const signature = `${mtimeMs(getManifestPath(rootPath))}:${mtimeMs(
+    getDirtyFlagPath(rootPath),
+  )}:${options.respect_gitignore ? 1 : 0}`;
+  const now = Date.now();
+  const cached = stalenessMemo.get(rootPath);
+  if (cached && cached.signature === signature && cached.expiresAt > now) {
+    return cached.result;
+  }
+
+  const result = computeStalenessUncached(rootPath, manifest, options);
+  stalenessMemo.set(rootPath, {
+    signature,
+    result,
+    expiresAt: now + STALENESS_MEMO_TTL_MS,
+  });
+  return result;
+}
+
+function computeStalenessUncached(
   rootPath: string,
   manifest: DiscoveryManifest,
   options: ComputeStalenessOptions = {},

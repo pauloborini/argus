@@ -121,7 +121,7 @@ describe("pack context tool", () => {
     );
 
     try {
-      const payload = buildToolStub("retrieve", root, { handle });
+      const payload = buildToolStub("retrieve", root, { handle, response_format: "detailed" });
       expect(payload.state).toBe("falha");
       expect(String(payload.content)).not.toContain("segredo externo");
       expect((payload.limitations as string[]).some((item) => item.includes("fora do workspace"))).toBe(true);
@@ -161,6 +161,7 @@ describe("pack context tool", () => {
       goal: "reidratar parcial",
       token_budget: 400,
       style: "deep",
+      response_format: "detailed",
     });
     expect(replay.state).toBe("parcial");
     expect(replay.reversibility).toBe("partial");

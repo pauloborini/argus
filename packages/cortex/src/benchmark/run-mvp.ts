@@ -85,7 +85,11 @@ const MIN_AVERAGE_UTILITY = 4;
 const MIN_TASK_UTILITY = 3;
 
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  // Code-aware (alinhado a approximateTokenCount do pack_context): conta tokens
+  // lexicais com piso chars/4 — mais honesto que chars/4 puro para output de
+  // código. Tokenizer real segue como melhoria futura (ver docs/ANALISE §5).
+  const lexical = text.match(/[A-Za-z0-9_$]+|[^\sA-Za-z0-9_$]/g)?.length ?? 0;
+  return Math.max(1, lexical, Math.ceil(text.length / 4));
 }
 
 function nowIso(): string {

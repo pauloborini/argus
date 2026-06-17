@@ -111,6 +111,7 @@ describe("trace tool", () => {
       from: "src/main.ts",
       to: "src/dep.ts",
       max_hops: 3,
+      response_format: "detailed",
     });
     expect(payload.state).toBe("stale");
     expect(String(payload.staleness_hint)).toContain("cortex sync");
@@ -127,6 +128,7 @@ describe("trace tool", () => {
       from: "lib/main.dart",
       to: "lib/dep.dart",
       max_hops: 3,
+      response_format: "detailed",
     });
     expect(payload.state).toBe("parcial");
     expect(((payload.limitations as string[] | undefined) ?? []).length).toBeGreaterThan(0);
