@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join, resolve } from "node:path";
 import { buildDiscoveryManifest, fingerprintDiscoveredFiles } from "../discovery/fingerprint.js";
 import { writeManifestAtomic } from "../discovery/manifest.js";
+import { countTokens } from "../packing/tokenizer.js";
 import { discoverFiles } from "../discovery/walk.js";
 import { buildStructuralIndex } from "../extraction/pipeline.js";
 import { buildToolResponse } from "../mcp/tools/response.js";
@@ -132,35 +133,8 @@ interface TaskSpec {
 }
 
 // --- Tokenizer (aproximação documentada) -----------------------------------
-
-/**
- * APROXIMAÇÃO DOCUMENTADA — NÃO é o tokenizer do modelo alvo. Conta subpalavras
- * (quebra camelCase, dígitos e símbolos) tratando cada pontuação como 1 token.
- * Determinística e offline; substitui o antigo `chars/4` (que subestimava código
- * denso). Os números do benchmark são, portanto, estimativas — não contagem real.
- */
-export function approxTokens(text: string): number {
-  if (!text) {
-    return 0;
-  }
-  const atoms = text.match(/[A-Za-z]+|[0-9]+|[^\sA-Za-z0-9]/g);
-  if (!atoms) {
-    return 0;
-  }
-  let count = 0;
-  for (const atom of atoms) {
-    if (/^[A-Za-z]+$/.test(atom)) {
-      // Quebra camelCase e divide runs longos (~6 chars/subtoken, como BPE faz).
-      const parts = atom.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/);
-      for (const part of parts) {
-        count += Math.max(1, Math.ceil(part.length / 6));
-      }
-    } else {
-      count += 1;
-    }
-  }
-  return count;
-}
+// Delegado a src/packing/tokenizer.ts (countTokens).
+export { countTokens as approxTokens } from "../packing/tokenizer.js";
 
 /**
  * Re-serialização compacta usada no arm `formato-so`: mesma informação do
@@ -352,7 +326,7 @@ function buildArmResult(
   }
 
   const combined = steps.map((step) => step.output).join("\n");
-  const tokens = steps.reduce((sum, step) => sum + approxTokens(step.output), 0);
+  const tokens = steps.reduce((sum, step) => sum + countTokens(step.output), 0);
   const evalResult = evaluateAnswer(combined, spec.groundTruth);
 
   return {

@@ -10,19 +10,7 @@ import { uniqueByKey, isWithinPath } from "./common.js";
 import type { ToolResponsePayload, PackContextArgs, RetrieveArgs, IndexEnvelope, ExploreSnippetRef, PackOriginRef, PackRemovedEntry, PackSegment, StoredPackHandle, ReadStoredPackHandleResult, TraceNode } from "./common.js";
 import { LazyTraceGraph, personalizedPageRank } from "./graph.js";
 import { buildExploreResponse } from "./explore.js";
-
-/**
- * Estimador de tokens code-aware (sem dependência de tokenizer). `chars/4`
- * subestima código (muitos tokens curtos + pontuação), arriscando estourar o
- * budget real; contar tokens lexicais (identificadores/números/pontuação) é mais
- * conservador. Mantém o piso `chars/4` para subdividir identificadores longos
- * em prosa densa. (Um tokenizer real — tiktoken / token-count Anthropic — segue
- * como opção futura, ao custo de dependência/rede.)
- */
-function approximateTokenCount(text: string): number {
-  const lexical = text.match(/[A-Za-z0-9_$]+|[^\sA-Za-z0-9_$]/g)?.length ?? 0;
-  return Math.max(1, lexical, Math.ceil(text.length / 4));
-}
+import { countTokens } from "../../packing/tokenizer.js";
 
 /**
  * Resumo de segmento que **preserva o código**. As linhas de scaffolding em
@@ -43,7 +31,7 @@ function summarizeSegmentText(text: string, budget: number): string {
     snippetStart >= 0 ? [...head, ...lines.slice(snippetStart)] : lines.slice(0, 4);
 
   let kept = candidate;
-  while (kept.length > 1 && approximateTokenCount(`\n\n${kept.join("\n")}`) > budget) {
+  while (kept.length > 1 && countTokens(`\n\n${kept.join("\n")}`) > budget) {
     kept = kept.slice(0, -1);
   }
   return kept.join("\n");
@@ -759,14 +747,14 @@ export function buildPackContextResponse(
   }
 
   const header = [`Objetivo: ${goal}`, `Estilo: ${style}`, `Fontes: ${sources.join(", ")}`].join("\n");
-  let remainingBudget = tokenBudget - approximateTokenCount(header);
+  let remainingBudget = tokenBudget - countTokens(header);
   if (remainingBudget <= 0) {
     return {
       packed_context: "",
       origin_refs: [],
       removed_or_summarized: [],
       reversibility: "none",
-      token_estimate: approximateTokenCount(header),
+      token_estimate: countTokens(header),
       ...stubResponse("falha", "token_budget insuficiente para montar contexto útil."),
     };
   }
@@ -778,7 +766,7 @@ export function buildPackContextResponse(
 
   for (const segment of segments) {
     const segmentText = `\n\n${segment.text}`;
-    const fullCost = approximateTokenCount(segmentText);
+    const fullCost = countTokens(segmentText);
     if (fullCost <= remainingBudget) {
       includedSections.push(segmentText);
       originRefs.push(...segment.originRefs);
@@ -788,7 +776,7 @@ export function buildPackContextResponse(
 
     const summarizedLines = summarizeSegmentText(segment.text, remainingBudget);
     const summarizedText = `\n\n${summarizedLines}`;
-    const summaryCost = approximateTokenCount(summarizedText);
+    const summaryCost = countTokens(summarizedText);
     if (summaryCost <= remainingBudget) {
       includedSections.push(summarizedText);
       originRefs.push(...segment.originRefs);
@@ -819,7 +807,7 @@ export function buildPackContextResponse(
       origin_refs: [],
       removed_or_summarized: removedOrSummarized,
       reversibility: "none",
-      token_estimate: approximateTokenCount(packedContext),
+      token_estimate: countTokens(packedContext),
       ...stubResponse("falha", "Não foi possível empacotar: budget ou fontes insuficientes."),
     };
   }
@@ -865,7 +853,7 @@ export function buildPackContextResponse(
     removed_or_summarized: removedOrSummarized,
     retrieve_handle: retrieveHandle,
     reversibility,
-    token_estimate: approximateTokenCount(packedContext),
+    token_estimate: countTokens(packedContext),
     ...stubResponse(state, "Contexto comprimido pronto para o modelo.", {
       limitations: Array.from(limitations),
       staleness_hint: envelope.staleness_hint,
