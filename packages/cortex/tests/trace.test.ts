@@ -46,6 +46,7 @@ describe("trace tool", () => {
       to: "helper",
       direction: "forward",
       max_hops: 4,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.paths as Array<{ hops: unknown[] }>).length).toBeGreaterThan(0);
@@ -63,6 +64,7 @@ describe("trace tool", () => {
       from: "src/main.ts",
       to: "src/dep.ts",
       max_hops: 3,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.files as string[])).toContain("src/dep.ts");
@@ -93,6 +95,7 @@ describe("trace tool", () => {
       from: "boot",
       to: "src/right.ts",
       max_hops: 4,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect(payload.files).toContain("src/right.ts");

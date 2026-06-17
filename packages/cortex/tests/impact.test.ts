@@ -62,6 +62,7 @@ describe("impact tool", () => {
       target: "calculateTotal",
       direction: "dependencies",
       depth: 2,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.files as string[])).toContain("dep.ts");
@@ -79,6 +80,7 @@ describe("impact tool", () => {
       target: "src/dep.ts",
       direction: "dependents",
       depth: 2,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.files as string[])).toContain("src/main.ts");
@@ -125,6 +127,7 @@ describe("impact tool", () => {
       target: "alvoChamado",
       direction: "dependents",
       depth: 2,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.files as string[])).toContain("caller.ts");

@@ -16,6 +16,7 @@ import { buildImpactResponse } from "./impact.js";
 import { buildRetrieveResponse, buildPackContextResponse } from "./pack.js";
 import { buildDiffImpactResponse } from "./diff-impact.js";
 import { buildExploreResponse } from "./explore.js";
+import { compressPayload } from "./payload-compress.js";
 
 /** Respostas honestas por tool — campos vazios alinhados a SURFACE_MCP_CLI.md (S02) */
 type ResponseFormat = "concise" | "detailed";
@@ -58,6 +59,7 @@ function envelopeCode(text: string | undefined): string | undefined {
 function applyResponseFormat(
   payload: ToolResponsePayload,
   format: ResponseFormat,
+  tool: McpToolName,
 ): ToolResponsePayload {
   if (format === "detailed") {
     return payload;
@@ -74,7 +76,7 @@ function applyResponseFormat(
     out.message = messageCode;
   }
 
-  return out;
+  return compressPayload(out, tool);
 }
 
 export function buildToolResponse(
@@ -85,6 +87,7 @@ export function buildToolResponse(
   return applyResponseFormat(
     buildToolResponseInner(tool, cwd, args),
     resolveResponseFormat(args),
+    tool,
   );
 }
 
@@ -179,6 +182,7 @@ export async function buildToolResponseAsync(
       return applyResponseFormat(
         buildToolResponseInner(tool, cwd, args),
         resolveResponseFormat(args),
+        tool,
       );
     }
     const envelope = buildIndexEnvelope(cwd, "lite");
@@ -188,7 +192,7 @@ export async function buildToolResponseAsync(
       args as SemanticSearchArgs | undefined,
       deps,
     );
-    return applyResponseFormat(inner, resolveResponseFormat(args));
+    return applyResponseFormat(inner, resolveResponseFormat(args), tool);
   }
   return buildToolResponse(tool, cwd, args);
 }

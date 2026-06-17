@@ -233,7 +233,6 @@ export function buildExploreResponse(
           entry = uniqueFiles[0]!;
         } else {
           ambiguityCandidates = uniqueFiles.slice(0, 10).map((file) => ({
-            name: file.relative_path,
             path: file.relative_path,
             reason: "topic_match",
           }));

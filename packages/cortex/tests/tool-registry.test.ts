@@ -108,7 +108,7 @@ describe("tool-registry", () => {
   it("impact e diff_impact usam campos SURFACE §4–5", () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
-    const impact = buildToolResponse("impact", dir);
+    const impact = buildToolResponse("impact", dir, { response_format: "detailed" });
     expect(impact).toMatchObject({
       direct_affected: [],
       indirect_affected: [],
