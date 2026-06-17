@@ -459,8 +459,26 @@ Organizado por **impacto/esforço**. Os três tiers são entregáveis independen
 15. **Resolução de import por linguagem** + `from_symbol` na extração +
     preservar receiver no callee (Bugs de precisão §3.4). Maior ganho de acurácia
     cross-file em repos poliglotas.
-16. **Embeddings opcionais** (sqlite-vec int8 + bge-small, híbrido RRF com BM25,
-    rerank opcional) como **uma tool** que o agente chama quando o lexical falha.
+16. ~~**Embeddings opcionais** (int8 + bge-small, híbrido RRF com BM25) como
+    **uma tool** que o agente chama quando o lexical falha.~~ ✅
+    *Fechado:* nova tool `semantic_search` (10ª da surface, extensão aditiva +
+    bump SemVer minor) + comando `cortex embed`, **off-by-default**. Modelo real
+    `Xenova/bge-small-en-v1.5` (dim 384) via transformers.js (WASM, sem build
+    nativo); vetores **int8 quantizados em BLOB no próprio SQLite** com cosine
+    brute-force (sem dep nativa de vector-store — sqlite-vec descartado, ganho só
+    em escala que não temos); fusão híbrida por **RRF** com o BM25 lexical.
+    Migração v4 aditiva (não força reindex; `index` completo zera vetores por
+    CASCADE, `sync` incremental os deixa stale → sinalizado `W_EMBEDDINGS_STALE`;
+    ausência → `W_EMBEDDINGS_UNAVAILABLE` com fallback lexical honesto). Embed do
+    próprio repo: **2563 símbolos** em ~2min (inclui download do modelo).
+    Medição honesta (amostra pequena, nosso repo) — em 3 queries de **intenção
+    multi-palavra** o `search` lexical retornou **vazio** e o `semantic_search`
+    trouxe o alvo no top-3: *"OS file-watcher limit reached… polling"* →
+    `onWatcherError`/`watcherExhaustionHint` (0.61); *"combine lexical and dense
+    rankings"* → fusão em `semantic-search.ts` (0.67); *"deterministic embedder
+    for tests"* → símbolos do `FakeEmbedder` (0.69). Lexical de **nome exato**
+    segue forte (sem regressão); semântico é fallback opcional, default segue
+    lexical sempre-fresco.
 17. **Ingestão SCIP opcional** como tier de precisão quando o repo emite
     `index.scip` em CI.
 18. **Fechar lacunas por linguagem** (Dart calls, Rust impl, Go interface/

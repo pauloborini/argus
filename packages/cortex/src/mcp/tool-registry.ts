@@ -9,6 +9,7 @@ export const MCP_TOOL_NAMES = [
   "pack_context",
   "retrieve",
   "status",
+  "semantic_search",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];

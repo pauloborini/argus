@@ -9,6 +9,8 @@ import { runIndex } from "./commands/index-cmd.js";
 import { runPackContext } from "./commands/pack-context.js";
 import { runRetrieve } from "./commands/retrieve.js";
 import { runSearch } from "./commands/search.js";
+import { runSemanticSearch } from "./commands/semantic-search.js";
+import { runEmbed } from "./commands/embed-cmd.js";
 import { runStatus } from "./commands/status.js";
 import { runSync } from "./commands/sync.js";
 import { runTrace } from "./commands/trace.js";
@@ -178,6 +180,31 @@ program
   .action((query: string, opts: { scope?: string; kind?: string; limit?: number }) => {
     finish(runSearch(query, opts));
   });
+
+program
+  .command("embed")
+  .description("Gerar embeddings semânticos do índice (opcional, off-by-default)")
+  .option("--batch <n>", "Tamanho do lote de inferência", (value) => Number(value))
+  .action(async (opts: { batch?: number }) => {
+    finish(await runEmbed({ batch: opts.batch }));
+  });
+
+program
+  .command("semantic-search")
+  .description("Busca semântica (embeddings) com fusão híbrida; requer cortex embed")
+  .argument("<query>", "Query em linguagem natural")
+  .option("--mode <mode>", "dense | hybrid (default hybrid)")
+  .option("--scope <path>", "Restringir candidatos por path")
+  .option("--kind <kind>", "Restringir por tipo de símbolo")
+  .option("--limit <n>", "Máximo de candidatos", (value) => Number(value))
+  .action(
+    async (
+      query: string,
+      opts: { mode?: "dense" | "hybrid"; scope?: string; kind?: string; limit?: number },
+    ) => {
+      finish(await runSemanticSearch(query, opts));
+    },
+  );
 
 program
   .command("files")

@@ -84,6 +84,22 @@ A saída reporta o caminho usado — `via full` · `via git-delta` · `via dirty
 · `via watch` (delta por paths explícitos do daemon) — e, quando uma dirty-flag
 foi consumida, o número de paths pendentes.
 
+### `cortex embed`
+Gera embeddings semânticos do índice estrutural — **opcional e off-by-default**.
+Alimenta a tool `semantic_search`. Modelo bge-small local (baixa no 1º uso,
+cache do transformers.js), vetores quantizados int8 no próprio SQLite. **Não
+auto-sincroniza**: re-rode após mudanças relevantes (um `cortex index` completo
+zera os vetores; `cortex sync` incremental os deixa stale, sinalizado na busca).
+
+```bash
+cortex embed
+cortex embed --batch 64   # tamanho do lote de inferência (default 32)
+```
+
+| Flag | Significado |
+|---|---|
+| `--batch <n>` | Símbolos por lote de inferência. |
+
 ### `cortex status`
 Saúde e staleness do índice local.
 
@@ -120,6 +136,30 @@ cortex search "calculate" --scope src/ --kind function --limit 5
 Cada candidato: `id`, `kind`, `name`, `path`, `start_line`, `end_line`,
 `score`, `match_reason`. `start_line`/`end_line` distinguem símbolos homônimos
 no mesmo arquivo e permitem ir direto a eles.
+
+### `cortex semantic-search <query>`
+Busca por **significado** via embeddings (bge-small local), fundida com o
+lexical por RRF. Use quando `search` vier vazio ou a intenção não casar com
+nomes literais — ex.: *"limite de watchers do SO esgotado"* acha
+`watcherExhaustionHint` mesmo sem o termo no nome. Requer `cortex embed` antes
+(off-by-default); sem vetores, degrada honesto (`W_EMBEDDINGS_UNAVAILABLE`) e cai
+para resultados lexicais.
+
+```bash
+cortex semantic-search "onde tratamos limite de file watchers do SO"
+cortex semantic-search "combinar ranking lexical e denso" --mode dense --limit 5
+```
+
+| Flag | Significado |
+|---|---|
+| `--mode <mode>` | `dense` (só vetores) · `hybrid` (fusão RRF com lexical, default). |
+| `--scope <path>` | Restringe candidatos a um path/dir. |
+| `--kind <kind>` | Restringe por tipo de símbolo. |
+| `--limit <n>` | Máximo de candidatos. |
+
+Mesmo shape de candidato do `search`, com `match_reason` ∈ `semantic` ·
+`lexical` · `hybrid`. `state` pode vir `stale` (`W_EMBEDDINGS_STALE`) quando o
+índice avançou desde o `embed` — resultados servidos com o aviso.
 
 ### `cortex files`
 Lista a estrutura indexada do workspace.
