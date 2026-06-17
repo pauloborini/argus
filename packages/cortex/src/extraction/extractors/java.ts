@@ -80,11 +80,12 @@ export function extractJava(root: SyntaxNode): FileExtractionResult {
       case "method_invocation": {
         const name = node.childForFieldName("name")?.text;
         if (name) {
+          const object = node.childForFieldName("object")?.text;
           const from = enclosingSymbolName(node, JAVA_CALL_DEFINERS);
           edges.push({
             kind: "calls",
             from_symbol: from ?? undefined,
-            to: name,
+            to: object ? `${object}.${name}` : name,
             line: startLine(node),
           });
         }

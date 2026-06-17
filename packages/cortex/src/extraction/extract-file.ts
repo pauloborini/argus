@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
 import { detectLanguageFromPath } from "./language.js";
 import { extractDart } from "./extractors/dart.js";
@@ -19,6 +19,33 @@ import type {
 
 const TS_IMPORT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"];
 
+function toRelativePath(rootPath: string, absolutePath: string): string {
+  return relative(rootPath, absolutePath).split("\\").join("/");
+}
+
+function firstExistingPath(rootPath: string, candidates: string[]): string | undefined {
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return toRelativePath(rootPath, candidate);
+    }
+  }
+  return undefined;
+}
+
+function singleFileInDir(rootPath: string, dirPath: string, extensions: string[]): string | undefined {
+  if (!existsSync(dirPath)) {
+    return undefined;
+  }
+  try {
+    const files = readdirSync(dirPath)
+      .filter((item) => extensions.some((ext) => item.endsWith(ext)))
+      .sort((a, b) => a.localeCompare(b));
+    return files.length === 1 ? toRelativePath(rootPath, join(dirPath, files[0]!)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveTypeScriptImportPath(
   rootPath: string,
   fromRelativePath: string,
@@ -35,13 +62,7 @@ function resolveTypeScriptImportPath(
     ...TS_IMPORT_EXTENSIONS.map((ext) => join(base, `index${ext}`)),
   ];
 
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return relative(rootPath, candidate);
-    }
-  }
-
-  return undefined;
+  return firstExistingPath(rootPath, candidates);
 }
 
 function resolveTypeScriptImports(
@@ -53,6 +74,152 @@ function resolveTypeScriptImports(
     const resolved_path = resolveTypeScriptImportPath(rootPath, fromRelativePath, entry.source);
     return resolved_path ? { ...entry, resolved_path } : entry;
   });
+}
+
+function resolvePythonImportPath(
+  rootPath: string,
+  fromRelativePath: string,
+  importSource: string,
+): string | undefined {
+  const modulePath = importSource.replace(/^\.+/, "").replace(/\./g, "/");
+  if (!modulePath) {
+    return undefined;
+  }
+  const fromDir = dirname(join(rootPath, fromRelativePath));
+  const candidates = [
+    join(fromDir, `${modulePath}.py`),
+    join(fromDir, modulePath, "__init__.py"),
+    join(rootPath, `${modulePath}.py`),
+    join(rootPath, modulePath, "__init__.py"),
+  ];
+  return firstExistingPath(rootPath, candidates);
+}
+
+function resolvePythonImports(
+  rootPath: string,
+  fromRelativePath: string,
+  imports: ExtractedImport[],
+): ExtractedImport[] {
+  return imports.map((entry) => {
+    const resolved_path = resolvePythonImportPath(rootPath, fromRelativePath, entry.source);
+    return resolved_path ? { ...entry, resolved_path } : entry;
+  });
+}
+
+function resolveGoImportPath(
+  rootPath: string,
+  fromRelativePath: string,
+  importSource: string,
+): string | undefined {
+  const baseDir = importSource.startsWith(".")
+    ? normalize(join(dirname(join(rootPath, fromRelativePath)), importSource))
+    : normalize(join(rootPath, importSource));
+  return (
+    firstExistingPath(rootPath, [`${baseDir}.go`]) ??
+    singleFileInDir(rootPath, baseDir, [".go"])
+  );
+}
+
+function resolveGoImports(
+  rootPath: string,
+  fromRelativePath: string,
+  imports: ExtractedImport[],
+): ExtractedImport[] {
+  return imports.map((entry) => {
+    const resolved_path = resolveGoImportPath(rootPath, fromRelativePath, entry.source);
+    return resolved_path ? { ...entry, resolved_path } : entry;
+  });
+}
+
+function resolveDottedImportPath(
+  rootPath: string,
+  fromRelativePath: string,
+  importSource: string,
+  extension: ".java" | ".kt",
+): string | undefined {
+  const sourcePath = importSource.replace(/\./g, "/");
+  const fromDir = dirname(join(rootPath, fromRelativePath));
+  const candidates = [
+    join(fromDir, `${sourcePath}${extension}`),
+    join(rootPath, `${sourcePath}${extension}`),
+  ];
+  return firstExistingPath(rootPath, candidates);
+}
+
+function resolveDottedImports(
+  rootPath: string,
+  fromRelativePath: string,
+  imports: ExtractedImport[],
+  extension: ".java" | ".kt",
+): ExtractedImport[] {
+  return imports.map((entry) => {
+    const resolved_path = resolveDottedImportPath(rootPath, fromRelativePath, entry.source, extension);
+    return resolved_path ? { ...entry, resolved_path } : entry;
+  });
+}
+
+function resolveRustImportPath(
+  rootPath: string,
+  fromRelativePath: string,
+  importSource: string,
+): string | undefined {
+  if (importSource.startsWith("std::") || importSource.startsWith("core::") || importSource.startsWith("alloc::")) {
+    return undefined;
+  }
+  const fromDir = dirname(join(rootPath, fromRelativePath));
+  const stripped = importSource
+    .replace(/^crate::/, "")
+    .replace(/^self::/, "")
+    .replace(/^super::/, "../");
+  const modulePath = stripped.replace(/::/g, "/");
+  if (!modulePath) {
+    return undefined;
+  }
+  const base = importSource.startsWith("crate::") ? rootPath : fromDir;
+  const target = normalize(join(base, modulePath));
+  const rootTarget = normalize(join(rootPath, modulePath));
+  return firstExistingPath(rootPath, [
+    `${target}.rs`,
+    join(target, "mod.rs"),
+    `${rootTarget}.rs`,
+    join(rootTarget, "mod.rs"),
+  ]);
+}
+
+function resolveRustImports(
+  rootPath: string,
+  fromRelativePath: string,
+  imports: ExtractedImport[],
+): ExtractedImport[] {
+  return imports.map((entry) => {
+    const resolved_path = resolveRustImportPath(rootPath, fromRelativePath, entry.source);
+    return resolved_path ? { ...entry, resolved_path } : entry;
+  });
+}
+
+function resolveImportsForLanguage(
+  language: SupportedLanguage,
+  rootPath: string,
+  relativePath: string,
+  imports: ExtractedImport[],
+): ExtractedImport[] {
+  switch (language) {
+    case "typescript":
+    case "javascript":
+      return resolveTypeScriptImports(rootPath, relativePath, imports);
+    case "python":
+      return resolvePythonImports(rootPath, relativePath, imports);
+    case "go":
+      return resolveGoImports(rootPath, relativePath, imports);
+    case "java":
+      return resolveDottedImports(rootPath, relativePath, imports, ".java");
+    case "kotlin":
+      return resolveDottedImports(rootPath, relativePath, imports, ".kt");
+    case "rust":
+      return resolveRustImports(rootPath, relativePath, imports);
+    case "dart":
+      return resolveDartImports(rootPath, relativePath, imports);
+  }
 }
 
 /**
@@ -69,7 +236,7 @@ function resolveDartImportPath(
     return undefined;
   }
   const candidate = normalize(join(dirname(join(rootPath, fromRelativePath)), importSource));
-  return existsSync(candidate) ? relative(rootPath, candidate) : undefined;
+  return existsSync(candidate) ? toRelativePath(rootPath, candidate) : undefined;
 }
 
 function resolveDartImports(
@@ -174,12 +341,12 @@ export function extractFile(rootPath: string, relativePath: string): FileStructu
   try {
     const source = readFileSync(absolutePath, "utf-8");
     const result = dispatchExtractor(detection.language, source);
-    const imports =
-      detection.language === "typescript" || detection.language === "javascript"
-        ? resolveTypeScriptImports(rootPath, relativePath, result.imports)
-        : detection.language === "dart"
-          ? resolveDartImports(rootPath, relativePath, result.imports)
-          : result.imports;
+    const imports = resolveImportsForLanguage(
+      detection.language,
+      rootPath,
+      relativePath,
+      result.imports,
+    );
     return {
       relative_path: relativePath,
       language: detection.language,

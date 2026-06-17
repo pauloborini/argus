@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { stubResponse } from "../../contracts/response-state.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { closeIndexDb, openIndexDb } from "../../storage/sqlite-index-store.js";
-import { getIndexDbPath } from "../../workspace/workspace.js";
+import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
 import { uniqueByKey, isWithinPath } from "./common.js";
-import type { ToolResponsePayload, PackContextArgs, RetrieveArgs, IndexEnvelope, ExploreSnippetRef, PackOriginRef, PackRemovedEntry, PackSegment, StoredPackHandle, ReadStoredPackHandleResult } from "./common.js";
-import { buildTraceAdjacency, personalizedPageRank } from "./graph.js";
+import type { ToolResponsePayload, PackContextArgs, RetrieveArgs, IndexEnvelope, ExploreSnippetRef, PackOriginRef, PackRemovedEntry, PackSegment, StoredPackHandle, ReadStoredPackHandleResult, TraceNode } from "./common.js";
+import { LazyTraceGraph, personalizedPageRank } from "./graph.js";
 import { buildExploreResponse } from "./explore.js";
 
 /**
@@ -633,6 +633,60 @@ function buildPackSegmentsFromSource(
   };
 }
 
+function rankSegmentsByLazyPageRank(cwd: string, segments: PackSegment[]): PackSegment[] {
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata || segments.length <= 1) {
+    return segments;
+  }
+
+  try {
+    const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+    try {
+      const graph = new LazyTraceGraph(db, true);
+      const seedNodes = uniqueByKey(
+        segments
+          .flatMap((segment) => segment.originRefs.map((ref) => ref.path))
+          .map((path): TraceNode => ({
+            id: `file:${path}`,
+            node_type: "file",
+            name: path,
+            path,
+          })),
+        (node) => node.id,
+      );
+
+      for (const seed of seedNodes) {
+        const firstHop = graph.outEdges(seed);
+        for (const edge of firstHop.slice(0, 20)) {
+          graph.outEdges(edge.to);
+        }
+      }
+
+      const pageRank = personalizedPageRank(
+        graph.discovered,
+        seedNodes.map((node) => node.id),
+      );
+      if (pageRank.size === 0) {
+        return segments;
+      }
+
+      const scoreSegment = (segment: PackSegment): number =>
+        segment.originRefs.reduce(
+          (max, ref) => Math.max(max, pageRank.get(`file:${ref.path}`) ?? 0),
+          0,
+        );
+      return segments
+        .map((segment, index) => ({ segment, index, score: scoreSegment(segment) }))
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+        .map((scored) => scored.segment);
+    } finally {
+      closeIndexDb(db);
+    }
+  } catch {
+    return segments;
+  }
+}
+
 export function buildPackContextResponse(
   cwd: string,
   envelope: IndexEnvelope,
@@ -686,31 +740,9 @@ export function buildPackContextResponse(
     sourceReversibility = compareReversibility(sourceReversibility, result.reversibility);
   }
 
-  // Item 14: reordena segmentos por PageRank personalizado nas fontes da
-  // query antes do preenchimento guloso do budget, então o material mais
-  // central sobrevive ao corte. Seeds = nós-arquivo das próprias fontes do
-  // pack. Fallback silencioso para ordem original se o grafo estiver
-  // indisponível/vazio (ex.: fontes só de retrieve_handle).
-  if (envelope.structuralIndex && segments.length > 1) {
-    const adjacency = buildTraceAdjacency(envelope.structuralIndex, true);
-    if (adjacency.size > 0) {
-      const seedIds = uniqueByKey(
-        segments.flatMap((segment) => segment.originRefs.map((ref) => `file:${ref.path}`)),
-        (id) => id,
-      );
-      const pageRank = personalizedPageRank(adjacency, seedIds);
-      const scoreSegment = (segment: PackSegment): number =>
-        segment.originRefs.reduce(
-          (max, ref) => Math.max(max, pageRank.get(`file:${ref.path}`) ?? 0),
-          0,
-        );
-      const ranked = segments
-        .map((segment, index) => ({ segment, index, score: scoreSegment(segment) }))
-        .sort((left, right) => right.score - left.score || left.index - right.index)
-        .map((scored) => scored.segment);
-      segments.splice(0, segments.length, ...ranked);
-    }
-  }
+  // Item 14: PageRank personalizado no subgrafo curto das fontes, via
+  // LazyTraceGraph. Evita reconstruir o grafo inteiro só para ordenar segmentos.
+  segments.splice(0, segments.length, ...rankSegmentsByLazyPageRank(cwd, segments));
 
   if (segments.length === 0) {
     return {

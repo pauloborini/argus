@@ -4,6 +4,14 @@ import { enclosingSymbolName, endLine, namedIdentifier, startLine, walkTree } fr
 
 const KOTLIN_CALL_DEFINERS: ReadonlySet<string> = new Set(["function_declaration"]);
 
+function kotlinCallee(node: SyntaxNode): string | null {
+  const navigation = node.descendantsOfType("navigation_expression")[0];
+  if (navigation) {
+    return navigation.text;
+  }
+  return namedIdentifier(node);
+}
+
 export function extractKotlin(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
   const imports: FileExtractionResult["imports"] = [];
@@ -60,13 +68,13 @@ export function extractKotlin(root: SyntaxNode): FileExtractionResult {
         break;
       }
       case "call_expression": {
-        const callee = node.childForFieldName("function") ?? namedIdentifier(node);
+        const callee = kotlinCallee(node);
         if (callee) {
           const from = enclosingSymbolName(node, KOTLIN_CALL_DEFINERS);
           edges.push({
             kind: "calls",
             from_symbol: from ?? undefined,
-            to: typeof callee === "string" ? callee : callee.text,
+            to: callee,
             line: startLine(node),
           });
         }
