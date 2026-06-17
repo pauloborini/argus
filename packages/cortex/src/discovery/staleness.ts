@@ -2,7 +2,13 @@ import { statSync } from "node:fs";
 import type { DiscoveryManifest } from "./types.js";
 import { discoverFiles } from "./walk.js";
 import { readDirtyFlag } from "./dirty-flag.js";
-import { getDirtyFlagPath, getManifestPath } from "../workspace/workspace.js";
+import { readManifest } from "./manifest.js";
+import {
+  getDirtyFlagPath,
+  getManifestPath,
+  readWorkspaceMetadata,
+  resolveRespectGitignore,
+} from "../workspace/workspace.js";
 
 export type ManifestStaleness = "fresh" | "stale" | "unknown";
 
@@ -68,6 +74,36 @@ export function computeManifestStaleness(
     expiresAt: now + STALENESS_MEMO_TTL_MS,
   });
   return result;
+}
+
+/**
+ * Probe barato para o auto-sync do MCP: o working tree divergiu do manifest?
+ * Fecha o Bug 9 — com daemon down e sem hooks a dirty-flag nunca é alimentada,
+ * então o auto-sync gated em `hasDirtyPaths` jamais dispara e o índice fica
+ * stale para sempre (até `cortex sync` manual). Reusa o memo de
+ * `computeManifestStaleness` (mesma assinatura por root), então não adiciona
+ * walk quando a tool já vai computar staleness no mesmo burst. Erro/ausência de
+ * manifest → `false`: nada a sincronizar via delta; a própria tool reporta o
+ * estado honesto (parcial/falha).
+ */
+export function isManifestStaleForAutoSync(cwd: string): boolean {
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return false;
+  }
+  let manifest: DiscoveryManifest | null;
+  try {
+    manifest = readManifest(getManifestPath(metadata.root_path));
+  } catch {
+    return false;
+  }
+  if (!manifest) {
+    return false;
+  }
+  const result = computeManifestStaleness(metadata.root_path, manifest, {
+    respect_gitignore: resolveRespectGitignore(metadata),
+  });
+  return result.staleness === "stale";
 }
 
 function computeStalenessUncached(

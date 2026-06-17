@@ -309,6 +309,22 @@ describe("S28 — sync de baixo atrito", () => {
       expect(text).toContain("novaFn");
     });
 
+    it("Bug 9: sem daemon/hooks (dirty-flag vazia) o fallback sincroniza o drift do working tree", async () => {
+      const root = useWorkspace(true);
+      expect(await runIndex()).toBe(0);
+      // Edição fora de daemon/hooks: a dirty-flag nunca é alimentada, então o
+      // caminho quente (consumo da flag) não dispara. Só o probe de staleness
+      // pega o drift.
+      writeFileSync(join(root, "tardio.ts"), "export function fnTardia() {}\n", "utf-8");
+      expect(hasDirtyPaths(root)).toBe(false);
+
+      const res = await callTool(true, "search", { query: "fnTardia" });
+      const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+
+      // Fallback de staleness disparou o sync mesmo sem dirty-flag: símbolo novo achável.
+      expect(text).toContain("fnTardia");
+    });
+
     it("--no-auto-sync não consome a dirty-flag", async () => {
       const root = useWorkspace(true);
       expect(await runIndex()).toBe(0);

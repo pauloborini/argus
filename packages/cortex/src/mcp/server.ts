@@ -9,6 +9,7 @@ import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "./tool-registry.js";
 import { buildToolStub } from "./tools/stubs.js";
 import { CORTEX_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
+import { isManifestStaleForAutoSync } from "../discovery/staleness.js";
 import { runSync } from "../commands/sync.js";
 
 export interface McpServerOptions {
@@ -213,6 +214,29 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
       // Sync falhou e não limpou a flag: pára para não entrar em loop infinito.
       if (!cleared) {
         break;
+      }
+    }
+
+    // Fallback Bug 9: com daemon down e sem hooks a dirty-flag nunca é
+    // alimentada, então o laço acima nunca dispara e o índice ficaria stale
+    // para sempre. Probe barato (memoizado, compartilha o walk que a tool já
+    // fará): se o working tree divergiu do manifest, sincroniza uma vez via
+    // walk. Sem laço — `runSync` atualiza o manifest e o próximo probe é fresh;
+    // se falhar, a tool reporta stale honesto pela leitura do índice.
+    if (!hasDirtyPaths(rootCwd) && isManifestStaleForAutoSync(rootCwd)) {
+      if (inFlight) {
+        await inFlight;
+      } else {
+        inFlight = (async () => {
+          try {
+            await runSync({ cwd: rootCwd, quiet: true });
+          } catch {
+            /* deixa o estado de staleness sinalizar; não trava a tool call */
+          } finally {
+            inFlight = null;
+          }
+        })();
+        await inFlight;
       }
     }
   }
