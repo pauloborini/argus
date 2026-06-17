@@ -20,6 +20,7 @@ import {
 import { acquireDaemonLock } from "./lock.js";
 
 const DEFAULT_DEBOUNCE_MS = 400;
+const DEFAULT_MAX_DEBOUNCE_MS = 3_000;
 const STATUS_INTERVAL_MS = 15_000;
 const SNAPSHOT_INTERVAL_MS = 30_000;
 const MAX_RESUBSCRIBE_BACKOFF_MS = 30_000;
@@ -44,6 +45,7 @@ interface WorkspaceState {
 
 export interface DaemonRuntimeOptions {
   debounceMs?: number;
+  maxDebounceMs?: number;
 }
 
 /** Estado serializável publicado no status file para `cortex daemon status`. */
@@ -86,6 +88,7 @@ function writeFileAtomic(path: string, content: string): void {
 export class DaemonRuntime {
   private readonly states = new Map<string, WorkspaceState>();
   private readonly debounceMs: number;
+  private readonly maxDebounceMs: number;
   private readonly startedAt = new Date().toISOString();
   private statusTimer: NodeJS.Timeout | null = null;
   private snapshotTimer: NodeJS.Timeout | null = null;
@@ -94,6 +97,7 @@ export class DaemonRuntime {
 
   constructor(options: DaemonRuntimeOptions = {}) {
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.maxDebounceMs = options.maxDebounceMs ?? DEFAULT_MAX_DEBOUNCE_MS;
   }
 
   async start(): Promise<boolean> {
@@ -158,7 +162,7 @@ export class DaemonRuntime {
             s.lastError = err.message;
           }
         },
-      }),
+      }, this.maxDebounceMs),
       subscription: null,
       snapshotPath,
       watching: false,
