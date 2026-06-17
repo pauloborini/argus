@@ -179,6 +179,7 @@ interface TraceEdgeStep {
   to: TraceNode;
   line?: number;
   uncertain?: string;
+  weight?: number;
 }
 
 interface TraceHopPayload {
@@ -1237,6 +1238,29 @@ function buildTraceAdjacency(
   // Índice name→ocorrências construído uma vez: elimina o scan O(arquivos×
   // símbolos) que ocorria por call-edge/herança resolvida.
   const symbolIndex = buildSymbolNameIndex(index, includeTests);
+  const referenceCounts = new Map<string, number>();
+  for (const entry of index.files) {
+    if (!includeTests && fileMatchesTests(entry.relative_path)) {
+      continue;
+    }
+    for (const edge of entry.edges) {
+      if (edge.kind === "calls" || edge.kind === "extends" || edge.kind === "implements") {
+        const target = callTargetName(edge.to);
+        referenceCounts.set(target, (referenceCounts.get(target) ?? 0) + 1);
+      }
+    }
+  }
+  const symbolWeight = (name: string): number => {
+    const definitionCount = findFilesBySymbolName(symbolIndex, name).length;
+    const referenceCount = referenceCounts.get(name) ?? 1;
+    const descriptiveNameBoost = name.length >= 8 ? 10 : 1;
+    const privatePenalty = name.startsWith("_") ? 0.1 : 1;
+    const commonNamePenalty = definitionCount > 5 ? 0.1 : 1;
+    return Math.max(
+      0.001,
+      descriptiveNameBoost * privatePenalty * commonNamePenalty * Math.sqrt(referenceCount),
+    );
+  };
   const fileNodes = new Map<string, TraceNode>();
 
   for (const entry of index.files) {
@@ -1296,6 +1320,7 @@ function buildTraceAdjacency(
             to: targetNode,
             line: edge.line,
             uncertain,
+            weight: symbolWeight(targetNode.name),
           });
           addEdge({
             relation: "called_by",
@@ -1303,6 +1328,7 @@ function buildTraceAdjacency(
             to: callerNode,
             line: edge.line,
             uncertain,
+            weight: symbolWeight(targetNode.name),
           });
         }
       }
@@ -1326,6 +1352,7 @@ function buildTraceAdjacency(
             to: targetNode,
             line: edge.line,
             uncertain,
+            weight: symbolWeight(targetNode.name),
           });
           addEdge({
             relation: `${edge.kind}_by`,
@@ -1333,6 +1360,7 @@ function buildTraceAdjacency(
             to: originNode,
             line: edge.line,
             uncertain,
+            weight: symbolWeight(targetNode.name),
           });
         }
       }
@@ -1355,7 +1383,7 @@ function buildTraceAdjacency(
  * centralidade de proximidade ponderada. Iteração de potência com damping
  * 0.85, massa dangling redistribuída pelo vetor de personalização.
  */
-function personalizedPageRank(
+export function personalizedPageRank(
   adjacency: Map<string, TraceEdgeStep[]>,
   seeds: string[],
   options?: { damping?: number; iterations?: number; tolerance?: number },
@@ -1366,13 +1394,17 @@ function personalizedPageRank(
 
   // Conjunto de nós = união de origens (chaves) e destinos de cada aresta.
   const nodeIds = new Set<string>();
-  const outNeighbors = new Map<string, string[]>();
+  const outNeighbors = new Map<string, Array<{ id: string; weight: number }>>();
   for (const [from, edges] of adjacency) {
     nodeIds.add(from);
     const targets = outNeighbors.get(from) ?? [];
     for (const edge of edges) {
       nodeIds.add(edge.to.id);
-      targets.push(edge.to.id);
+      const weight = edge.weight;
+      targets.push({
+        id: edge.to.id,
+        weight: weight !== undefined && Number.isFinite(weight) && weight > 0 ? weight : 1,
+      });
     }
     outNeighbors.set(from, targets);
   }
@@ -1421,12 +1453,13 @@ function personalizedPageRank(
       if (out.length === 0) {
         continue;
       }
-      const share = (damping * (pr.get(id) ?? 0)) / out.length;
-      if (share === 0) {
+      const totalWeight = out.reduce((sum, target) => sum + target.weight, 0);
+      if (totalWeight === 0) {
         continue;
       }
       for (const target of out) {
-        next.set(target, (next.get(target) ?? 0) + share);
+        const share = damping * (pr.get(id) ?? 0) * (target.weight / totalWeight);
+        next.set(target.id, (next.get(target.id) ?? 0) + share);
       }
     }
 
@@ -2214,21 +2247,27 @@ function registerPackedHandleInIndex(cwd: string, handle: string, createdAt: str
 const PACKED_HANDLE_MAX = 50;
 const PACKED_HANDLE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-function evictStalePackedHandles(cwd: string): void {
+function evictStalePackedHandles(cwd: string, protectedHandle: string): void {
   try {
     const db = openIndexDb(getIndexDbPath(cwd));
     try {
       const rows = db
-        .prepare("SELECT handle, created_at FROM packed_handles ORDER BY created_at DESC")
-        .all() as Array<{ handle: string; created_at: string }>;
+        .prepare(
+          `SELECT handle, created_at FROM packed_handles
+           ORDER BY CASE WHEN handle = ? THEN 0 ELSE 1 END, created_at DESC, id DESC`,
+        )
+        .all(protectedHandle) as Array<{ handle: string; created_at: string }>;
       const now = Date.now();
       const del = db.prepare("DELETE FROM packed_handles WHERE handle = ?");
       const handlesDir = getPackedHandlesDir(cwd);
-      rows.forEach((row, index) => {
+      let retained = 0;
+      rows.forEach((row) => {
         const parsed = Date.parse(row.created_at);
-        const tooOld = Number.isFinite(parsed) && now - parsed > PACKED_HANDLE_TTL_MS;
-        const overflow = index >= PACKED_HANDLE_MAX;
+        const isProtected = row.handle === protectedHandle;
+        const tooOld = !isProtected && Number.isFinite(parsed) && now - parsed > PACKED_HANDLE_TTL_MS;
+        const overflow = !isProtected && retained >= PACKED_HANDLE_MAX;
         if (!tooOld && !overflow) {
+          retained += 1;
           return;
         }
         if (isValidRetrieveHandle(row.handle)) {
@@ -2503,7 +2542,7 @@ function writeStoredPackHandle(
   }
 
   registerPackedHandleInIndex(cwd, payload.handle, payload.created_at);
-  evictStalePackedHandles(cwd);
+  evictStalePackedHandles(cwd, payload.handle);
   if (manifest.segments.length === 0) {
     return "none";
   }
@@ -2543,9 +2582,29 @@ function readSymbolSignature(
         break;
       }
     }
-    const signature = collected
-      .join(" ")
-      .replace(/\s*\{.*$/, "")
+    const declaration = collected.join(" ");
+    let bodyStart = declaration.length;
+    const pythonDeclaration = /^\s*(?:async\s+)?(?:def|class)\b/.test(declaration);
+    let nesting = 0;
+    for (let i = 0; i < declaration.length; i += 1) {
+      const char = declaration[i];
+      if (char === "(" || char === "[" || char === "<") {
+        nesting += 1;
+      } else if (char === ")" || char === "]" || char === ">") {
+        nesting = Math.max(0, nesting - 1);
+      } else if (char === "{") {
+        bodyStart = i;
+        break;
+      } else if (char === "=" && declaration[i + 1] === ">") {
+        bodyStart = i;
+        break;
+      } else if (char === ":" && nesting === 0 && pythonDeclaration) {
+        bodyStart = i + 1;
+        break;
+      }
+    }
+    const signature = declaration
+      .slice(0, bodyStart)
       .replace(/\s+/g, " ")
       .trim();
     if (!signature) {

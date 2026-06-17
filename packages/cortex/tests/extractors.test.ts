@@ -152,13 +152,15 @@ describe("extractors core", () => {
 
   it("Go: struct e interface embedding geram edges extends", () => {
     const src =
-      "package x\ntype Dog struct {\n  Animal\n  sync.Mutex\n  age int\n}\ntype Reader interface {\n  io.Reader\n  Read() error\n}\n";
+      "package x\ntype Dog struct {\n  Animal\n  sync.Mutex\n  age int\n}\ntype Reader interface {\n  Readable\n  io.Reader\n  Read() error\n}\n";
     const { rootNode } = parseFile("go", src);
     const result = extractGo(rootNode);
 
     expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Dog" && e.to === "Animal")).toBe(true);
     expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Dog" && e.to === "Mutex")).toBe(true);
     expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Reader" && e.to === "Reader")).toBe(true);
+    expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Reader" && e.to === "Readable")).toBe(true);
+    expect(result.edges.some((e) => e.kind === "extends" && e.to === "int")).toBe(false);
   });
 
   it("Dart: import relativo resolve resolved_path", () => {
