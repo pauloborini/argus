@@ -301,6 +301,179 @@ export function readAllFileEntries(db: Database): FileStructuralEntry[] {
   });
 }
 
+/** Hidrata um FileStructuralEntry a partir da linha de `files` (símbolos/edges/imports). */
+function hydrateFileEntry(
+  db: Database,
+  file: { id: number; relative_path: string; language: string; imports_json: string; parse_errors_json: string },
+): FileStructuralEntry {
+  const symbolRows = db
+    .prepare(
+      "SELECT name, kind, start_line, end_line, exported FROM symbols WHERE file_id = ? ORDER BY start_line, name",
+    )
+    .all(file.id) as Array<{
+    name: string;
+    kind: string;
+    start_line: number;
+    end_line: number;
+    exported: number | null;
+  }>;
+  const edgeRows = db
+    .prepare("SELECT kind, from_symbol, target, line FROM edges WHERE file_id = ? ORDER BY id")
+    .all(file.id) as Array<{
+    kind: string;
+    from_symbol: string | null;
+    target: string;
+    line: number | null;
+  }>;
+
+  let imports: ExtractedImport[];
+  let parse_errors: ParseError[];
+  try {
+    imports = JSON.parse(file.imports_json) as ExtractedImport[];
+    parse_errors = JSON.parse(file.parse_errors_json) as ParseError[];
+  } catch {
+    throw new IndexDbCorruptedError(
+      "E_INDEX_CORRUPTED: Dados de arquivo corrompidos no SQLite; execute cortex index para reconstruir.",
+    );
+  }
+
+  return {
+    relative_path: file.relative_path,
+    language: file.language as FileStructuralEntry["language"],
+    symbols: symbolRows.map((symbol) => ({
+      name: symbol.name,
+      kind: symbol.kind as ExtractedSymbol["kind"],
+      start_line: symbol.start_line,
+      end_line: symbol.end_line,
+      exported: symbol.exported === null ? undefined : symbol.exported === 1,
+    })),
+    imports,
+    edges: edgeRows.map((edge) => ({
+      kind: edge.kind as ExtractedEdge["kind"],
+      from_symbol: edge.from_symbol ?? undefined,
+      to: edge.target,
+      line: edge.line ?? undefined,
+    })),
+    parse_errors,
+  };
+}
+
+/** Carrega um único FileStructuralEntry por path — base do grafo lazy (sem full-load). */
+export function readFileEntryByPath(db: Database, relativePath: string): FileStructuralEntry | null {
+  const file = db
+    .prepare(
+      "SELECT id, relative_path, language, imports_json, parse_errors_json FROM files WHERE relative_path = ?",
+    )
+    .get(relativePath) as
+    | { id: number; relative_path: string; language: string; imports_json: string; parse_errors_json: string }
+    | undefined;
+  return file ? hydrateFileEntry(db, file) : null;
+}
+
+/** Paths de arquivos que declaram um símbolo com este nome (resolução por nome, lazy). */
+export function readSymbolFilePathsByName(db: Database, name: string): string[] {
+  return (
+    db
+      .prepare(
+        "SELECT DISTINCT f.relative_path AS relative_path FROM symbols s JOIN files f ON f.id = s.file_id WHERE s.name = ? ORDER BY f.relative_path",
+      )
+      .all(name) as Array<{ relative_path: string }>
+  ).map((row) => row.relative_path);
+}
+
+export interface ReverseEdgeRow {
+  relative_path: string;
+  kind: string;
+  from_symbol: string | null;
+  target: string;
+  line: number | null;
+}
+
+/** Edges cujo nome-alvo normalizado bate (callers/herdeiros reversos via idx_edges_target_name). */
+export function readEdgesByTargetName(db: Database, targetName: string): ReverseEdgeRow[] {
+  return db
+    .prepare(
+      "SELECT f.relative_path AS relative_path, e.kind AS kind, e.from_symbol AS from_symbol, e.target AS target, e.line AS line FROM edges e JOIN files f ON f.id = e.file_id WHERE e.target_name = ?",
+    )
+    .all(targetName) as ReverseEdgeRow[];
+}
+
+/** Edges cujo target cru é exatamente este (herança reversa preserva semântica raw do eager). */
+export function readEdgesByRawTarget(db: Database, target: string): ReverseEdgeRow[] {
+  return db
+    .prepare(
+      "SELECT f.relative_path AS relative_path, e.kind AS kind, e.from_symbol AS from_symbol, e.target AS target, e.line AS line FROM edges e JOIN files f ON f.id = e.file_id WHERE e.target = ?",
+    )
+    .all(target) as ReverseEdgeRow[];
+}
+
+/** Quantas edges referenciam este nome-alvo (peso PageRank: referenceCount). */
+export function countEdgesByTargetName(db: Database, name: string): number {
+  return (
+    db.prepare("SELECT COUNT(*) AS count FROM edges WHERE target_name = ?").get(name) as {
+      count: number;
+    }
+  ).count;
+}
+
+/** Quantos símbolos têm este nome (peso PageRank: definitionCount / nome comum). */
+export function countSymbolsByName(db: Database, name: string): number {
+  return (
+    db.prepare("SELECT COUNT(*) AS count FROM symbols WHERE name = ?").get(name) as {
+      count: number;
+    }
+  ).count;
+}
+
+/**
+ * Mapa resolved_path → arquivos que o importam. Único scan leve da coluna
+ * `imports_json` (sem símbolos/edges); construído sob demanda para o lookup
+ * `imported_by` reverso do grafo lazy quando não há índice de imports.
+ */
+export function readImportersMap(db: Database): Map<string, string[]> {
+  const rows = db
+    .prepare("SELECT relative_path, imports_json FROM files")
+    .all() as Array<{ relative_path: string; imports_json: string }>;
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    let imports: ExtractedImport[];
+    try {
+      imports = JSON.parse(row.imports_json) as ExtractedImport[];
+    } catch {
+      continue;
+    }
+    for (const imp of imports) {
+      if (!imp.resolved_path) {
+        continue;
+      }
+      const list = map.get(imp.resolved_path);
+      if (list) {
+        list.push(row.relative_path);
+      } else {
+        map.set(imp.resolved_path, [row.relative_path]);
+      }
+    }
+  }
+  return map;
+}
+
+/** Paths para resolução de alvo de arquivo (exato + parcial por substring), lazy. */
+export function readFilePathMatches(db: Database, normalizedLower: string): { exact: string[]; partial: string[] } {
+  const exact = (
+    db
+      .prepare("SELECT relative_path FROM files WHERE LOWER(relative_path) = ? ORDER BY relative_path")
+      .all(normalizedLower) as Array<{ relative_path: string }>
+  ).map((row) => row.relative_path);
+  const partial = (
+    db
+      .prepare(
+        "SELECT relative_path FROM files WHERE LOWER(relative_path) LIKE ? ESCAPE '\\' ORDER BY relative_path",
+      )
+      .all(`%${normalizedLower.replace(/[\\%_]/g, "\\$&")}%`) as Array<{ relative_path: string }>
+  ).map((row) => row.relative_path);
+  return { exact, partial };
+}
+
 export function readStructuralIndexFromDb(db: Database): StructuralIndex | null {
   const meta = readIndexMeta(db);
   if (!meta) {
@@ -540,7 +713,7 @@ function insertFileEntry(db: Database, file: FileStructuralEntry): void {
     "INSERT INTO symbols (file_id, name, kind, start_line, end_line, exported) VALUES (?, ?, ?, ?, ?, ?)",
   );
   const insertEdge = db.prepare(
-    "INSERT INTO edges (file_id, kind, from_symbol, target, line) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO edges (file_id, kind, from_symbol, target, target_name, line) VALUES (?, ?, ?, ?, ?, ?)",
   );
   const insertFts = db.prepare(
     "INSERT INTO symbols_fts (rowid, name, relative_path, kind) VALUES (?, ?, ?, ?)",
@@ -565,9 +738,16 @@ function insertFileEntry(db: Database, file: FileStructuralEntry): void {
       edge.kind,
       edge.from_symbol ?? null,
       edge.to,
+      edgeTargetName(edge.to),
       edge.line ?? null,
     );
   }
+}
+
+/** Último segmento de um target cru (`obj.metodo` → `metodo`); espelha callTargetName. */
+function edgeTargetName(rawTarget: string): string {
+  const segments = rawTarget.split(/[.:]/).filter(Boolean);
+  return segments.at(-1) ?? rawTarget;
 }
 
 function deleteFileByPath(db: Database, relativePath: string): void {

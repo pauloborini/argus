@@ -2,7 +2,13 @@ import type { Database } from "./sqlite-db.js";
 import { IndexDbSchemaError } from "./sqlite-db.js";
 import { SQLITE_SCHEMA_VERSION } from "./sqlite-prepared.js";
 
-export const MIGRATION_VERSION = 2;
+export const MIGRATION_VERSION = 3;
+
+/** Último segmento de um target cru (`obj.metodo` → `metodo`); espelha callTargetName. */
+function targetLastSegment(rawTarget: string): string {
+  const segments = rawTarget.split(/[.:]/).filter(Boolean);
+  return segments.at(-1) ?? rawTarget;
+}
 
 const DDL_V1 = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -76,10 +82,32 @@ CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 CREATE INDEX IF NOT EXISTS idx_edges_from_symbol ON edges(from_symbol);
 `;
 
-/** Ladder de migrações: cada degrau é idempotente (CREATE … IF NOT EXISTS). */
-const MIGRATIONS: ReadonlyArray<{ version: number; ddl: string }> = [
+// v3: coluna derivada `target_name` (último segmento de `target`) + índice,
+// habilita lookup reverso por nome (called_by/extends_by) em SQL sem varrer
+// `target` cru. ADD COLUMN roda uma única vez (gated por appliedVersion); o
+// backfill repopula DBs existentes sem exigir reindex.
+const DDL_V3 = `
+ALTER TABLE edges ADD COLUMN target_name TEXT;
+CREATE INDEX IF NOT EXISTS idx_edges_target_name ON edges(target_name);
+`;
+
+/** Repopula target_name de DBs já existentes (edges gravadas antes da v3). */
+export function backfillTargetName(db: Database): void {
+  const rows = db.prepare("SELECT id, target FROM edges WHERE target_name IS NULL").all() as Array<{
+    id: number;
+    target: string;
+  }>;
+  const update = db.prepare("UPDATE edges SET target_name = ? WHERE id = ?");
+  for (const row of rows) {
+    update.run(targetLastSegment(row.target), row.id);
+  }
+}
+
+/** Ladder de migrações: cada degrau é idempotente; `backfill` roda pós-DDL. */
+const MIGRATIONS: ReadonlyArray<{ version: number; ddl: string; backfill?: (db: Database) => void }> = [
   { version: 1, ddl: DDL_V1 },
   { version: 2, ddl: DDL_V2 },
+  { version: 3, ddl: DDL_V3, backfill: backfillTargetName },
 ];
 
 function hasMigrationsTable(db: Database): boolean {
@@ -114,6 +142,7 @@ export function applyMigrations(db: Database): void {
     for (const migration of MIGRATIONS) {
       if (migration.version > appliedVersion) {
         db.exec(migration.ddl);
+        migration.backfill?.(db);
         db.prepare(
           "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
         ).run(migration.version, new Date().toISOString());
