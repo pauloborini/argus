@@ -74,7 +74,12 @@ function dartCallee(argumentPart: SyntaxNode): string | undefined {
     return prev.text;
   }
   if (prev.type === "selector") {
-    return prev.descendantsOfType("identifier").at(-1)?.text;
+    const method = prev.descendantsOfType("identifier").at(-1)?.text;
+    if (!method) {
+      return undefined;
+    }
+    const receiver = prev.previousNamedSibling?.text;
+    return receiver ? `${receiver}.${method}` : method;
   }
   return undefined;
 }

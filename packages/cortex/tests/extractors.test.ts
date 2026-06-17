@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { extractFile } from "../src/extraction/extract-file.js";
 import { extractDart } from "../src/extraction/extractors/dart.js";
 import { extractGo } from "../src/extraction/extractors/go.js";
 import { extractJava } from "../src/extraction/extractors/java.js";
+import { extractKotlin } from "../src/extraction/extractors/kotlin.js";
 import { extractPython } from "../src/extraction/extractors/python.js";
 import { extractRust } from "../src/extraction/extractors/rust.js";
 import { extractTypeScriptLike } from "../src/extraction/extractors/typescript.js";
@@ -40,6 +41,27 @@ describe("extractors core", () => {
     const result = extractFile(tempDir, "main.ts");
     expect(result.imports[0]?.source).toBe("./bar");
     expect(result.imports[0]?.resolved_path).toBe("bar.ts");
+  });
+
+  it("resolve imports locais por linguagem quando há arquivo inequívoco", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "cortex-import-resolve-poly-"));
+    writeFileSync(join(tempDir, "dep.py"), "def helper(): pass\n", "utf-8");
+    writeFileSync(join(tempDir, "main.py"), "from dep import helper\n", "utf-8");
+    writeFileSync(join(tempDir, "dep.go"), "package main\n", "utf-8");
+    writeFileSync(join(tempDir, "main.go"), 'package main\nimport "./dep"\n', "utf-8");
+    mkdirSync(join(tempDir, "com", "acme"), { recursive: true });
+    writeFileSync(join(tempDir, "com", "acme", "Dep.java"), "package com.acme; class Dep {}\n", "utf-8");
+    writeFileSync(join(tempDir, "Main.java"), "import com.acme.Dep; class Main {}\n", "utf-8");
+    writeFileSync(join(tempDir, "com", "acme", "Dep.kt"), "package com.acme\nclass Dep\n", "utf-8");
+    writeFileSync(join(tempDir, "Main.kt"), "import com.acme.Dep\nclass Main\n", "utf-8");
+    writeFileSync(join(tempDir, "dep.rs"), "pub fn helper() {}\n", "utf-8");
+    writeFileSync(join(tempDir, "main.rs"), "use crate::dep;\n", "utf-8");
+
+    expect(extractFile(tempDir, "main.py").imports[0]?.resolved_path).toBe("dep.py");
+    expect(extractFile(tempDir, "main.go").imports[0]?.resolved_path).toBe("dep.go");
+    expect(extractFile(tempDir, "Main.java").imports[0]?.resolved_path).toBe("com/acme/Dep.java");
+    expect(extractFile(tempDir, "Main.kt").imports[0]?.resolved_path).toBe("com/acme/Dep.kt");
+    expect(extractFile(tempDir, "main.rs").imports[0]?.resolved_path).toBe("dep.rs");
   });
 
   it("extrai função, classe, import e edges em TypeScript", () => {
@@ -146,8 +168,18 @@ describe("extractors core", () => {
     const call = result.edges.find((e) => e.kind === "calls" && e.to === "helper");
     expect(call?.from_symbol).toBe("load");
     expect(
-      result.edges.some((e) => e.kind === "calls" && e.to === "write" && e.from_symbol === "save"),
+      result.edges.some((e) => e.kind === "calls" && e.to === "db.write" && e.from_symbol === "save"),
     ).toBe(true);
+  });
+
+  it("Java/Dart/Kotlin preservam receiver no callee raw", () => {
+    const java = parseFile("java", "class A { void save() { db.write(1); helper(); } }\n");
+    const dart = parseFile("dart", "class A { void save() { db.write(1); helper(); } }\n");
+    const kotlin = parseFile("kotlin", "fun save() { db.write(1); helper() }\n");
+
+    expect(extractJava(java.rootNode).edges.some((e) => e.kind === "calls" && e.to === "db.write")).toBe(true);
+    expect(extractDart(dart.rootNode).edges.some((e) => e.kind === "calls" && e.to === "db.write")).toBe(true);
+    expect(extractKotlin(kotlin.rootNode).edges.some((e) => e.kind === "calls" && e.to === "db.write")).toBe(true);
   });
 
   it("Go: struct e interface embedding geram edges extends", () => {
