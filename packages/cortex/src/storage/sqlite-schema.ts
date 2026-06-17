@@ -2,7 +2,7 @@ import type { Database } from "./sqlite-db.js";
 import { IndexDbSchemaError } from "./sqlite-db.js";
 import { SQLITE_SCHEMA_VERSION } from "./sqlite-prepared.js";
 
-export const MIGRATION_VERSION = 4;
+export const MIGRATION_VERSION = 5;
 
 /** Último segmento de um target cru (`obj.metodo` → `metodo`); espelha callTargetName. */
 function targetLastSegment(rawTarget: string): string {
@@ -127,12 +127,23 @@ export function backfillTargetName(db: Database): void {
   }
 }
 
+// v5: coluna `source` em edges — distingue 'heuristic' (tree-sitter) de 'scip'
+// (ingestão SCIP precisa). Aditiva: sem reindex, apenas backfill de linhas existentes.
+const DDL_V5 = `
+ALTER TABLE edges ADD COLUMN source TEXT DEFAULT 'heuristic';
+`;
+
+function backfillEdgeSource(db: Database): void {
+  db.prepare("UPDATE edges SET source = 'heuristic' WHERE source IS NULL").run();
+}
+
 /** Ladder de migrações: cada degrau é idempotente; `backfill` roda pós-DDL. */
 const MIGRATIONS: ReadonlyArray<{ version: number; ddl: string; backfill?: (db: Database) => void }> = [
   { version: 1, ddl: DDL_V1 },
   { version: 2, ddl: DDL_V2 },
   { version: 3, ddl: DDL_V3, backfill: backfillTargetName },
   { version: 4, ddl: DDL_V4 },
+  { version: 5, ddl: DDL_V5, backfill: backfillEdgeSource },
 ];
 
 function hasMigrationsTable(db: Database): boolean {

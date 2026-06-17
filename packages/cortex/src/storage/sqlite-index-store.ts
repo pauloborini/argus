@@ -244,13 +244,14 @@ export function readAllFileEntries(db: Database): FileStructuralEntry[] {
     exported: number | null;
   }>;
   const edgeRows = db
-    .prepare("SELECT file_id, kind, from_symbol, target, line FROM edges ORDER BY file_id, id")
+    .prepare("SELECT file_id, kind, from_symbol, target, line, source FROM edges ORDER BY file_id, id")
     .all() as Array<{
     file_id: number;
     kind: string;
     from_symbol: string | null;
     target: string;
     line: number | null;
+    source: string | null;
   }>;
 
   const symbolsByFile = new Map<number, ExtractedSymbol[]>();
@@ -274,6 +275,7 @@ export function readAllFileEntries(db: Database): FileStructuralEntry[] {
       from_symbol: edge.from_symbol ?? undefined,
       to: edge.target,
       line: edge.line ?? undefined,
+      source: edge.source ?? undefined,
     });
     edgesByFile.set(edge.file_id, list);
   }
@@ -318,12 +320,13 @@ function hydrateFileEntry(
     exported: number | null;
   }>;
   const edgeRows = db
-    .prepare("SELECT kind, from_symbol, target, line FROM edges WHERE file_id = ? ORDER BY id")
+    .prepare("SELECT kind, from_symbol, target, line, source FROM edges WHERE file_id = ? ORDER BY id")
     .all(file.id) as Array<{
     kind: string;
     from_symbol: string | null;
     target: string;
     line: number | null;
+    source: string | null;
   }>;
 
   let imports: ExtractedImport[];
@@ -353,6 +356,7 @@ function hydrateFileEntry(
       from_symbol: edge.from_symbol ?? undefined,
       to: edge.target,
       line: edge.line ?? undefined,
+      source: edge.source ?? undefined,
     })),
     parse_errors,
   };
@@ -387,13 +391,14 @@ export interface ReverseEdgeRow {
   from_symbol: string | null;
   target: string;
   line: number | null;
+  source: string | null;
 }
 
 /** Edges cujo nome-alvo normalizado bate (callers/herdeiros reversos via idx_edges_target_name). */
 export function readEdgesByTargetName(db: Database, targetName: string): ReverseEdgeRow[] {
   return db
     .prepare(
-      "SELECT f.relative_path AS relative_path, e.kind AS kind, e.from_symbol AS from_symbol, e.target AS target, e.line AS line FROM edges e JOIN files f ON f.id = e.file_id WHERE e.target_name = ?",
+      "SELECT f.relative_path AS relative_path, e.kind AS kind, e.from_symbol AS from_symbol, e.target AS target, e.line AS line, e.source AS source FROM edges e JOIN files f ON f.id = e.file_id WHERE e.target_name = ?",
     )
     .all(targetName) as ReverseEdgeRow[];
 }
@@ -402,7 +407,7 @@ export function readEdgesByTargetName(db: Database, targetName: string): Reverse
 export function readEdgesByRawTarget(db: Database, target: string): ReverseEdgeRow[] {
   return db
     .prepare(
-      "SELECT f.relative_path AS relative_path, e.kind AS kind, e.from_symbol AS from_symbol, e.target AS target, e.line AS line FROM edges e JOIN files f ON f.id = e.file_id WHERE e.target = ?",
+      "SELECT f.relative_path AS relative_path, e.kind AS kind, e.from_symbol AS from_symbol, e.target AS target, e.line AS line, e.source AS source FROM edges e JOIN files f ON f.id = e.file_id WHERE e.target = ?",
     )
     .all(target) as ReverseEdgeRow[];
 }
@@ -713,7 +718,7 @@ function insertFileEntry(db: Database, file: FileStructuralEntry): void {
     "INSERT INTO symbols (file_id, name, kind, start_line, end_line, exported) VALUES (?, ?, ?, ?, ?, ?)",
   );
   const insertEdge = db.prepare(
-    "INSERT INTO edges (file_id, kind, from_symbol, target, target_name, line) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO edges (file_id, kind, from_symbol, target, target_name, line, source) VALUES (?, ?, ?, ?, ?, ?, 'heuristic')",
   );
   const insertFts = db.prepare(
     "INSERT INTO symbols_fts (rowid, name, relative_path, kind) VALUES (?, ?, ?, ?)",

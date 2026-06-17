@@ -100,6 +100,26 @@ cortex embed --batch 64   # inference batch size (default 32)
 |---|---|
 | `--batch <n>` | Symbols per inference batch. |
 
+### `cortex scip import`
+Import precise edges from a SCIP index file — **optional and off-by-default**.
+SCIP (Sourcegraph Code Intelligence Protocol) provides globally-stable symbol IDs
+with accurate go-to-def/find-refs. When imported, SCIP edges override heuristic
+tree-sitter edges for covered symbol pairs. Requires `cortex index` first; re-run
+after reindex (reindex clears SCIP edges).
+
+```bash
+cortex scip import                     # default: <workspace>/index.scip
+cortex scip import ./build/index.scip  # explicit path
+```
+
+| Argument | Meaning |
+|---|---|
+| `[path]` | Path to `index.scip` file. Default: `<workspace>/index.scip`. |
+
+Output: count of imported edges, matched/missing files, covered symbols.
+SCIP requires a build step in CI (`scip-typescript`, `scip-python`, etc.) — gain
+is conditional on the repo emitting `index.scip`.
+
 ### `cortex status`
 Health and staleness of the local index.
 

@@ -100,6 +100,26 @@ cortex embed --batch 64   # tamanho do lote de inferência (default 32)
 |---|---|
 | `--batch <n>` | Símbolos por lote de inferência. |
 
+### `cortex scip import`
+Importa edges precisas de um arquivo SCIP — **opcional e off-by-default**.
+SCIP (Sourcegraph Code Intelligence Protocol) fornece IDs de símbolo globalmente
+estáveis com go-to-def/find-refs precisos. Ao importar, edges SCIP sobrescrevem
+as heurísticas tree-sitter para os pares de símbolos cobertos. Requer `cortex index`
+prévio; re-rode após reindex (reindex zera edges SCIP).
+
+```bash
+cortex scip import                     # default: <workspace>/index.scip
+cortex scip import ./build/index.scip  # path explícito
+```
+
+| Argumento | Significado |
+|---|---|
+| `[path]` | Caminho do `index.scip`. Default: `<workspace>/index.scip`. |
+
+Saída: contagem de edges importadas, arquivos casados/ausentes, símbolos cobertos.
+SCIP exige um passo de build em CI (`scip-typescript`, `scip-python`, etc.) — o
+ganho é condicional ao repo emitir `index.scip`.
+
 ### `cortex status`
 Saúde e staleness do índice local.
 

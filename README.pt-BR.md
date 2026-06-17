@@ -157,7 +157,7 @@ constantes top-level, relações `with`/`on`) por causa do Flutter.
 
 ## Limitações conhecidas
 
-- Chamadas sem import resolvido degradam para correspondência global por nome.
+- Chamadas sem import resolvido degradam para correspondência global por nome (mitigável via importação SCIP opcional — `cortex scip import`).
 - Dart/Kotlin mantêm cobertura parcial explícita.
 - Resolução dinâmica/reflexiva não é tratada como causalidade comprovada.
 - `search` rankeia lexical e estruturalmente (sempre fresco). Busca semântica

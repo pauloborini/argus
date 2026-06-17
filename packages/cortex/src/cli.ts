@@ -11,6 +11,7 @@ import { runRetrieve } from "./commands/retrieve.js";
 import { runSearch } from "./commands/search.js";
 import { runSemanticSearch } from "./commands/semantic-search.js";
 import { runEmbed } from "./commands/embed-cmd.js";
+import { runScipImport } from "./commands/scip-import.js";
 import { runStatus } from "./commands/status.js";
 import { runSync } from "./commands/sync.js";
 import { runTrace } from "./commands/trace.js";
@@ -187,6 +188,15 @@ program
   .option("--batch <n>", "Tamanho do lote de inferência", (value) => Number(value))
   .action(async (opts: { batch?: number }) => {
     finish(await runEmbed({ batch: opts.batch }));
+  });
+
+const scipCmd = program.command("scip").description("Ingestão SCIP (tier de precisão sobre tree-sitter)");
+scipCmd
+  .command("import")
+  .description("Importar edges precisas de um index.scip (off-by-default)")
+  .argument("[path]", "Caminho do index.scip (default: <workspace>/index.scip)")
+  .action(async (path?: string) => {
+    finish(await runScipImport({ path }));
   });
 
 program

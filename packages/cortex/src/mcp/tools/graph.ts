@@ -674,6 +674,25 @@ export class LazyTraceGraph {
       // Forward: calls/extends/implements de cujo dono é este símbolo.
       for (const edge of entry.edges) {
         if (edge.kind === "calls") {
+          if (edge.source === "scip") {
+            const caller = edge.from_symbol
+              ? entry.symbols.find((s) => s.name === edge.from_symbol) ?? null
+              : null;
+            const callerNode = caller ? buildSymbolNode(entry, caller) : buildFileNode(entry);
+            if (callerNode.id !== node.id) continue;
+            const targetName = callTargetName(edge.to);
+            const targetMatches = this.matchesByName(targetName);
+            for (const match of targetMatches) {
+              edges.push({
+                relation: "calls",
+                from: node,
+                to: buildSymbolNode(match.entry, match.symbol),
+                line: edge.line,
+                weight: this.weight(match.symbol.name),
+              });
+            }
+            continue;
+          }
           for (const call of this.resolveCalls(entry, edge)) {
             if (call.callerNode.id !== node.id) {
               continue;
@@ -690,6 +709,20 @@ export class LazyTraceGraph {
         } else if ((edge.kind === "extends" || edge.kind === "implements") && edge.from_symbol) {
           const originSymbol = entry.symbols.find((symbol) => symbol.name === edge.from_symbol);
           if (!originSymbol || buildSymbolNode(entry, originSymbol).id !== node.id) {
+            continue;
+          }
+          if (edge.source === "scip") {
+            const targetName = callTargetName(edge.to);
+            const targetMatches = this.matchesByName(targetName);
+            for (const match of targetMatches) {
+              edges.push({
+                relation: edge.kind,
+                from: node,
+                to: buildSymbolNode(match.entry, match.symbol),
+                line: edge.line,
+                weight: this.weight(match.symbol.name),
+              });
+            }
             continue;
           }
           const targetMatches = this.matchesByName(edge.to);
@@ -716,6 +749,20 @@ export class LazyTraceGraph {
       if (!source) {
         continue;
       }
+      if (row.source === "scip") {
+        const caller = row.from_symbol
+          ? source.symbols.find((s) => s.name === row.from_symbol) ?? null
+          : null;
+        const callerNode = caller ? buildSymbolNode(source, caller) : buildFileNode(source);
+        edges.push({
+          relation: "called_by",
+          from: node,
+          to: callerNode,
+          line: row.line ?? undefined,
+          weight: this.weight(node.name),
+        });
+        continue;
+      }
       for (const call of this.resolveCalls(source, { from_symbol: row.from_symbol ?? undefined, to: row.target, line: row.line ?? undefined })) {
         if (call.targetNode.id !== node.id) {
           continue;
@@ -739,6 +786,16 @@ export class LazyTraceGraph {
       const source = this.fileEntry(row.relative_path);
       const originSymbol = source?.symbols.find((symbol) => symbol.name === row.from_symbol);
       if (!source || !originSymbol) {
+        continue;
+      }
+      if (row.source === "scip") {
+        edges.push({
+          relation: `${row.kind}_by`,
+          from: node,
+          to: buildSymbolNode(source, originSymbol),
+          line: row.line ?? undefined,
+          weight: this.weight(node.name),
+        });
         continue;
       }
       const targetMatches = this.matchesByName(row.target);

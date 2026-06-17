@@ -479,8 +479,10 @@ Organizado por **impacto/esforço**. Os três tiers são entregáveis independen
     for tests"* → símbolos do `FakeEmbedder` (0.69). Lexical de **nome exato**
     segue forte (sem regressão); semântico é fallback opcional, default segue
     lexical sempre-fresco.
-17. **Ingestão SCIP opcional** como tier de precisão quando o repo emite
-    `index.scip` em CI.
+17. ✅ **Ingestão SCIP opcional** como tier de precisão quando o repo emite
+    `index.scip` em CI. — Implementado: `cortex scip import` (off-by-default),
+    migração v5 (coluna `source` em edges), edges SCIP sobrescrevem heurísticas,
+    trace/impact preferem edges SCIP (sem uncertainty). Dep protobufjs opcional/lazy.
 18. **Fechar lacunas por linguagem** (Dart calls, Rust impl, Go interface/
     embedding, Python extends, TS arrow-const) e **adicionar linguagens**
     (C/C++, C#, Ruby, PHP, Swift) — cada uma é dep de grammar + extractor.
