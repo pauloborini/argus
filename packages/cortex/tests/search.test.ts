@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("search tool", () => {
@@ -41,7 +41,7 @@ describe("search tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, { query: "calculateTotal" });
+    const payload = buildToolResponse("search", root, { query: "calculateTotal" });
     expect(payload.state).toBe("sucesso");
     const candidates = payload.candidates as Array<{ name: string; path: string }>;
     expect(candidates.length).toBeGreaterThan(0);
@@ -56,7 +56,7 @@ describe("search tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, { query: "run" });
+    const payload = buildToolResponse("search", root, { query: "run" });
     expect(payload.state).toBe("ambigua");
     const candidates = payload.candidates as Array<{ path: string }>;
     expect(candidates).toHaveLength(2);
@@ -69,7 +69,7 @@ describe("search tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, { query: "compress", kind: "function" });
+    const payload = buildToolResponse("search", root, { query: "compress", kind: "function" });
     const candidates = payload.candidates as Array<{ name: string; path: string; start_line: number }>;
     const homonyms = candidates.filter((c) => c.name === "compress" && c.path === "dup.ts");
     expect(homonyms.length).toBe(2);
@@ -87,7 +87,7 @@ describe("search tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, {
+    const payload = buildToolResponse("search", root, {
       query: "calculate",
       scope: "src/",
       kind: "function",
@@ -118,7 +118,7 @@ describe("search tool", () => {
     const root = setupWorkspace(files);
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, {
+    const payload = buildToolResponse("search", root, {
       query: "calculate",
       scope: "target/",
       kind: "function",
@@ -136,7 +136,7 @@ describe("search tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "app.ts"), "export function calculateTotal() { return 2; }\n", "utf-8");
 
-    const payload = buildToolStub("search", root, {
+    const payload = buildToolResponse("search", root, {
       query: "calculateTotal",
       response_format: "detailed",
     });
@@ -155,7 +155,7 @@ describe("search tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, { query: "calculateTotal" });
+    const payload = buildToolResponse("search", root, { query: "calculateTotal" });
     expect(payload.state).toBe("sucesso");
     const candidates = payload.candidates as Array<{ name: string; path: string }>;
     expect(candidates.length).toBeGreaterThan(0);
@@ -168,7 +168,7 @@ describe("search tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, {
+    const payload = buildToolResponse("search", root, {
       query: "FeatureController",
       response_format: "detailed",
     });

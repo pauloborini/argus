@@ -30,7 +30,7 @@ import {
 import { SUPPORTED_HOSTS, type McpHostId } from "./install/mcp-hosts.js";
 import { CORTEX_VERSION } from "./version.js";
 import { setPrettyOutput } from "./output.js";
-import { setDefaultResponseFormat } from "./mcp/tools/stubs.js";
+import { setDefaultResponseFormat } from "./mcp/tools/response.js";
 
 /** Parse e valida a flag `--hosts a,b`; vazio → todos os suportados. */
 function parseHosts(value?: string): McpHostId[] | undefined {

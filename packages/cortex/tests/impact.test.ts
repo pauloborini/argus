@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub, personalizedPageRank } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
+import { personalizedPageRank } from "../src/mcp/tools/graph.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("impact tool", () => {
@@ -57,7 +58,7 @@ describe("impact tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("impact", root, {
+    const payload = buildToolResponse("impact", root, {
       target: "calculateTotal",
       direction: "dependencies",
       depth: 2,
@@ -74,7 +75,7 @@ describe("impact tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("impact", root, {
+    const payload = buildToolResponse("impact", root, {
       target: "src/dep.ts",
       direction: "dependents",
       depth: 2,
@@ -90,7 +91,7 @@ describe("impact tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("impact", root, { target: "run" });
+    const payload = buildToolResponse("impact", root, { target: "run" });
     expect(payload.state).toBe("ambigua");
     expect((payload.candidates as unknown[]).length).toBe(2);
   });
@@ -103,7 +104,7 @@ describe("impact tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "src/dep.ts"), "export function helper() { return 1; }\n", "utf-8");
 
-    const payload = buildToolStub("impact", root, {
+    const payload = buildToolResponse("impact", root, {
       target: "src/dep.ts",
       direction: "dependents",
       depth: 2,
@@ -120,7 +121,7 @@ describe("impact tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("impact", root, {
+    const payload = buildToolResponse("impact", root, {
       target: "alvoChamado",
       direction: "dependents",
       depth: 2,
@@ -139,7 +140,7 @@ describe("impact tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("impact", root, {
+    const payload = buildToolResponse("impact", root, {
       target: "BaseWidget",
       direction: "dependents",
       depth: 2,
@@ -157,7 +158,7 @@ describe("impact tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("impact", root, {
+    const payload = buildToolResponse("impact", root, {
       target: "lib/dep.dart",
       direction: "dependents",
       depth: 2,

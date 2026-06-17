@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("trace tool", () => {
@@ -41,7 +41,7 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "calculateTotal",
       to: "helper",
       direction: "forward",
@@ -59,7 +59,7 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "src/main.ts",
       to: "src/dep.ts",
       max_hops: 3,
@@ -75,7 +75,7 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, { from: "run" });
+    const payload = buildToolResponse("trace", root, { from: "run" });
     expect(payload.state).toBe("ambigua");
     expect((payload.candidates as unknown[]).length).toBe(2);
   });
@@ -89,7 +89,7 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "boot",
       to: "src/right.ts",
       max_hops: 4,
@@ -107,7 +107,7 @@ describe("trace tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "src/main.ts"), 'import { helper } from "./dep";\nexport function boot() { return helper(); }\n', "utf-8");
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "src/main.ts",
       to: "src/dep.ts",
       max_hops: 3,
@@ -124,7 +124,7 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "lib/main.dart",
       to: "lib/dep.dart",
       max_hops: 3,

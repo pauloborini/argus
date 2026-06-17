@@ -5,7 +5,7 @@ import { buildDiscoveryManifest, fingerprintDiscoveredFiles } from "../discovery
 import { writeManifestAtomic } from "../discovery/manifest.js";
 import { discoverFiles } from "../discovery/walk.js";
 import { buildStructuralIndex } from "../extraction/pipeline.js";
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { persistFullStructuralIndex } from "../storage/index-persistence.js";
 import { getManifestPath, initWorkspace } from "../workspace/workspace.js";
 
@@ -138,7 +138,7 @@ function runShellStep(cwd: string, title: string, command: string): StepResult {
 }
 
 function runToolStep(cwd: string, title: string, tool: ToolName, args?: Record<string, unknown>): StepResult {
-  const payload = buildToolStub(tool, cwd, args);
+  const payload = buildToolResponse(tool, cwd, args);
   return {
     title,
     output: JSON.stringify(payload, null, 2),

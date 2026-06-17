@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "./tool-registry.js";
-import { buildToolStub } from "./tools/stubs.js";
+import { buildToolResponse } from "./tools/response.js";
 import { CORTEX_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
 import { isManifestStaleForAutoSync } from "../discovery/staleness.js";
@@ -249,7 +249,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
   // `response_format` é aceito por toda tool (default `concise`): envelope
   // mínimo (state + códigos `E_*`); `detailed` restaura message/limitations/
   // staleness_hint em prosa. Injetado em todo inputSchema para descoberta pelo
-  // agente; o passthrough das schemas zod já o deixa fluir até `buildToolStub`.
+  // agente; o passthrough das schemas zod já o deixa fluir até `buildToolResponse`.
   const withResponseFormat = (schema: { properties: Record<string, unknown> }) => ({
     ...schema,
     properties: {
@@ -306,7 +306,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     await autoSyncIfDirty();
 
     const pathArg = typeof args.path === "string" ? args.path : process.cwd();
-    const payload = buildToolStub(toolName as (typeof MCP_TOOL_NAMES)[number], pathArg, args);
+    const payload = buildToolResponse(toolName as (typeof MCP_TOOL_NAMES)[number], pathArg, args);
 
     return {
       content: [

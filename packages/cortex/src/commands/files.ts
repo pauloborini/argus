@@ -1,9 +1,9 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { serializePayload } from "../output.js";
 
 export function runFiles(options?: { pattern?: string; maxDepth?: number }): number {
   try {
-    const payload = buildToolStub("files", process.cwd(), {
+    const payload = buildToolResponse("files", process.cwd(), {
       pattern: options?.pattern,
       max_depth: options?.maxDepth,
     });

@@ -1,4 +1,4 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { serializePayload } from "../output.js";
 
 export function runTrace(
@@ -6,7 +6,7 @@ export function runTrace(
   options?: { to?: string; direction?: string; maxHops?: number },
 ): number {
   try {
-    const payload = buildToolStub("trace", process.cwd(), {
+    const payload = buildToolResponse("trace", process.cwd(), {
       from,
       to: options?.to,
       direction: options?.direction,

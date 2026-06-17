@@ -1,4 +1,4 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { serializePayload } from "../output.js";
 
 export function runImpact(
@@ -6,7 +6,7 @@ export function runImpact(
   options?: { direction?: string; depth?: number; includeTests?: boolean; summaryOnly?: boolean },
 ): number {
   try {
-    const payload = buildToolStub("impact", process.cwd(), {
+    const payload = buildToolResponse("impact", process.cwd(), {
       target,
       direction: options?.direction,
       depth: options?.depth,

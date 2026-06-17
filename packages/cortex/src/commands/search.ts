@@ -1,4 +1,4 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { serializePayload } from "../output.js";
 
 export function runSearch(
@@ -6,7 +6,7 @@ export function runSearch(
   options?: { scope?: string; kind?: string; limit?: number },
 ): number {
   try {
-    const payload = buildToolStub("search", process.cwd(), {
+    const payload = buildToolResponse("search", process.cwd(), {
       query,
       scope: options?.scope,
       kind: options?.kind,
