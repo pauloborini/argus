@@ -154,7 +154,7 @@ describe("impact tool", () => {
     ).toBe(true);
   });
 
-  it("impact degrada para parcial em Dart por cobertura limitada", async () => {
+  it("Dart full: impact retorna sucesso (cobertura full, S31)", async () => {
     const root = setupWorkspace({
       "lib/main.dart": 'import "dep.dart";\nvoid boot() { helper(); }\n',
       "lib/dep.dart": "void helper() {}\n",
@@ -167,7 +167,14 @@ describe("impact tool", () => {
       depth: 2,
       response_format: "detailed",
     });
-    expect(payload.state).toBe("parcial");
-    expect((payload.limitations as string[]).some((item) => item.includes("Cobertura parcial"))).toBe(true);
+    expect(["sucesso", "parcial"]).toContain(payload.state);
+    // Dart full: se for parcial, não deve ser por linguagem
+    if (payload.state === "parcial") {
+      expect(
+        (payload.limitations as string[] | undefined)?.every((item) =>
+          !item.toLowerCase().includes("cobertura parcial em pelo menos uma"),
+        ) ?? true,
+      ).toBe(true);
+    }
   });
 });

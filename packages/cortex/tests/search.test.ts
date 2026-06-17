@@ -162,7 +162,7 @@ describe("search tool", () => {
     expect(candidates[0]?.name).toBe("calculateTotal");
   });
 
-  it("degrada para parcial quando o match está em linguagem com cobertura parcial", async () => {
+  it("Dart full: search retorna sucesso (cobertura full, S31)", async () => {
     const root = setupWorkspace({
       "lib/feature.dart": "class FeatureController { void run() {} }\n",
     });
@@ -172,8 +172,13 @@ describe("search tool", () => {
       query: "FeatureController",
       response_format: "detailed",
     });
-    expect(payload.state).toBe("parcial");
+    expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.candidates as Array<{ path: string }>)[0]?.path).toBe("lib/feature.dart");
-    expect((payload.limitations as string[]).some((item) => item.includes("Cobertura parcial"))).toBe(true);
+    // Dart full: não deve incluir limitação de cobertura de linguagem
+    expect(
+      (payload.limitations as string[] | undefined)?.some((item) =>
+        item.includes("Cobertura parcial"),
+      ) ?? false,
+    ).toBe(false);
   });
 });

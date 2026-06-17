@@ -31,7 +31,7 @@ const COVERAGE_BY_LANGUAGE: Record<SupportedLanguage, CoverageLevel> = {
   java: "full",
   rust: "full",
   kotlin: "partial",
-  dart: "partial",
+  dart: "full",
 };
 
 export function detectLanguageFromPath(relativePath: string): LanguageDetection {
