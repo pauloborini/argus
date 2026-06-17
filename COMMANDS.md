@@ -10,12 +10,20 @@ Without a global install, prefix any command with `npx atlas-cortex …`.
 
 ## Conventions
 
-- Every tool prints **JSON** to stdout.
-- Shared fields: `state` (`sucesso` · `ambigua` · `parcial` · `stale` ·
-  `falha`), `confidence` (`high` · `medium` · `low`), and, when relevant,
-  `limitations[]` and `staleness_hint`.
+- Every tool prints compact **JSON** to stdout (machine-friendly by default).
+- Core shared field: `state` (`sucesso` · `ambigua` · `parcial` · `stale` · `falha`).
+  Errors also include `message` with an `E_*` / `W_*` code. Fields `confidence`,
+  `limitations[]`, and `staleness_hint` (with a `STALE_*` code prefix) appear only in
+  `--detailed` mode.
 - Exit code is non-zero only when `state` is `falha`.
 - Commands are scriptable: pipe stdout into `jq` freely.
+
+**Global flags** (work before any subcommand):
+
+| Flag | Effect |
+|------|--------|
+| `--pretty` | Indent JSON for human reading (~30–40 % more tokens) |
+| `--detailed` | Full envelope: `confidence`, `limitations[]`, `staleness_hint` in prose |
 
 ---
 
