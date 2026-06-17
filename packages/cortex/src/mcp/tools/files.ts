@@ -96,6 +96,30 @@ export function buildFilesResponse(cwd: string, envelope: IndexEnvelope): ToolRe
   };
 }
 
+export interface FileTsvRow {
+  path: string;
+  language: string;
+  symbol_count: number;
+}
+
+/** Retorna linhas com language por arquivo — usada apenas pelo output TSV. */
+export function readFilesForTsv(cwd: string): FileTsvRow[] {
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) return [];
+  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  try {
+    return readFileTreeRows(db)
+      .filter((r) => r.language !== "unsupported")
+      .map((r) => ({
+        path: r.relative_path,
+        language: r.language,
+        symbol_count: r.has_parse_errors ? 0 : r.total,
+      }));
+  } finally {
+    closeIndexDb(db);
+  }
+}
+
 export function applyFilesFilters(
   tree: Array<{ path: string; symbol_counts?: unknown }>,
   args?: FilesArgs,

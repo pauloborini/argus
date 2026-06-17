@@ -7,7 +7,7 @@ import type { McpToolName } from "../tool-registry.js";
 import { WORKSPACE_MISSING, buildIndexEnvelope, isWithinPath } from "./common.js";
 import type { ToolResponsePayload, SearchArgs, FilesArgs, ExploreArgs, TraceArgs, ImpactArgs, DiffImpactArgs, PackContextArgs, RetrieveArgs, StructuralLoadMode } from "./common.js";
 import { buildStatusResponse } from "./status.js";
-import { buildFilesResponse, applyFilesFilters } from "./files.js";
+import { buildFilesResponse, applyFilesFilters, readFilesForTsv } from "./files.js";
 import { buildSearchResponse } from "./search.js";
 import { buildSemanticSearchDegraded, buildSemanticSearchResponse } from "./semantic-search.js";
 import type { SemanticSearchArgs, SemanticSearchDeps } from "./semantic-search.js";
@@ -195,6 +195,83 @@ export async function buildToolResponseAsync(
     return applyResponseFormat(inner, resolveResponseFormat(args), tool);
   }
   return buildToolResponse(tool, cwd, args);
+}
+
+const TSV_TRUNCATE_LIMIT = 50;
+
+function toTsv(header: string[], rows: string[][]): string {
+  return [header, ...rows].map((r) => r.join("\t")).join("\n");
+}
+
+export interface TsvResult {
+  text: string;
+  truncationNote: string | undefined;
+  isError: boolean;
+}
+
+/**
+ * Variante TSV do dispatcher. Suportada apenas em `search` e `files`; outras
+ * tools retornam `E_FORMAT_UNSUPPORTED`. Trunca em 50 resultados.
+ */
+export function buildToolResponseTsv(
+  tool: McpToolName,
+  cwd: string = process.cwd(),
+  args?: Record<string, unknown>,
+): TsvResult {
+  if (tool !== "search" && tool !== "files") {
+    return {
+      text: JSON.stringify({
+        state: "falha",
+        message: `E_FORMAT_UNSUPPORTED: TSV não suportado para '${tool}'; use search ou files`,
+      }),
+      truncationNote: undefined,
+      isError: true,
+    };
+  }
+
+  if (!readWorkspaceMetadata(cwd)) {
+    return {
+      text: JSON.stringify({ state: "falha", message: WORKSPACE_MISSING }),
+      truncationNote: undefined,
+      isError: true,
+    };
+  }
+
+  if (tool === "search") {
+    const payload = buildToolResponseInner("search", cwd, args);
+    const candidates = Array.isArray(payload.candidates)
+      ? (payload.candidates as Array<{ name: string; path: string; kind: string; start_line: number; score: number }>)
+      : [];
+    const total = candidates.length;
+    const rows = candidates.slice(0, TSV_TRUNCATE_LIMIT).map((c) => [
+      c.name,
+      c.path,
+      c.kind,
+      String(c.start_line),
+      String(c.score),
+    ]);
+    const text = toTsv(["name", "path", "kind", "line", "score"], rows);
+    const truncationNote =
+      total > TSV_TRUNCATE_LIMIT
+        ? `Showing ${TSV_TRUNCATE_LIMIT} of ${total}; refine query for more.`
+        : undefined;
+    return { text, truncationNote, isError: payload.state === "falha" };
+  }
+
+  // tool === "files"
+  const rows_data = readFilesForTsv(cwd);
+  const total = rows_data.length;
+  const rows = rows_data.slice(0, TSV_TRUNCATE_LIMIT).map((f) => [
+    f.path,
+    f.language,
+    String(f.symbol_count),
+  ]);
+  const text = toTsv(["path", "language", "symbol_count"], rows);
+  const truncationNote =
+    total > TSV_TRUNCATE_LIMIT
+      ? `Showing ${TSV_TRUNCATE_LIMIT} of ${total}; refine query for more.`
+      : undefined;
+  return { text, truncationNote, isError: false };
 }
 
 export { STRUCTURAL_INDEX_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION };

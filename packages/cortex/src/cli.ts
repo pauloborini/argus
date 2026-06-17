@@ -178,7 +178,8 @@ program
   .option("--scope <path>", "Restringir candidatos por path")
   .option("--kind <kind>", "Restringir por tipo de símbolo")
   .option("--limit <n>", "Máximo de candidatos", (value) => Number(value))
-  .action((query: string, opts: { scope?: string; kind?: string; limit?: number }) => {
+  .option("--format <fmt>", "Formato de saída: concise | detailed | tsv")
+  .action((query: string, opts: { scope?: string; kind?: string; limit?: number; format?: string }) => {
     finish(runSearch(query, opts));
   });
 
@@ -221,7 +222,8 @@ program
   .description("Listar estrutura indexada do workspace")
   .option("--pattern <pattern>", "Filtro simples por substring do path")
   .option("--max-depth <n>", "Profundidade máxima por path", (value) => Number(value))
-  .action((opts: { pattern?: string; maxDepth?: number }) => {
+  .option("--format <fmt>", "Formato de saída: concise | detailed | tsv")
+  .action((opts: { pattern?: string; maxDepth?: number; format?: string }) => {
     finish(runFiles(opts));
   });
 

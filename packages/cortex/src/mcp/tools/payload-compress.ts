@@ -80,6 +80,46 @@ function applyPathDictionary(payload: ToolResponsePayload): ToolResponsePayload 
   return compressed;
 }
 
+/**
+ * Remove campos com valor vazio (null, undefined, "", [], {}) de objetos aninhados.
+ * Preserva `0` e `false`. Aplicado apenas dentro de objetos nestados (itens de
+ * array, valores de objetos top-level) — nunca remove chaves do payload raiz,
+ * que são campos de contrato da API.
+ */
+function elideEmptyFieldsInner(obj: unknown): unknown {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return obj;
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (v === null || v === undefined) continue;
+    if (typeof v === "string" && v === "") continue;
+    if (Array.isArray(v) && v.length === 0) continue;
+    if (typeof v === "object" && !Array.isArray(v) && Object.keys(v as object).length === 0) continue;
+    result[k] =
+      Array.isArray(v)
+        ? v.map((item) => elideEmptyFieldsInner(item))
+        : typeof v === "object"
+          ? elideEmptyFieldsInner(v)
+          : v;
+  }
+  return result;
+}
+
+/**
+ * Aplica elision apenas dentro dos valores do payload raiz (nunca remove chaves
+ * top-level que fazem parte do contrato da API).
+ */
+function elideEmptyFields(payload: ToolResponsePayload): ToolResponsePayload {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(payload)) {
+    result[k] = Array.isArray(v)
+      ? v.map((item) => elideEmptyFieldsInner(item))
+      : v !== null && typeof v === "object"
+        ? elideEmptyFieldsInner(v)
+        : v;
+  }
+  return result as ToolResponsePayload;
+}
+
 export function compressPayload(payload: ToolResponsePayload, tool: McpToolName): ToolResponsePayload {
-  return applyPathDictionary(stripDerivedFields(payload, tool));
+  return elideEmptyFields(applyPathDictionary(stripDerivedFields(payload, tool)));
 }

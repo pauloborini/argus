@@ -153,6 +153,7 @@ Lexical + structural symbol search over the local FTS index.
 ```bash
 cortex search "calculateTotal"
 cortex search "calculate" --scope src/ --kind function --limit 5
+cortex search "runSync" --format tsv | cut -f1,2   # pipe-friendly TSV
 ```
 
 | Flag | Meaning |
@@ -160,10 +161,14 @@ cortex search "calculate" --scope src/ --kind function --limit 5
 | `--scope <path>` | Restrict candidates to a path/dir. |
 | `--kind <kind>` | Restrict by symbol kind (`function`, `class`, …). |
 | `--limit <n>` | Max candidates. |
+| `--format <fmt>` | `concise` (default) · `detailed` · `tsv` (tab-separated, ideal for pipes). |
 
 Each candidate: `id`, `kind`, `name`, `path`, `start_line`, `end_line`,
 `score`, `match_reason`. `start_line`/`end_line` distinguish same-named symbols
 in one file and let you jump straight to them.
+
+TSV columns: `name`, `path`, `kind`, `line`, `score`. Truncates at 50 results
+(note goes to stderr); add `--limit` to narrow the set first.
 
 ### `cortex semantic-search <query>`
 Search by **meaning** via embeddings (local bge-small), fused with lexical via
@@ -195,14 +200,19 @@ List the indexed structure of the workspace.
 ```bash
 cortex files
 cortex files --pattern src --max-depth 3
+cortex files --format tsv | awk -F'\t' '$3 > 10'   # files with >10 symbols
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--pattern <pattern>` | Substring filter on paths. |
 | `--max-depth <n>` | Max path depth. |
+| `--format <fmt>` | `concise` (default) · `detailed` · `tsv` (tab-separated, ideal for pipes). |
 
 Output: a `tree` of paths with `symbol_counts`.
+
+TSV columns: `path`, `language`, `symbol_count`. Truncates at 50 results
+(note goes to stderr).
 
 ### `cortex explore <target>`
 Composite structural context for a symbol, file, or topic — central symbols,
