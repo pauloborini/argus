@@ -52,6 +52,53 @@ describe("pack context tool", () => {
     expect(payload.reversibility).toBe("full");
   });
 
+  it("overview-first: balanced empacota assinatura sem inlinar o corpo", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "entender refactor",
+      token_budget: 400,
+      style: "balanced",
+    });
+    const packed = String(payload.packed_context);
+    expect(packed).toContain("calculateTotal");
+    // Assinatura presente, corpo (`helper(); return 1`) ausente.
+    expect(packed).not.toContain("return 1");
+  });
+
+  it("deep inlina corpo completo (escape hatch)", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "ver código",
+      token_budget: 4000,
+      style: "deep",
+    });
+    expect(String(payload.packed_context)).toContain("return 1");
+  });
+
+  it("retrieve expande corpos sob demanda com context_lines", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const packed = buildToolStub("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "entender refactor",
+      token_budget: 80,
+      style: "deep",
+    });
+    const handle = String(packed.retrieve_handle);
+
+    const expanded = buildToolStub("retrieve", root, { handle, context_lines: 1 });
+    expect(["sucesso", "parcial"]).toContain(expanded.state);
+    expect(expanded.context_lines).toBe(1);
+    expect(String(expanded.content)).toContain("calculateTotal");
+  });
+
   it("pack-context emite handle quando budget corta material", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
