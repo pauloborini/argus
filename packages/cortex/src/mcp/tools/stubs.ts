@@ -89,6 +89,9 @@ interface PackContextArgs {
 
 interface RetrieveArgs {
   handle?: string;
+  // Body-on-demand: quando > 0, expande os origin_refs do handle lendo o
+  // código real do disco com ± context_lines de padding ao redor do range.
+  context_lines?: number;
 }
 
 const INDEX_MISSING = "E_INDEX_MISSING: Índice não inicializado; execute init/index";
@@ -141,6 +144,9 @@ interface ExploreSnippetRef {
   start_line: number;
   end_line: number;
   symbol?: string;
+  // Overview-first: assinatura (linha de declaração) sem o corpo. Deixa o
+  // agente ver a forma do símbolo e decidir se vale expandir via FS/retrieve.
+  signature?: string;
 }
 
 interface ExploreRef {
@@ -863,6 +869,7 @@ function fileMatchesTests(relativePath: string): boolean {
 }
 
 function buildSnippetRefs(
+  cwd: string,
   entry: FileStructuralEntry,
   symbols: ExtractedSymbol[],
   limit: number,
@@ -872,6 +879,8 @@ function buildSnippetRefs(
     start_line: symbol.start_line,
     end_line: symbol.end_line,
     symbol: symbol.name,
+    signature:
+      readSymbolSignature(cwd, entry.relative_path, symbol.start_line, symbol.end_line) ?? undefined,
   }));
 }
 
@@ -2147,15 +2156,19 @@ function getPackStyleConfig(style: NonNullable<PackContextArgs["style"]>): {
   depth: number;
   budget: number;
   snippetLimit: number;
+  inlineBodies: boolean;
 } {
   switch (style) {
     case "brief":
-      return { depth: 1, budget: 4, snippetLimit: 1 };
+      // Overview-first: assinatura + handle (path:linhas), zero corpo.
+      return { depth: 1, budget: 4, snippetLimit: 1, inlineBodies: false };
     case "deep":
-      return { depth: 4, budget: 10, snippetLimit: 3 };
+      // Escape hatch: inlina corpos completos quando o agente quer o código.
+      return { depth: 4, budget: 10, snippetLimit: 3, inlineBodies: true };
     case "balanced":
     default:
-      return { depth: 2, budget: 6, snippetLimit: 2 };
+      // Default overview-first: o agente tem FS; inlinar código é desperdício.
+      return { depth: 2, budget: 6, snippetLimit: 2, inlineBodies: false };
   }
 }
 
@@ -2311,6 +2324,65 @@ function buildRetrieveStub(cwd: string, args?: RetrieveArgs): ToolStubPayload {
   }
 
   const originRefs = uniqueOriginRefs(stored.segments.flatMap((segment) => segment.originRefs));
+
+  // Body-on-demand: com context_lines > 0, expande os origin_refs lendo o
+  // código real do disco com padding ao redor do range. Cada arquivo é lido
+  // uma vez (cache local) e validado contra o workspace antes da leitura.
+  const contextLines = Math.max(0, Math.min(args?.context_lines ?? 0, 100));
+  if (contextLines > 0) {
+    const fileCache = new Map<string, string[] | null>();
+    const readLines = (relativePath: string): string[] | null => {
+      if (fileCache.has(relativePath)) {
+        return fileCache.get(relativePath) ?? null;
+      }
+      const absolutePath = join(cwd, relativePath);
+      const value = isWithinPath(cwd, absolutePath)
+        ? (() => {
+            try {
+              return readFileSync(absolutePath, "utf-8").split("\n");
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+      fileCache.set(relativePath, value);
+      return value;
+    };
+    const expandedBlocks: string[] = [];
+    const expandLimitations: string[] = [];
+    for (const ref of originRefs) {
+      if (ref.start_line === undefined || ref.end_line === undefined) {
+        continue;
+      }
+      const lines = readLines(ref.path);
+      if (!lines) {
+        expandLimitations.push(`Origin ref fora do workspace ou ilegível: ${ref.path}.`);
+        continue;
+      }
+      const from = Math.max(0, ref.start_line - 1 - contextLines);
+      const to = Math.min(lines.length, ref.end_line + contextLines);
+      const body = lines.slice(from, to).join("\n").trim();
+      if (body) {
+        expandedBlocks.push(`${ref.symbol ?? ref.path}@${ref.path}:${from + 1}-${to}\n${body}`);
+      }
+    }
+    if (expandedBlocks.length > 0) {
+      return {
+        handle,
+        content: expandedBlocks.join("\n\n"),
+        origin_refs: originRefs,
+        segment_count: stored.segments.length,
+        context_lines: contextLines,
+        reversibility: stored.reversibility,
+        ...stubResponse(
+          expandLimitations.length > 0 ? "parcial" : "sucesso",
+          "Corpos expandidos sob demanda a partir dos origin_refs.",
+          { limitations: [...stored.limitations, ...expandLimitations] },
+        ),
+      };
+    }
+  }
+
   const content = stored.segments.map((segment) => segment.text).join("\n\n");
   if (!content) {
     return {
@@ -2404,6 +2476,45 @@ function uniqueOriginRefs(refs: PackOriginRef[]): PackOriginRef[] {
     (item) =>
       `${item.ref}:${item.path}:${item.start_line ?? ""}:${item.end_line ?? ""}:${item.symbol ?? ""}`,
   );
+}
+
+/**
+ * Lê só a **assinatura** do símbolo: da linha de declaração até o abre-corpo
+ * (`{` ou `:` final) ou um teto de 3 linhas. Núcleo do modelo overview-first
+ * — o agente vê a forma (`export function calc(a, b)`) sem puxar o corpo.
+ * Whitespace colapsado, cap ~200 chars; null se ilegível/vazio.
+ */
+function readSymbolSignature(
+  cwd: string,
+  path: string,
+  startLine: number,
+  endLine: number,
+): string | null {
+  try {
+    const absolutePath = join(cwd, path);
+    const lines = readFileSync(absolutePath, "utf-8").split("\n");
+    const start = Math.max(0, startLine - 1);
+    const hardEnd = Math.min(lines.length, endLine);
+    const collected: string[] = [];
+    for (let i = start; i < hardEnd && collected.length < 3; i += 1) {
+      const line = lines[i] ?? "";
+      collected.push(line);
+      if (line.includes("{") || line.trimEnd().endsWith(":")) {
+        break;
+      }
+    }
+    const signature = collected
+      .join(" ")
+      .replace(/\s*\{.*$/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!signature) {
+      return null;
+    }
+    return signature.length > 200 ? `${signature.slice(0, 197)}...` : signature;
+  } catch {
+    return null;
+  }
 }
 
 function readSnippetContent(cwd: string, ref: ExploreSnippetRef): string | null {
@@ -2512,11 +2623,21 @@ function buildPackSegmentsFromSource(
   ]);
   const snippetBlocks = snippets
     .map((snippet) => {
-      const content = readSnippetContent(cwd, snippet);
-      if (!content) {
-        return null;
+      if (config.inlineBodies) {
+        const content = readSnippetContent(cwd, snippet);
+        if (!content) {
+          return null;
+        }
+        return `Snippet ${snippet.path}:${snippet.start_line}-${snippet.end_line}\n${content}`;
       }
-      return `Snippet ${snippet.path}:${snippet.start_line}-${snippet.end_line}\n${content}`;
+      // Overview-first: handle (path:linhas) + assinatura, sem corpo. O agente
+      // tem FS e expande sob demanda; inlinar código é desperdício de tokens.
+      const signature =
+        snippet.signature ??
+        readSymbolSignature(cwd, snippet.path, snippet.start_line, snippet.end_line) ??
+        undefined;
+      const head = `Símbolo ${snippet.symbol ?? snippet.path}@${snippet.path}:${snippet.start_line}-${snippet.end_line}`;
+      return signature ? `${head} — ${signature}` : head;
     })
     .filter((item): item is string => item !== null);
 
@@ -3185,7 +3306,7 @@ function buildExploreStub(
   const relevantFiles = collectFileRelevantFiles(index, entry, includeTests, budget);
   const imports = entry.imports.slice(0, budget);
   const { callers, callees } = collectCallersAndCallees(index, entry, targetSymbol, includeTests, budget);
-  const snippets = buildSnippetRefs(entry, centralSymbols, budget);
+  const snippets = buildSnippetRefs(cwd, entry, centralSymbols, budget);
 
   const partialCoverage = index.coverage_by_language[entry.language]?.coverage_level === "partial";
   const state =
@@ -3222,6 +3343,10 @@ function buildExploreStub(
       start_line: symbol.start_line,
       end_line: symbol.end_line,
       exported: symbol.exported ?? false,
+      // Overview-first: forma do símbolo sem o corpo (body-on-demand via FS).
+      signature:
+        readSymbolSignature(cwd, entry!.relative_path, symbol.start_line, symbol.end_line) ??
+        undefined,
     })),
     relevant_files: relevantFiles,
     imports,

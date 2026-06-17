@@ -49,6 +49,21 @@ describe("explore tool", () => {
     expect((payload.snippets as Array<{ path: string }>)[0]?.path).toBe("utils.ts");
   });
 
+  it("overview-first: central_symbols e snippets carregam signature sem corpo", async () => {
+    const root = setupWorkspace({
+      "utils.ts": 'import { helper } from "./dep";\nexport function calculateTotal() { helper(); return 1; }\n',
+      "dep.ts": "export function helper() {}\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("explore", root, { target: "calculateTotal", mode: "symbol" });
+    const central = (payload.central_symbols as Array<{ name: string; signature?: string }>)[0];
+    expect(central?.signature).toContain("calculateTotal");
+    expect(central?.signature).not.toContain("return 1");
+    const snippet = (payload.snippets as Array<{ signature?: string }>)[0];
+    expect(snippet?.signature).toContain("calculateTotal");
+  });
+
   it("declara ambiguidade quando múltiplos alvos competem", async () => {
     const root = setupWorkspace({
       "a.ts": "export function run() {}\n",
