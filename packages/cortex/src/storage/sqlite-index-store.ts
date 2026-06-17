@@ -228,12 +228,55 @@ export function readAllFileEntries(db: Database): FileStructuralEntry[] {
     parse_errors_json: string;
   }>;
 
-  const symbolsStmt = db.prepare(
-    "SELECT name, kind, start_line, end_line, exported FROM symbols WHERE file_id = ? ORDER BY start_line, name",
-  );
-  const edgesStmt = db.prepare(
-    "SELECT kind, from_symbol, target, line FROM edges WHERE file_id = ? ORDER BY id",
-  );
+  // 3 queries bulk + agrupamento em JS, em vez de 2 queries por arquivo (N+1).
+  // Em repos grandes isso troca ~100k roundtrips por 3. A ordenação por
+  // (file_id, …) preserva a mesma ordem intra-arquivo do código anterior.
+  const symbolRows = db
+    .prepare(
+      "SELECT file_id, name, kind, start_line, end_line, exported FROM symbols ORDER BY file_id, start_line, name",
+    )
+    .all() as Array<{
+    file_id: number;
+    name: string;
+    kind: string;
+    start_line: number;
+    end_line: number;
+    exported: number | null;
+  }>;
+  const edgeRows = db
+    .prepare("SELECT file_id, kind, from_symbol, target, line FROM edges ORDER BY file_id, id")
+    .all() as Array<{
+    file_id: number;
+    kind: string;
+    from_symbol: string | null;
+    target: string;
+    line: number | null;
+  }>;
+
+  const symbolsByFile = new Map<number, ExtractedSymbol[]>();
+  for (const symbol of symbolRows) {
+    const list = symbolsByFile.get(symbol.file_id) ?? [];
+    list.push({
+      name: symbol.name,
+      kind: symbol.kind as ExtractedSymbol["kind"],
+      start_line: symbol.start_line,
+      end_line: symbol.end_line,
+      exported: symbol.exported === null ? undefined : symbol.exported === 1,
+    });
+    symbolsByFile.set(symbol.file_id, list);
+  }
+
+  const edgesByFile = new Map<number, ExtractedEdge[]>();
+  for (const edge of edgeRows) {
+    const list = edgesByFile.get(edge.file_id) ?? [];
+    list.push({
+      kind: edge.kind as ExtractedEdge["kind"],
+      from_symbol: edge.from_symbol ?? undefined,
+      to: edge.target,
+      line: edge.line ?? undefined,
+    });
+    edgesByFile.set(edge.file_id, list);
+  }
 
   return files.map((file) => {
     let imports: ExtractedImport[];
@@ -247,39 +290,12 @@ export function readAllFileEntries(db: Database): FileStructuralEntry[] {
       );
     }
 
-    const symbols = symbolsStmt.all(file.id) as Array<{
-      name: string;
-      kind: string;
-      start_line: number;
-      end_line: number;
-      exported: number | null;
-    }>;
-    const edges = (
-      edgesStmt.all(file.id) as Array<{
-        kind: string;
-        from_symbol: string | null;
-        target: string;
-        line: number | null;
-      }>
-    ).map((edge) => ({
-      kind: edge.kind as ExtractedEdge["kind"],
-      from_symbol: edge.from_symbol ?? undefined,
-      to: edge.target,
-      line: edge.line ?? undefined,
-    }));
-
     return {
       relative_path: file.relative_path,
       language: file.language as FileStructuralEntry["language"],
-      symbols: symbols.map((symbol) => ({
-        name: symbol.name,
-        kind: symbol.kind as ExtractedSymbol["kind"],
-        start_line: symbol.start_line,
-        end_line: symbol.end_line,
-        exported: symbol.exported === null ? undefined : symbol.exported === 1,
-      })),
+      symbols: symbolsByFile.get(file.id) ?? [],
       imports,
-      edges,
+      edges: edgesByFile.get(file.id) ?? [],
       parse_errors,
     };
   });

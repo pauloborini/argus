@@ -1,6 +1,18 @@
 import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
-import { endLine, namedIdentifier, startLine, stripQuotes, walkTree } from "./ast-utils.js";
+import {
+  enclosingSymbolName,
+  endLine,
+  namedIdentifier,
+  startLine,
+  stripQuotes,
+  walkTree,
+} from "./ast-utils.js";
+
+const GO_CALL_DEFINERS: ReadonlySet<string> = new Set([
+  "function_declaration",
+  "method_declaration",
+]);
 
 export function extractGo(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
@@ -26,7 +38,12 @@ export function extractGo(root: SyntaxNode): FileExtractionResult {
         walkTree(node, (spec) => {
           if (spec.type === "type_spec") {
             const name = namedIdentifier(spec);
-            const kind = spec.descendantsOfType("struct_type").length > 0 ? "class" : "type";
+            const kind =
+              spec.descendantsOfType("interface_type").length > 0
+                ? "interface"
+                : spec.descendantsOfType("struct_type").length > 0
+                  ? "class"
+                  : "type";
             if (name) {
               symbols.push({
                 name,
@@ -55,7 +72,13 @@ export function extractGo(root: SyntaxNode): FileExtractionResult {
       case "call_expression": {
         const fn = node.childForFieldName("function");
         if (fn) {
-          edges.push({ kind: "calls", to: fn.text, line: startLine(node) });
+          const from = enclosingSymbolName(node, GO_CALL_DEFINERS);
+          edges.push({
+            kind: "calls",
+            from_symbol: from ?? undefined,
+            to: fn.text,
+            line: startLine(node),
+          });
         }
         break;
       }

@@ -92,4 +92,54 @@ describe("extractors core", () => {
     expect(result.symbols.some((s) => s.name === "Bar")).toBe(true);
     expect(result.imports.some((i) => i.source.includes("std"))).toBe(true);
   });
+
+  it("TS: arrow-const vira function e call carrega from_symbol do escopo", () => {
+    const src = "export const calc = (a) => { return helper(a); };\nfunction helper(x) { return x + 1; }\n";
+    const { rootNode } = parseFile("typescript", src);
+    const result = extractTypeScriptLike(rootNode);
+
+    expect(result.symbols.find((s) => s.name === "calc")?.kind).toBe("function");
+    const callEdge = result.edges.find((e) => e.kind === "calls" && e.to === "helper");
+    expect(callEdge?.from_symbol).toBe("calc");
+  });
+
+  it("Python: extends só superclasses posicionais (sem metaclass) e from_symbol em call", () => {
+    const src = "class A:\n    pass\n\nclass B(A, metaclass=Meta):\n    def run(self):\n        helper()\n";
+    const { rootNode } = parseFile("python", src);
+    const result = extractPython(rootNode);
+
+    const extendsEdges = result.edges.filter((e) => e.kind === "extends");
+    expect(extendsEdges.some((e) => e.to === "A")).toBe(true);
+    expect(extendsEdges.some((e) => e.to === "Meta")).toBe(false);
+    const call = result.edges.find((e) => e.kind === "calls" && e.to === "helper");
+    expect(call?.from_symbol).toBe("run");
+  });
+
+  it("Go: interface_type vira kind interface", () => {
+    const src = "package x\n\ntype Reader interface {\n\tRead() error\n}\n";
+    const { rootNode } = parseFile("go", src);
+    const result = extractGo(rootNode);
+
+    expect(result.symbols.find((s) => s.name === "Reader")?.kind).toBe("interface");
+  });
+
+  it("Rust: impl Trait for Type gera edge implements", () => {
+    const src = "trait T {}\nstruct S;\nimpl T for S {\n    fn run(&self) {}\n}\n";
+    const { rootNode } = parseFile("rust", src);
+    const result = extractRust(rootNode);
+
+    expect(
+      result.edges.some((e) => e.kind === "implements" && e.from_symbol === "S" && e.to === "T"),
+    ).toBe(true);
+  });
+
+  it("Dart: import relativo resolve resolved_path", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "cortex-dart-import-"));
+    writeFileSync(join(tempDir, "dep.dart"), "class Dep {}\n", "utf-8");
+    writeFileSync(join(tempDir, "main.dart"), "import 'dep.dart';\n\nclass Main {}\n", "utf-8");
+
+    const result = extractFile(tempDir, "main.dart");
+    expect(result.imports.find((i) => i.source === "dep.dart")?.resolved_path).toBe("dep.dart");
+    expect(result.imports.find((i) => i.source.startsWith("package:"))?.resolved_path).toBeUndefined();
+  });
 });

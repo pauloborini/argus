@@ -1,6 +1,8 @@
 import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
-import { endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+import { enclosingSymbolName, endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+
+const KOTLIN_CALL_DEFINERS: ReadonlySet<string> = new Set(["function_declaration"]);
 
 export function extractKotlin(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
@@ -60,7 +62,13 @@ export function extractKotlin(root: SyntaxNode): FileExtractionResult {
       case "call_expression": {
         const callee = node.childForFieldName("function") ?? namedIdentifier(node);
         if (callee) {
-          edges.push({ kind: "calls", to: typeof callee === "string" ? callee : callee.text, line: startLine(node) });
+          const from = enclosingSymbolName(node, KOTLIN_CALL_DEFINERS);
+          edges.push({
+            kind: "calls",
+            from_symbol: from ?? undefined,
+            to: typeof callee === "string" ? callee : callee.text,
+            line: startLine(node),
+          });
         }
         break;
       }

@@ -37,13 +37,24 @@ describe("sqlite-schema", () => {
     expect(tableNames).toContain("index_meta");
     expect(tableNames).toContain("packed_handles");
 
+    // v2 do ladder: índices de grafo presentes.
+    const indexes = (
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")
+        .all() as Array<{ name: string }>
+    ).map((row) => row.name);
+    expect(indexes).toContain("idx_edges_target");
+    expect(indexes).toContain("idx_edges_from_symbol");
+
     closeIndexDb(db);
 
     const db2 = openIndexDb(dbPath);
+    // Ladder grava uma linha por degrau (v1..MIGRATION_VERSION); reabrir é
+    // idempotente — não adiciona linhas.
     const migration2 = db2
       .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
       .get() as { count: number };
-    expect(migration2.count).toBe(1);
+    expect(migration2.count).toBe(MIGRATION_VERSION);
     closeIndexDb(db2);
   });
 });
