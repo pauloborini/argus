@@ -83,6 +83,23 @@ Output reports the path taken — `via full` · `via git-delta` · `via dirty-fl
 · `via watch` (explicit-paths delta from the daemon) — and, when a dirty-flag
 was consumed, the number of pending paths.
 
+### `cortex embed`
+Generate semantic embeddings of the structural index — **optional and
+off-by-default**. Powers the `semantic_search` tool. Local bge-small model
+(downloads on first use, transformers.js cache), int8-quantized vectors stored
+in the same SQLite. **Not auto-synced**: re-run after meaningful changes (a full
+`cortex index` clears the vectors; an incremental `cortex sync` leaves them
+stale, signalled at search time).
+
+```bash
+cortex embed
+cortex embed --batch 64   # inference batch size (default 32)
+```
+
+| Flag | Meaning |
+|---|---|
+| `--batch <n>` | Symbols per inference batch. |
+
 ### `cortex status`
 Health and staleness of the local index.
 
@@ -119,6 +136,30 @@ cortex search "calculate" --scope src/ --kind function --limit 5
 Each candidate: `id`, `kind`, `name`, `path`, `start_line`, `end_line`,
 `score`, `match_reason`. `start_line`/`end_line` distinguish same-named symbols
 in one file and let you jump straight to them.
+
+### `cortex semantic-search <query>`
+Search by **meaning** via embeddings (local bge-small), fused with lexical via
+RRF. Use when `search` comes back empty or intent doesn't match literal names —
+e.g. *"OS file-watcher limit reached"* finds `watcherExhaustionHint` without the
+term in its name. Requires `cortex embed` first (off-by-default); with no
+vectors it degrades honestly (`W_EMBEDDINGS_UNAVAILABLE`) and falls back to
+lexical results.
+
+```bash
+cortex semantic-search "where do we handle the OS file-watcher limit"
+cortex semantic-search "combine lexical and dense ranking" --mode dense --limit 5
+```
+
+| Flag | Meaning |
+|---|---|
+| `--mode <mode>` | `dense` (vectors only) · `hybrid` (RRF fusion with lexical, default). |
+| `--scope <path>` | Restrict candidates to a path/dir. |
+| `--kind <kind>` | Restrict by symbol kind. |
+| `--limit <n>` | Max candidates. |
+
+Same candidate shape as `search`, with `match_reason` ∈ `semantic` · `lexical` ·
+`hybrid`. `state` may be `stale` (`W_EMBEDDINGS_STALE`) when the index moved
+ahead of the last `embed` — results still served with the warning.
 
 ### `cortex files`
 List the indexed structure of the workspace.

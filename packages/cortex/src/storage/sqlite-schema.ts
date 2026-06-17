@@ -2,7 +2,7 @@ import type { Database } from "./sqlite-db.js";
 import { IndexDbSchemaError } from "./sqlite-db.js";
 import { SQLITE_SCHEMA_VERSION } from "./sqlite-prepared.js";
 
-export const MIGRATION_VERSION = 3;
+export const MIGRATION_VERSION = 4;
 
 /** Último segmento de um target cru (`obj.metodo` → `metodo`); espelha callTargetName. */
 function targetLastSegment(rawTarget: string): string {
@@ -91,6 +91,30 @@ ALTER TABLE edges ADD COLUMN target_name TEXT;
 CREATE INDEX IF NOT EXISTS idx_edges_target_name ON edges(target_name);
 `;
 
+// v4: tabelas de embeddings opcionais (busca semântica). Aditivas e desligadas
+// por padrão — `embeddings` fica vazia até `cortex embed` rodar, então DBs
+// existentes não precisam reindexar. Não tocam o schema estrutural
+// (`SQLITE_SCHEMA_VERSION` inalterado): a ausência de vetores é estado válido,
+// e `semantic_search` degrada honesto (W_EMBEDDINGS_UNAVAILABLE).
+const DDL_V4 = `
+CREATE TABLE IF NOT EXISTS embeddings (
+  symbol_id INTEGER PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+  vector BLOB NOT NULL,
+  scale REAL NOT NULL,
+  dim INTEGER NOT NULL,
+  content_hash TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS embeddings_meta (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  model TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  built_at TEXT NOT NULL,
+  symbol_count INTEGER NOT NULL,
+  manifest_hash TEXT NOT NULL
+);
+`;
+
 /** Repopula target_name de DBs já existentes (edges gravadas antes da v3). */
 export function backfillTargetName(db: Database): void {
   const rows = db.prepare("SELECT id, target FROM edges WHERE target_name IS NULL").all() as Array<{
@@ -108,6 +132,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; ddl: string; backfill?: (db: 
   { version: 1, ddl: DDL_V1 },
   { version: 2, ddl: DDL_V2 },
   { version: 3, ddl: DDL_V3, backfill: backfillTargetName },
+  { version: 4, ddl: DDL_V4 },
 ];
 
 function hasMigrationsTable(db: Database): boolean {

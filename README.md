@@ -97,9 +97,9 @@ Point your agent or IDE at the stdio MCP server:
 }
 ```
 
-The server exposes nine tools: `search`, `explore`, `trace`, `impact`,
-`diff_impact`, `files`, `pack_context`, `retrieve`, `status`. They all read
-local state only.
+The server exposes ten tools: `search`, `explore`, `trace`, `impact`,
+`diff_impact`, `files`, `pack_context`, `retrieve`, `status` and
+`semantic_search`. They all read local state only.
 
 ---
 
@@ -159,7 +159,10 @@ top-level constants, `with`/`on` relations) because of Flutter.
 - Calls without a resolved import degrade to global name matching.
 - Dart/Kotlin keep explicit partial coverage.
 - Dynamic/reflective resolution is not treated as proven causality.
-- `search` ranks lexically and structurally — **no embeddings**.
+- `search` ranks lexically and structurally (always fresh). Semantic
+  **embeddings are optional and off-by-default**: run `cortex embed` and use the
+  `semantic_search` tool (dense bge-small + hybrid RRF fusion). Vectors are not
+  auto-synced — they can go stale, and the tool signals it honestly.
 
 ---
 

@@ -9,6 +9,8 @@ import type { ToolResponsePayload, SearchArgs, FilesArgs, ExploreArgs, TraceArgs
 import { buildStatusResponse } from "./status.js";
 import { buildFilesResponse, applyFilesFilters } from "./files.js";
 import { buildSearchResponse } from "./search.js";
+import { buildSemanticSearchDegraded, buildSemanticSearchResponse } from "./semantic-search.js";
+import type { SemanticSearchArgs, SemanticSearchDeps } from "./semantic-search.js";
 import { buildTraceResponse } from "./trace.js";
 import { buildImpactResponse } from "./impact.js";
 import { buildRetrieveResponse, buildPackContextResponse } from "./pack.js";
@@ -117,7 +119,13 @@ function buildToolResponseInner(
   // meta-only e resolvem cobertura/tree/grafo por query alvo (trace/impact via
   // LazyTraceGraph), matando o full-load no caminho quente.
   const mode: StructuralLoadMode =
-    tool === "search" || tool === "files" || tool === "trace" || tool === "impact" ? "lite" : "full";
+    tool === "search" ||
+    tool === "files" ||
+    tool === "trace" ||
+    tool === "impact" ||
+    tool === "semantic_search"
+      ? "lite"
+      : "full";
   const envelope = buildIndexEnvelope(cwd, mode);
 
   switch (tool) {
@@ -148,7 +156,41 @@ function buildToolResponseInner(
       return buildRetrieveResponse(cwd, args as RetrieveArgs | undefined);
     case "status":
       return buildStatusResponse(cwd);
+    case "semantic_search":
+      // Caminho síncrono: degrada para fallback lexical (sem embeddar a query).
+      // A busca densa real exige embed assíncrono → buildToolResponseAsync.
+      return buildSemanticSearchDegraded(cwd, envelope, args as SemanticSearchArgs | undefined);
   }
+}
+
+/**
+ * Variante assíncrona do dispatcher. Só `semantic_search` precisa de await (embed
+ * da query); as outras 9 tools delegam ao caminho síncrono. Usada pelo servidor
+ * MCP e pelo comando CLI `semantic-search`.
+ */
+export async function buildToolResponseAsync(
+  tool: McpToolName,
+  cwd: string = process.cwd(),
+  args?: Record<string, unknown>,
+  deps?: SemanticSearchDeps,
+): Promise<ToolResponsePayload> {
+  if (tool === "semantic_search") {
+    if (!readWorkspaceMetadata(cwd)) {
+      return applyResponseFormat(
+        buildToolResponseInner(tool, cwd, args),
+        resolveResponseFormat(args),
+      );
+    }
+    const envelope = buildIndexEnvelope(cwd, "lite");
+    const inner = await buildSemanticSearchResponse(
+      cwd,
+      envelope,
+      args as SemanticSearchArgs | undefined,
+      deps,
+    );
+    return applyResponseFormat(inner, resolveResponseFormat(args));
+  }
+  return buildToolResponse(tool, cwd, args);
 }
 
 export { STRUCTURAL_INDEX_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION };

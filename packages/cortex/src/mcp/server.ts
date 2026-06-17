@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "./tool-registry.js";
-import { buildToolResponse } from "./tools/response.js";
+import { buildToolResponseAsync } from "./tools/response.js";
 import { CORTEX_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
 import { isManifestStaleForAutoSync } from "../discovery/staleness.js";
@@ -63,6 +63,13 @@ const TOOL_INPUT_SCHEMAS = {
   }).passthrough(),
   retrieve: z.object({
     handle: z.string().regex(/^rh_[a-f0-9]{16}$/),
+  }).passthrough(),
+  semantic_search: z.object({
+    query: z.string().min(1),
+    mode: z.enum(["dense", "hybrid"]).optional(),
+    scope: z.string().min(1).optional(),
+    kind: z.string().min(1).optional(),
+    limit: z.number().int().positive().max(100).optional(),
   }).passthrough(),
 } as const;
 
@@ -159,6 +166,18 @@ const TOOL_INPUT_JSON_SCHEMAS = {
     required: ["handle"],
     additionalProperties: false,
   },
+  semantic_search: {
+    type: "object" as const,
+    properties: {
+      query: { type: "string" },
+      mode: { type: "string", enum: ["dense", "hybrid"] },
+      scope: { type: "string" },
+      kind: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 100 },
+    },
+    required: ["query"],
+    additionalProperties: true,
+  },
 } as const;
 
 const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
@@ -171,6 +190,7 @@ const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
   pack_context: "Empacotar contexto curto para o modelo com refs rastreáveis e handle opcional",
   retrieve: "Recuperar explicitamente conteúdo original de um retrieve_handle local",
   status: "Saúde, staleness e confiança do índice local",
+  semantic_search: "Busca semântica densa (embeddings) com fusão híbrida; use quando o lexical vier vazio",
 };
 
 export function createMcpServer(options: McpServerOptions = {}): Server {
@@ -306,7 +326,11 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     await autoSyncIfDirty();
 
     const pathArg = typeof args.path === "string" ? args.path : process.cwd();
-    const payload = buildToolResponse(toolName as (typeof MCP_TOOL_NAMES)[number], pathArg, args);
+    const payload = await buildToolResponseAsync(
+      toolName as (typeof MCP_TOOL_NAMES)[number],
+      pathArg,
+      args,
+    );
 
     return {
       content: [

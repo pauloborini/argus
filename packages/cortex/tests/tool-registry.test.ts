@@ -28,8 +28,8 @@ describe("tool-registry", () => {
     return tempDir;
   }
 
-  it("registra as nove tools do runtime maduro", () => {
-    expect(MCP_TOOL_NAMES).toHaveLength(9);
+  it("registra as dez tools do runtime maduro", () => {
+    expect(MCP_TOOL_NAMES).toHaveLength(10);
     expect(MCP_TOOL_NAMES).toEqual([
       "search",
       "explore",
@@ -40,6 +40,7 @@ describe("tool-registry", () => {
       "pack_context",
       "retrieve",
       "status",
+      "semantic_search",
     ]);
   });
 
