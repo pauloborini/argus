@@ -104,7 +104,7 @@ describe("explore tool", () => {
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
 
-  it("degrada para parcial em Dart por cobertura limitada", async () => {
+  it("Dart full: explore retorna sucesso (cobertura full, S31)", async () => {
     const root = setupWorkspace({
       "lib/main.dart": "class MainFeature {}\nvoid boot() {}\n",
     });
@@ -115,7 +115,13 @@ describe("explore tool", () => {
       mode: "file",
       response_format: "detailed",
     });
-    expect(payload.state).toBe("parcial");
-    expect((payload.limitations as string[]).some((item) => item.includes("Cobertura dart é parcial"))).toBe(true);
+    expect(payload.state).toBe("sucesso");
+    // Dart full: não deve declarar limitação de cobertura de linguagem
+    expect(
+      (payload.limitations as string[] | undefined)?.some((item) =>
+        item.toLowerCase().includes("dart"),
+      ) ?? false,
+    ).toBe(false);
   });
+
 });

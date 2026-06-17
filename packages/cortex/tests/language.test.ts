@@ -25,7 +25,7 @@ describe("language detection", () => {
     expect(detectLanguageFromPath("widget.dart")).toMatchObject({
       status: "supported",
       language: "dart",
-      coverage_level: "partial",
+      coverage_level: "full",
     });
   });
 

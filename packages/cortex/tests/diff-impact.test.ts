@@ -136,7 +136,7 @@ describe("diff impact tool", () => {
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
 
-  it("diff-impact degrada para parcial em Dart por cobertura limitada", async () => {
+  it("Dart full: diff-impact não degrada por linguagem (cobertura full, S31)", async () => {
     const root = setupWorkspace({
       "lib/dep.dart": "void helper() {}\n",
       "lib/main.dart": 'import "dep.dart";\nvoid boot() { helper(); }\n',
@@ -149,7 +149,14 @@ describe("diff impact tool", () => {
       scope: "unstaged",
       response_format: "detailed",
     });
-    expect(payload.state).toBe("parcial");
-    expect((payload.limitations as string[]).some((item) => item.includes("Cobertura parcial"))).toBe(true);
+    expect(["sucesso", "parcial", "stale"]).toContain(payload.state);
+    // Dart full: se parcial, não deve ser por cobertura de linguagem
+    if (payload.state === "parcial") {
+      expect(
+        (payload.limitations as string[] | undefined)?.every((item) =>
+          !item.toLowerCase().includes("cobertura parcial em pelo menos uma"),
+        ) ?? true,
+      ).toBe(true);
+    }
   });
 });
