@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { extractFile } from "../src/extraction/extract-file.js";
+import { extractDart } from "../src/extraction/extractors/dart.js";
 import { extractGo } from "../src/extraction/extractors/go.js";
 import { extractJava } from "../src/extraction/extractors/java.js";
 import { extractPython } from "../src/extraction/extractors/python.js";
@@ -131,6 +132,33 @@ describe("extractors core", () => {
     expect(
       result.edges.some((e) => e.kind === "implements" && e.from_symbol === "S" && e.to === "T"),
     ).toBe(true);
+  });
+
+  it("Dart: símbolos usam o nome real (não o tipo de retorno) e geram call edges", () => {
+    const src =
+      "class Repo {\n  int load() { return helper(); }\n  void save() { db.write(1); }\n}\nint helper() => 1;\n";
+    const { rootNode } = parseFile("dart", src);
+    const result = extractDart(rootNode);
+
+    expect(result.symbols.some((s) => s.name === "load" && s.kind === "function")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "helper")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "int")).toBe(false);
+    const call = result.edges.find((e) => e.kind === "calls" && e.to === "helper");
+    expect(call?.from_symbol).toBe("load");
+    expect(
+      result.edges.some((e) => e.kind === "calls" && e.to === "write" && e.from_symbol === "save"),
+    ).toBe(true);
+  });
+
+  it("Go: struct e interface embedding geram edges extends", () => {
+    const src =
+      "package x\ntype Dog struct {\n  Animal\n  sync.Mutex\n  age int\n}\ntype Reader interface {\n  io.Reader\n  Read() error\n}\n";
+    const { rootNode } = parseFile("go", src);
+    const result = extractGo(rootNode);
+
+    expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Dog" && e.to === "Animal")).toBe(true);
+    expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Dog" && e.to === "Mutex")).toBe(true);
+    expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Reader" && e.to === "Reader")).toBe(true);
   });
 
   it("Dart: import relativo resolve resolved_path", () => {

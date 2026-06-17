@@ -51,6 +51,45 @@ export function extractGo(root: SyntaxNode): FileExtractionResult {
                 start_line: startLine(spec),
                 end_line: endLine(spec),
               });
+
+              // Embedding Go = composição com promoção de métodos (a herança
+              // do Go). Struct: field_declaration sem field_identifier (campo
+              // anônimo). Interface: qualified_type embutido (`io.Reader`).
+              // Modelado como extends p/ impact/trace cruzar o tipo embutido.
+              if (kind === "class") {
+                const fields = spec
+                  .descendantsOfType("struct_type")[0]
+                  ?.descendantsOfType("field_declaration") ?? [];
+                for (const field of fields) {
+                  if (field.descendantsOfType("field_identifier").length > 0) {
+                    continue;
+                  }
+                  const embedded =
+                    field.descendantsOfType("qualified_type")[0]?.text ??
+                    field.descendantsOfType("type_identifier").at(-1)?.text;
+                  if (embedded) {
+                    edges.push({
+                      kind: "extends",
+                      from_symbol: name,
+                      to: embedded.split(".").at(-1) ?? embedded,
+                      line: startLine(field),
+                    });
+                  }
+                }
+              } else if (kind === "interface") {
+                const embeds =
+                  spec.descendantsOfType("interface_type")[0]?.descendantsOfType("qualified_type") ??
+                  [];
+                for (const embed of embeds) {
+                  const target = embed.descendantsOfType("type_identifier").at(-1)?.text ?? embed.text;
+                  edges.push({
+                    kind: "extends",
+                    from_symbol: name,
+                    to: target,
+                    line: startLine(embed),
+                  });
+                }
+              }
             }
           }
         });
