@@ -77,6 +77,12 @@ export const WORKSPACE_MISSING =
 export const STRUCTURAL_INDEX_MISSING =
   "E_INDEX_MISSING: Manifest disponível; índice estrutural ausente — execute cortex index ou cortex sync.";
 
+// Códigos de staleness_hint — prefixam a prosa em `detailed`; `concise` já dropa o campo.
+export const STALE_RUN_SYNC = "STALE_RUN_SYNC";
+export const STALE_RUN_INDEX = "STALE_RUN_INDEX";
+export const STALE_RUN_EMBED = "STALE_RUN_EMBED";
+export const STALE_UNKNOWN = "STALE_UNKNOWN";
+
 const FTS_RETRIEVAL_PENDING =
   "Índice lexical e estrutural disponível para retrieval local.";
 
@@ -306,7 +312,7 @@ export function buildIndexEnvelope(
         state: "parcial",
         message: err.message,
         limitations: PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS,
-        staleness_hint: "Execute cortex index para reconstruir o manifest.",
+        staleness_hint: `${STALE_RUN_INDEX}: Execute cortex index para reconstruir o manifest.`,
         structuralIndex: null,
         storage_backend: null,
         schema_version: null,
@@ -320,7 +326,7 @@ export function buildIndexEnvelope(
       state: "parcial",
       message: INDEX_MISSING,
       limitations: PARTIAL_NO_MANIFEST_LIMITATIONS,
-      staleness_hint: "Execute cortex index para criar o manifest inicial.",
+      staleness_hint: `${STALE_RUN_INDEX}: Execute cortex index para criar o manifest inicial.`,
       structuralIndex: null,
       storage_backend: null,
       schema_version: null,
@@ -355,7 +361,7 @@ export function buildIndexEnvelope(
       state: "stale",
       message: STALE_INDEX,
       limitations: structural ? PARTIAL_FTS_LIMITATIONS : PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-      staleness_hint: "Execute cortex sync para sincronizar o delta pendente.",
+      staleness_hint: `${STALE_RUN_SYNC}: Execute cortex sync para sincronizar o delta pendente.`,
       structuralIndex: structural,
       storage_backend,
       schema_version,
@@ -367,7 +373,7 @@ export function buildIndexEnvelope(
       state: "parcial",
       message: STALE_INDEX,
       limitations: structural ? PARTIAL_FTS_LIMITATIONS : PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-      staleness_hint: "Não foi possível determinar staleness com segurança.",
+      staleness_hint: `${STALE_UNKNOWN}: Não foi possível determinar staleness com segurança.`,
       structuralIndex: structural,
       storage_backend,
       schema_version,
@@ -379,7 +385,7 @@ export function buildIndexEnvelope(
       state: "parcial",
       message: STRUCTURAL_INDEX_MISSING,
       limitations: PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-      staleness_hint: "Execute cortex index ou cortex sync para gerar o índice SQLite.",
+      staleness_hint: `${STALE_RUN_INDEX}: Execute cortex index ou cortex sync para gerar o índice SQLite.`,
       structuralIndex: null,
       storage_backend: null,
       schema_version: null,

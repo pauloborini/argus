@@ -56,12 +56,25 @@ describe("tool-registry", () => {
     }
   });
 
-  it("stubs parciais incluem limitations[]", () => {
+  it("stubs parciais (detailed) incluem limitations[]", () => {
+    const dir = useEmptyDir();
+    initWorkspace(dir);
     for (const tool of MCP_TOOL_NAMES) {
-      const payload = buildToolResponse(tool);
+      const payload = buildToolResponse(tool, dir, { response_format: "detailed" });
       if (payload.state === "parcial") {
         expect(payload.limitations?.length).toBeGreaterThan(0);
       }
+    }
+  });
+
+  it("modo concise dropa limitations e staleness_hint", () => {
+    const dir = useEmptyDir();
+    initWorkspace(dir);
+    for (const tool of MCP_TOOL_NAMES) {
+      const payload = buildToolResponse(tool, dir);
+      expect(payload.limitations).toBeUndefined();
+      expect(payload.staleness_hint).toBeUndefined();
+      expect(payload.confidence).toBeUndefined();
     }
   });
 

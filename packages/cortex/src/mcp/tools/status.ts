@@ -7,7 +7,7 @@ import { readDirtyFlag } from "../../discovery/dirty-flag.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { IndexDbCorruptedError, IndexDbSchemaError } from "../../storage/index-persistence.js";
 import { getManifestPath, readWorkspaceMetadata, resolveRespectGitignore } from "../../workspace/workspace.js";
-import { INDEX_MISSING, STALE_INDEX, WORKSPACE_MISSING, STRUCTURAL_INDEX_MISSING, PARTIAL_NO_MANIFEST_LIMITATIONS, PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS, PARTIAL_STRUCTURAL_MISSING_LIMITATIONS, PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS, loadStructuralIndex, mergeStructuralLimitations, buildIndexVersion } from "./common.js";
+import { INDEX_MISSING, STALE_INDEX, WORKSPACE_MISSING, STRUCTURAL_INDEX_MISSING, PARTIAL_NO_MANIFEST_LIMITATIONS, PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS, PARTIAL_STRUCTURAL_MISSING_LIMITATIONS, PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS, STALE_RUN_SYNC, STALE_RUN_INDEX, STALE_UNKNOWN, loadStructuralIndex, mergeStructuralLimitations, buildIndexVersion } from "./common.js";
 import type { ToolResponsePayload } from "./common.js";
 
 export function buildStatusResponse(cwd: string): ToolResponsePayload {
@@ -41,7 +41,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
         schema_version: null,
         ...stubResponse("parcial", err.message, {
           limitations: PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS,
-          staleness_hint: "Execute cortex index para reconstruir o manifest.",
+          staleness_hint: `${STALE_RUN_INDEX}: Execute cortex index para reconstruir o manifest.`,
         }),
       };
     }
@@ -59,7 +59,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       schema_version: null,
       ...stubResponse("parcial", INDEX_MISSING, {
         limitations: PARTIAL_NO_MANIFEST_LIMITATIONS,
-        staleness_hint: "Execute cortex index para criar o manifest inicial.",
+        staleness_hint: `${STALE_RUN_INDEX}: Execute cortex index para criar o manifest inicial.`,
       }),
     };
   }
@@ -79,7 +79,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
         schema_version: null,
         ...stubResponse("falha", err.message, {
           limitations: PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS,
-          staleness_hint: "Execute cortex index para reconstruir o índice estrutural.",
+          staleness_hint: `${STALE_RUN_INDEX}: Execute cortex index para reconstruir o índice estrutural.`,
         }),
       };
     }
@@ -109,7 +109,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       ...basePayload,
       ...stubResponse("parcial", STRUCTURAL_INDEX_MISSING, {
         limitations: PARTIAL_STRUCTURAL_MISSING_LIMITATIONS,
-        staleness_hint: "Execute cortex index ou cortex sync para gerar o índice SQLite.",
+        staleness_hint: `${STALE_RUN_INDEX}: Execute cortex index ou cortex sync para gerar o índice SQLite.`,
       }),
     };
   }
@@ -137,7 +137,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       ...basePayload,
       ...stubResponse("stale", STALE_INDEX, {
         limitations: structuralLimitations,
-        staleness_hint: "Execute cortex sync para sincronizar o delta pendente.",
+        staleness_hint: `${STALE_RUN_SYNC}: Execute cortex sync para sincronizar o delta pendente.`,
       }),
     };
   }
@@ -148,7 +148,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       limitations: mergeStructuralLimitations(structural, [
         "Não foi possível determinar staleness com segurança.",
       ]),
-      staleness_hint: "Execute cortex sync se o filesystem mudou recentemente.",
+      staleness_hint: `${STALE_UNKNOWN}: Execute cortex sync se o filesystem mudou recentemente.`,
     }),
   };
 }

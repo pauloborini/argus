@@ -22,7 +22,7 @@ import {
   searchFtsInternal,
 } from "../../storage/sqlite-index-store.js";
 import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
-import { WORKSPACE_MISSING } from "./common.js";
+import { WORKSPACE_MISSING, STALE_RUN_EMBED } from "./common.js";
 import type { IndexEnvelope, SearchCandidate, ToolResponsePayload } from "./common.js";
 
 export interface SemanticSearchArgs {
@@ -41,7 +41,7 @@ const EMBEDDINGS_UNAVAILABLE =
   "W_EMBEDDINGS_UNAVAILABLE: Índice de embeddings ausente; execute cortex embed. Resultados lexicais como fallback.";
 const EMBEDDINGS_STALE =
   "W_EMBEDDINGS_STALE: Embeddings defasados em relação ao índice; execute cortex embed.";
-const EMBEDDINGS_HINT = "Execute cortex embed para (re)gerar os vetores semânticos.";
+const EMBEDDINGS_HINT = `${STALE_RUN_EMBED}: Execute cortex embed para (re)gerar os vetores semânticos.`;
 
 function toCandidate(detail: SymbolDetail, score: number, reason: string): SearchCandidate {
   return {
