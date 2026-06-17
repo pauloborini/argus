@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -136,6 +136,36 @@ describe("pack context tool", () => {
     expect(retrieved.state).toBe("sucesso");
     expect(retrieved.reversibility).toBe("full");
     expect(String(retrieved.content)).toContain("utils.ts");
+  });
+
+  it("GC evict handles antigos ao gravar um novo (TTL)", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    // Handle "velho" (> 7 dias) registrado no índice + dir em disco.
+    const stale = "rh_aaaaaaaaaaaaaaaa";
+    const staleDir = join(root, ".cortex", "packed-handles", stale);
+    mkdirSync(staleDir, { recursive: true });
+    writeFileSync(join(staleDir, "manifest.json"), "{}", "utf-8");
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const db = openIndexDb(getIndexDbPath(root));
+    db.prepare("INSERT OR REPLACE INTO packed_handles (handle, created_at) VALUES (?, ?)").run(stale, old);
+    db.close();
+
+    // Pack com perda de budget → grava novo handle → dispara GC.
+    const payload = buildToolStub("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "forcar handle",
+      token_budget: 80,
+      style: "deep",
+    });
+    expect(typeof payload.retrieve_handle).toBe("string");
+
+    const db2 = openIndexDb(getIndexDbPath(root), { readonly: true });
+    const row = db2.prepare("SELECT handle FROM packed_handles WHERE handle = ?").get(stale);
+    db2.close();
+    expect(row).toBeUndefined();
+    expect(existsSync(staleDir)).toBe(false);
   });
 
   it("retrieve rejeita traversal e handles de outro workspace", async () => {

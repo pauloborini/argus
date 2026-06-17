@@ -2208,6 +2208,45 @@ function registerPackedHandleInIndex(cwd: string, handle: string, createdAt: str
   }
 }
 
+// GC de retrieve handles: `.cortex/packed-handles/` crescia sem limite (um
+// diretório por pack com perda de budget). Evicção por idade (TTL) e por
+// contagem (cap dos mais recentes), disparada ao gravar um novo handle.
+const PACKED_HANDLE_MAX = 50;
+const PACKED_HANDLE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function evictStalePackedHandles(cwd: string): void {
+  try {
+    const db = openIndexDb(getIndexDbPath(cwd));
+    try {
+      const rows = db
+        .prepare("SELECT handle, created_at FROM packed_handles ORDER BY created_at DESC")
+        .all() as Array<{ handle: string; created_at: string }>;
+      const now = Date.now();
+      const del = db.prepare("DELETE FROM packed_handles WHERE handle = ?");
+      const handlesDir = getPackedHandlesDir(cwd);
+      rows.forEach((row, index) => {
+        const parsed = Date.parse(row.created_at);
+        const tooOld = Number.isFinite(parsed) && now - parsed > PACKED_HANDLE_TTL_MS;
+        const overflow = index >= PACKED_HANDLE_MAX;
+        if (!tooOld && !overflow) {
+          return;
+        }
+        if (isValidRetrieveHandle(row.handle)) {
+          const dir = getPackedHandlePath(cwd, row.handle);
+          if (isWithinPath(handlesDir, dir)) {
+            rmSync(dir, { recursive: true, force: true });
+          }
+        }
+        del.run(row.handle);
+      });
+    } finally {
+      closeIndexDb(db);
+    }
+  } catch {
+    // best effort; nunca falha o pack_context por causa da limpeza
+  }
+}
+
 function readStoredPackHandle(cwd: string, handle: string): ReadStoredPackHandleResult {
   if (!isValidRetrieveHandle(handle)) {
     return {
@@ -2464,6 +2503,7 @@ function writeStoredPackHandle(
   }
 
   registerPackedHandleInIndex(cwd, payload.handle, payload.created_at);
+  evictStalePackedHandles(cwd);
   if (manifest.segments.length === 0) {
     return "none";
   }
