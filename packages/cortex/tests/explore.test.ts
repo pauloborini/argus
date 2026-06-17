@@ -80,7 +80,11 @@ describe("explore tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "utils.ts"), 'export function calculateTotal() { return 2; }\n', "utf-8");
 
-    const payload = buildToolStub("explore", root, { target: "calculateTotal", mode: "symbol" });
+    const payload = buildToolStub("explore", root, {
+      target: "calculateTotal",
+      mode: "symbol",
+      response_format: "detailed",
+    });
     expect(payload.state).toBe("stale");
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
@@ -91,7 +95,11 @@ describe("explore tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("explore", root, { target: "lib/main.dart", mode: "file" });
+    const payload = buildToolStub("explore", root, {
+      target: "lib/main.dart",
+      mode: "file",
+      response_format: "detailed",
+    });
     expect(payload.state).toBe("parcial");
     expect((payload.limitations as string[]).some((item) => item.includes("Cobertura dart é parcial"))).toBe(true);
   });

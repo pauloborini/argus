@@ -30,6 +30,7 @@ import {
 import { SUPPORTED_HOSTS, type McpHostId } from "./install/mcp-hosts.js";
 import { CORTEX_VERSION } from "./version.js";
 import { setPrettyOutput } from "./output.js";
+import { setDefaultResponseFormat } from "./mcp/tools/stubs.js";
 
 /** Parse e valida a flag `--hosts a,b`; vazio → todos os suportados. */
 function parseHosts(value?: string): McpHostId[] | undefined {
@@ -81,12 +82,16 @@ program
   .name("cortex")
   .description("Atlas Cortex — CLI local de retrieval e context packing")
   .version(CORTEX_VERSION)
-  .option("--pretty", "Saída JSON identada para leitura humana (default: compacto)");
+  .option("--pretty", "Saída JSON identada para leitura humana (default: compacto)")
+  .option("--detailed", "Envelope detalhado (message/limitations/staleness_hint em prosa)");
 
-// Default compacto: pretty-print desperdiça ~30-40% de tokens; o consumidor
-// primário é máquina (agente / `jq`). `--pretty` reativa a identação.
+// Default compacto + conciso: pretty-print desperdiça ~30-40% de tokens e o
+// envelope em prosa ~50-70% dos tokens de envelope; o consumidor primário é
+// máquina. `--pretty` reativa a identação; `--detailed` restaura a prosa.
 program.hook("preAction", (thisCommand) => {
-  setPrettyOutput(thisCommand.optsWithGlobals().pretty === true);
+  const opts = thisCommand.optsWithGlobals();
+  setPrettyOutput(opts.pretty === true);
+  setDefaultResponseFormat(opts.detailed === true ? "detailed" : "concise");
 });
 
 program

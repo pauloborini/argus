@@ -222,11 +222,27 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     { capabilities: { tools: {} } },
   );
 
+  // `response_format` é aceito por toda tool (default `concise`): envelope
+  // mínimo (state + códigos `E_*`); `detailed` restaura message/limitations/
+  // staleness_hint em prosa. Injetado em todo inputSchema para descoberta pelo
+  // agente; o passthrough das schemas zod já o deixa fluir até `buildToolStub`.
+  const withResponseFormat = (schema: { properties: Record<string, unknown> }) => ({
+    ...schema,
+    properties: {
+      ...schema.properties,
+      response_format: {
+        type: "string" as const,
+        enum: ["concise", "detailed"],
+        description: "concise (default, mínimo tokens) | detailed (prosa completa)",
+      },
+    },
+  });
+
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: MCP_TOOL_NAMES.map((name) => ({
       name,
       description: TOOL_DESCRIPTIONS[name],
-      inputSchema: TOOL_INPUT_JSON_SCHEMAS[name],
+      inputSchema: withResponseFormat(TOOL_INPUT_JSON_SCHEMAS[name]),
     })),
   }));
 

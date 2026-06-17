@@ -59,7 +59,7 @@ describe("status stub e staleness", () => {
     writeFileSync(join(root, "notes.md"), "# notes\n", "utf-8");
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("status", root);
+    const payload = buildToolStub("status", root, { response_format: "detailed" });
     expect(payload.state).toBe("parcial");
     const limitations = payload.limitations as string[];
     expect(limitations.some((line) => line.includes("não suportada"))).toBe(true);

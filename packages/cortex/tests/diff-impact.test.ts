@@ -128,7 +128,10 @@ describe("diff impact tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "src/dep.ts"), "export function helper() { return 1; }\n", "utf-8");
 
-    const payload = buildToolStub("diff_impact", root, { scope: "unstaged" });
+    const payload = buildToolStub("diff_impact", root, {
+      scope: "unstaged",
+      response_format: "detailed",
+    });
     expect(payload.state).toBe("stale");
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
@@ -142,7 +145,10 @@ describe("diff impact tool", () => {
     writeFileSync(join(root, "lib/dep.dart"), "void helper() { print(1); }\n", "utf-8");
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("diff_impact", root, { scope: "unstaged" });
+    const payload = buildToolStub("diff_impact", root, {
+      scope: "unstaged",
+      response_format: "detailed",
+    });
     expect(payload.state).toBe("parcial");
     expect((payload.limitations as string[]).some((item) => item.includes("Cobertura parcial"))).toBe(true);
   });

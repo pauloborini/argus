@@ -52,7 +52,10 @@ describe("search com staleness indeterminada", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, { query: "calculateTotal" });
+    const payload = buildToolStub("search", root, {
+      query: "calculateTotal",
+      response_format: "detailed",
+    });
     expect(payload.state).toBe("parcial");
     const candidates = payload.candidates as Array<{ name: string }>;
     expect(candidates.length).toBeGreaterThan(0);

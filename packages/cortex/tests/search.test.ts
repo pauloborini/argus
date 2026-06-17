@@ -136,7 +136,10 @@ describe("search tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "app.ts"), "export function calculateTotal() { return 2; }\n", "utf-8");
 
-    const payload = buildToolStub("search", root, { query: "calculateTotal" });
+    const payload = buildToolStub("search", root, {
+      query: "calculateTotal",
+      response_format: "detailed",
+    });
     expect(payload.state).toBe("stale");
     expect((payload.candidates as unknown[]).length).toBeGreaterThan(0);
     expect(String(payload.staleness_hint)).toContain("cortex sync");
@@ -165,7 +168,10 @@ describe("search tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, { query: "FeatureController" });
+    const payload = buildToolStub("search", root, {
+      query: "FeatureController",
+      response_format: "detailed",
+    });
     expect(payload.state).toBe("parcial");
     expect((payload.candidates as Array<{ path: string }>)[0]?.path).toBe("lib/feature.dart");
     expect((payload.limitations as string[]).some((item) => item.includes("Cobertura parcial"))).toBe(true);

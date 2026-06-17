@@ -307,6 +307,94 @@ export function readFilesTree(db: Database): FileStructuralEntry[] {
   return readAllFileEntries(db);
 }
 
+/**
+ * Versão meta-only do índice estrutural: traz schema/coverage/limitations sem
+ * materializar `files[]` (sem o N+1 de símbolos/edges por arquivo). Usada no
+ * caminho quente de `search`/`files`, que não precisa do grafo completo.
+ */
+export function readStructuralIndexMetaFromDb(db: Database): StructuralIndex | null {
+  const meta = readIndexMeta(db);
+  if (!meta) {
+    return null;
+  }
+  return {
+    schema_version: meta.schema_version,
+    generated_at: meta.generated_at,
+    manifest_hash: meta.manifest_hash,
+    file_count: meta.file_count,
+    symbol_count: meta.symbol_count,
+    files: [],
+    coverage_by_language: meta.coverage_by_language,
+    extraction_limitations: meta.extraction_limitations,
+  };
+}
+
+export interface FileTreeRow {
+  relative_path: string;
+  language: string;
+  has_parse_errors: boolean;
+  total: number;
+  functions: number;
+  classes: number;
+  other: number;
+}
+
+/**
+ * Contagens de símbolos por arquivo agregadas em SQL (`GROUP BY file`), em vez
+ * de 2 queries por arquivo + 2 JSON.parse do `readAllFileEntries`. Alimenta o
+ * tree de `files` sem carregar o grafo inteiro.
+ */
+export function readFileTreeRows(db: Database): FileTreeRow[] {
+  const rows = db
+    .prepare(
+      `SELECT f.relative_path AS relative_path,
+              f.language AS language,
+              f.parse_errors_json AS parse_errors_json,
+              COALESCE(SUM(CASE WHEN s.kind = 'function' THEN 1 ELSE 0 END), 0) AS functions,
+              COALESCE(SUM(CASE WHEN s.kind IN ('class', 'interface') THEN 1 ELSE 0 END), 0) AS classes,
+              COALESCE(SUM(CASE WHEN s.id IS NOT NULL AND s.kind NOT IN ('function', 'class', 'interface') THEN 1 ELSE 0 END), 0) AS other,
+              COUNT(s.id) AS total
+       FROM files f
+       LEFT JOIN symbols s ON s.file_id = f.id
+       GROUP BY f.id
+       ORDER BY f.relative_path`,
+    )
+    .all() as Array<{
+    relative_path: string;
+    language: string;
+    parse_errors_json: string;
+    functions: number;
+    classes: number;
+    other: number;
+    total: number;
+  }>;
+  return rows.map((row) => ({
+    relative_path: row.relative_path,
+    language: row.language,
+    has_parse_errors: row.parse_errors_json !== "[]" && row.parse_errors_json !== "",
+    total: row.total,
+    functions: row.functions,
+    classes: row.classes,
+    other: row.other,
+  }));
+}
+
+/** Mapa path→language para um conjunto de paths (resolve cobertura por candidato). */
+export function readLanguagesForPaths(db: Database, paths: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (paths.length === 0) {
+    return out;
+  }
+  const placeholders = paths.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT relative_path, language FROM files WHERE relative_path IN (${placeholders})`)
+    .all(...paths) as Array<{ relative_path: string; language: string }>;
+  for (const row of rows) {
+    out.set(row.relative_path, row.language);
+  }
+  return out;
+}
+
 export function searchFtsInternal(
   db: Database,
   query: string,
