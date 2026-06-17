@@ -469,11 +469,20 @@ Organizado por **impacto/esforço**. Os três tiers são entregáveis independen
 
 ### Tier 3 — Higiene e robustez
 
-19. Quebrar `stubs.ts` (3120 linhas) por tool; renomear "stub"/`Semantic*`.
-20. `maxDebounceMs` (Bug 8); fallback daemon-down (Bug 9); GC de handles
+19. ~~Quebrar `stubs.ts` (3120 linhas) por tool; renomear "stub"/`Semantic*`.~~ ✅
+20. ~~`maxDebounceMs` (Bug 8); fallback daemon-down (Bug 9); GC de handles
     (Bug 12); ladder de migração; modernizar launchd/systemd com env explícito;
-    corrigir pin `@1.0.0` (Bug 13); detecção de exaustão de inotify.
-21. Re-benchmark honesto (§5) e separar contribuição de índice vs formato.
+    corrigir pin `@1.0.0` (Bug 13); detecção de exaustão de inotify.~~ ✅
+    *Fechado:* maxDebounce, fallback daemon-down, GC de handles já entregues;
+    pin `@1.0.0`→`@latest` no README; env explícito (PATH+HOME) no plist/unit
+    (`resolveServiceEnv`) — sem isso o `git` do Homebrew some sob launchd/systemd
+    e o auto-sync falha mudo; exaustão de inotify detectada com hint acionável
+    (`watcherExhaustionHint`) + backoff direto ao máximo (polling cobre). A
+    "ladder de migração" fica como **rebuild-on-mismatch** intencional: o índice
+    é local e barato de reconstruir, então schema incompatível lança
+    `E_INDEX_SCHEMA_INCOMPATIBLE` instruindo `cortex index` em vez de migrar
+    passo-a-passo (evita carregar migrações mortas).
+21. ~~Re-benchmark honesto (§5) e separar contribuição de índice vs formato.~~ ✅
 
 ---
 

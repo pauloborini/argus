@@ -26,6 +26,23 @@ const SNAPSHOT_INTERVAL_MS = 30_000;
 const MAX_RESUBSCRIBE_BACKOFF_MS = 30_000;
 const POLL_INTERVAL_MS = 30_000;
 
+/**
+ * Reconhece exaustão de watches do SO (inotify no Linux, descritores no
+ * macOS/BSD). Quando o backend nativo estoura, resubscrever rápido só queima
+ * CPU — o limite é do SO, não transitório. Retorna `null` para erros comuns.
+ */
+export function watcherExhaustionHint(err: Error): string | null {
+  const text = `${(err as NodeJS.ErrnoException).code ?? ""} ${err.message}`;
+  if (/ENOSPC|EMFILE|ENFILE|inotify|too many open files|watch(?:er)? limit/i.test(text)) {
+    return (
+      "Limite de watches do SO esgotado (ENOSPC/EMFILE). " +
+      "Aumente fs.inotify.max_user_watches (Linux) ou o limite de descritores; " +
+      "auto-sync degradou para polling a cada 30s até o limite subir."
+    );
+  }
+  return null;
+}
+
 interface WorkspaceState {
   root: string;
   pipeline: WorkspacePipeline;
@@ -221,12 +238,15 @@ export class DaemonRuntime {
   private onWatcherError(state: WorkspaceState, err: Error): void {
     state.watching = false;
     state.watchBackend = "poll";
-    state.lastError = err.message;
+    const exhaustion = watcherExhaustionHint(err);
+    state.lastError = exhaustion ?? err.message;
     if (this.stopping) {
       return;
     }
     this.startPolling(state);
-    const delay = state.resubscribeBackoffMs;
+    // Exaustão é limite do SO, não transitório: vai direto ao backoff máximo para
+    // não martelar o subscribe enquanto o polling cobre as mudanças.
+    const delay = exhaustion ? MAX_RESUBSCRIBE_BACKOFF_MS : state.resubscribeBackoffMs;
     state.resubscribeBackoffMs = Math.min(delay * 2, MAX_RESUBSCRIBE_BACKOFF_MS);
     setTimeout(() => {
       if (!this.stopping && this.states.has(state.root)) {
