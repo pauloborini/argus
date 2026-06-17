@@ -156,7 +156,7 @@ top-level constants, `with`/`on` relations) because of Flutter.
 
 ## Known limitations
 
-- Calls without a resolved import degrade to global name matching.
+- Calls without a resolved import degrade to global name matching (mitigable via optional SCIP import — `cortex scip import`).
 - Dart/Kotlin keep explicit partial coverage.
 - Dynamic/reflective resolution is not treated as proven causality.
 - `search` ranks lexically and structurally (always fresh). Semantic

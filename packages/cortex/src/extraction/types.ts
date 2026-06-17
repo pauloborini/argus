@@ -44,6 +44,7 @@ export interface ExtractedEdge {
   from_symbol?: string;
   to: string;
   line?: number;
+  source?: string;
 }
 
 export interface ParseError {
