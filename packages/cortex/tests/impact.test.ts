@@ -113,6 +113,43 @@ describe("impact tool", () => {
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
 
+  it("impact dependents de símbolo acha callers via lazy reverse (target_name)", async () => {
+    const root = setupWorkspace({
+      "lib.ts": "export function alvoChamado() { return 1; }\n",
+      "caller.ts": 'import { alvoChamado } from "./lib";\nexport function chamador() { return alvoChamado(); }\n',
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("impact", root, {
+      target: "alvoChamado",
+      direction: "dependents",
+      depth: 2,
+    });
+    expect(["sucesso", "parcial"]).toContain(payload.state);
+    expect((payload.files as string[])).toContain("caller.ts");
+    expect(
+      (payload.direct_affected as Array<{ name: string }>).some((ref) => ref.name === "chamador"),
+    ).toBe(true);
+  });
+
+  it("impact dependents de classe acha herdeiros via lazy reverse (extends_by)", async () => {
+    const root = setupWorkspace({
+      "base.ts": "export class BaseWidget {}\n",
+      "derived.ts": 'import { BaseWidget } from "./base";\nexport class DerivedWidget extends BaseWidget {}\n',
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolStub("impact", root, {
+      target: "BaseWidget",
+      direction: "dependents",
+      depth: 2,
+    });
+    expect(["sucesso", "parcial"]).toContain(payload.state);
+    expect(
+      (payload.direct_affected as Array<{ name: string }>).some((ref) => ref.name === "DerivedWidget"),
+    ).toBe(true);
+  });
+
   it("impact degrada para parcial em Dart por cobertura limitada", async () => {
     const root = setupWorkspace({
       "lib/main.dart": 'import "dep.dart";\nvoid boot() { helper(); }\n',

@@ -21,12 +21,20 @@ import {
 } from "../../storage/index-persistence.js";
 import {
   closeIndexDb,
+  countEdgesByTargetName,
   openIndexDb,
+  readEdgesByRawTarget,
+  readEdgesByTargetName,
+  readFileEntryByPath,
+  readFilePathMatches,
   readFileTreeRows,
+  readImportersMap,
   readLanguagesForPaths,
+  readSymbolFilePathsByName,
   searchFtsInternal,
 } from "../../storage/sqlite-index-store.js";
 import type { FileTreeRow } from "../../storage/sqlite-index-store.js";
+import type { Database } from "../../storage/sqlite-db.js";
 import { SQLITE_SCHEMA_VERSION } from "../../storage/sqlite-prepared.js";
 import {
   getIndexDbPath,
@@ -1093,7 +1101,7 @@ function findOwningSymbol(
 }
 
 function resolveCallTargets(
-  symbolIndex: SymbolNameIndex,
+  lookupByName: (name: string) => SymbolMatch[],
   source: FileStructuralEntry,
   rawTarget: string,
 ): {
@@ -1117,23 +1125,44 @@ function resolveCallTargets(
       )
       .map((item) => item.resolved_path!),
   );
-  const imported = findFilesBySymbolName(symbolIndex, target).filter((match) =>
+  const imported = lookupByName(target).filter((match) =>
     importedPaths.has(match.entry.relative_path),
   );
   if (imported.length > 0) {
     return { matches: imported, resolution: "import" };
   }
 
-  const global = findFilesBySymbolName(symbolIndex, target);
+  const global = lookupByName(target);
   return {
     matches: global,
     resolution: global.length > 0 ? "global" : "unresolved",
   };
 }
 
+/** Seleção de alvo de arquivo via SQL (exato + parcial), sem materializar index.files. */
+function selectFileTargetLazy(
+  graph: LazyTraceGraph,
+  db: Database,
+  target: string,
+  includeTests: boolean,
+): { entry: FileStructuralEntry | null; candidates: ExploreRef[] } {
+  const normalized = target.trim().toLowerCase();
+  const keep = (path: string): boolean => includeTests || !fileMatchesTests(path);
+  const { exact, partial } = readFilePathMatches(db, normalized);
+  const exactFiltered = exact.filter(keep);
+  if (exactFiltered.length === 1) {
+    return { entry: graph.fileEntry(exactFiltered[0]!), candidates: [] };
+  }
+  const partialFiltered = partial.filter(keep).sort((a, b) => a.localeCompare(b));
+  return {
+    entry: partialFiltered.length === 1 ? graph.fileEntry(partialFiltered[0]!) : null,
+    candidates: partialFiltered.slice(0, 10).map((path) => ({ path, reason: "file_match" })),
+  };
+}
+
 function resolveTraceTarget(
-  cwd: string,
-  index: StructuralIndex,
+  graph: LazyTraceGraph,
+  db: Database,
   target: string,
   includeTests = false,
 ): TraceResolvedTarget | null {
@@ -1142,7 +1171,7 @@ function resolveTraceTarget(
     return null;
   }
 
-  const fileSelection = selectFileTarget(index, normalized, includeTests);
+  const fileSelection = selectFileTargetLazy(graph, db, normalized, includeTests);
   if (fileSelection.entry && fileSelection.entry.relative_path === normalized) {
     return {
       node: buildFileNode(fileSelection.entry),
@@ -1167,58 +1196,50 @@ function resolveTraceTarget(
     };
   }
 
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata) {
-    return null;
+  const hits = searchFtsInternal(db, normalized, 20);
+  const exactHits = hits.filter((hit) => hit.name.toLowerCase() === normalized.toLowerCase());
+  const resolveHit = (hit: { relative_path: string; name: string }): { entry: FileStructuralEntry; symbol: ExtractedSymbol } | null => {
+    const entry = graph.fileEntry(hit.relative_path);
+    const symbol = entry?.symbols.find((item) => item.name === hit.name);
+    return entry && symbol ? { entry, symbol } : null;
+  };
+  if (exactHits.length === 1) {
+    const resolved = resolveHit(exactHits[0]!);
+    if (resolved) {
+      return { node: buildSymbolNode(resolved.entry, resolved.symbol), candidates: [] };
+    }
   }
-  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
-  try {
-    const hits = searchFtsInternal(db, normalized, 20);
-    const exactHits = hits.filter((hit) => hit.name.toLowerCase() === normalized.toLowerCase());
-    if (exactHits.length === 1) {
-      const hit = exactHits[0]!;
-      const entry = index.files.find((file) => file.relative_path === hit.relative_path);
-      const symbol = entry?.symbols.find((item) => item.name === hit.name);
-      if (entry && symbol) {
-        return { node: buildSymbolNode(entry, symbol), candidates: [] };
-      }
-    }
-    if (exactHits.length > 1) {
+  if (exactHits.length > 1) {
+    return {
+      candidates: exactHits.slice(0, 10).map((hit) => ({
+        name: hit.name,
+        path: hit.relative_path,
+        kind: hit.kind,
+        reason: "exact_symbol_match",
+      })),
+      limitations: ["Múltiplos símbolos equivalentes encontrados para o alvo."],
+    };
+  }
+  if (hits.length === 1) {
+    const resolved = resolveHit(hits[0]!);
+    if (resolved) {
       return {
-        candidates: exactHits.slice(0, 10).map((hit) => ({
-          name: hit.name,
-          path: hit.relative_path,
-          kind: hit.kind,
-          reason: "exact_symbol_match",
-        })),
-        limitations: ["Múltiplos símbolos equivalentes encontrados para o alvo."],
+        node: buildSymbolNode(resolved.entry, resolved.symbol),
+        candidates: [],
+        limitations: ["Alvo resolvido por hit FTS único, sem correspondência exata por nome."],
       };
     }
-    if (hits.length === 1) {
-      const hit = hits[0]!;
-      const entry = index.files.find((file) => file.relative_path === hit.relative_path);
-      const symbol = entry?.symbols.find((item) => item.name === hit.name);
-      if (entry && symbol) {
-        return {
-          node: buildSymbolNode(entry, symbol),
-          candidates: [],
-          limitations: ["Alvo resolvido por hit FTS único, sem correspondência exata por nome."],
-        };
-      }
-    }
-    if (hits.length > 1) {
-      return {
-        candidates: hits.slice(0, 10).map((hit) => ({
-          name: hit.name,
-          path: hit.relative_path,
-          kind: hit.kind,
-          reason: "fts_candidate",
-        })),
-        limitations: ["Múltiplos candidatos FTS encontrados para o alvo."],
-      };
-    }
-  } finally {
-    closeIndexDb(db);
+  }
+  if (hits.length > 1) {
+    return {
+      candidates: hits.slice(0, 10).map((hit) => ({
+        name: hit.name,
+        path: hit.relative_path,
+        kind: hit.kind,
+        reason: "fts_candidate",
+      })),
+      limitations: ["Múltiplos candidatos FTS encontrados para o alvo."],
+    };
   }
 
   return null;
@@ -1299,7 +1320,7 @@ function buildTraceAdjacency(
 
     for (const edge of entry.edges) {
       if (edge.kind === "calls") {
-        const resolved = resolveCallTargets(symbolIndex, entry, edge.to);
+        const resolved = resolveCallTargets((name) => findFilesBySymbolName(symbolIndex, name), entry, edge.to);
         const caller = edge.from_symbol
           ? entry.symbols.find((symbol) => symbol.name === edge.from_symbol) ?? null
           : findOwningSymbol(entry, edge.line);
@@ -1476,8 +1497,290 @@ export function personalizedPageRank(
   return pr;
 }
 
+/** Tupla intermediária de resolução de uma call-edge (paridade com buildTraceAdjacency). */
+interface ResolvedCall {
+  callerNode: TraceNode;
+  targetNode: TraceNode;
+  uncertain?: string;
+}
+
+/**
+ * Provê `outEdges(node)` para um nó **sem** materializar o grafo inteiro:
+ * expande as arestas sob demanda via SQL indexado (idx_edges_target_name /
+ * idx_symbols_name + scan único de imports). Cada nó é expandido no máximo uma
+ * vez (`expanded`); o subgrafo descoberto fica em `discovered` para o PageRank
+ * rodar só sobre o que o BFS visitou. Resolução (local/import/global), pesos e
+ * razões de incerteza idênticos ao caminho eager — muda só a fonte de dados.
+ */
+class LazyTraceGraph {
+  private readonly fileCache = new Map<string, FileStructuralEntry | null>();
+  private readonly symbolMatchCache = new Map<string, SymbolMatch[]>();
+  private readonly refCountCache = new Map<string, number>();
+  private readonly expanded = new Map<string, TraceEdgeStep[]>();
+  readonly discovered = new Map<string, TraceEdgeStep[]>();
+  private importers: Map<string, string[]> | null = null;
+
+  constructor(
+    private readonly db: Database,
+    private readonly includeTests: boolean,
+  ) {}
+
+  private includeFile(path: string): boolean {
+    return this.includeTests || !fileMatchesTests(path);
+  }
+
+  fileEntry(path: string): FileStructuralEntry | null {
+    if (this.fileCache.has(path)) {
+      return this.fileCache.get(path) ?? null;
+    }
+    const entry = readFileEntryByPath(this.db, path);
+    this.fileCache.set(path, entry);
+    return entry;
+  }
+
+  languageOf(path: string): string | null {
+    return this.fileEntry(path)?.language ?? null;
+  }
+
+  private matchesByName(name: string): SymbolMatch[] {
+    const cached = this.symbolMatchCache.get(name);
+    if (cached) {
+      return cached;
+    }
+    const matches: SymbolMatch[] = [];
+    for (const path of readSymbolFilePathsByName(this.db, name)) {
+      if (!this.includeFile(path)) {
+        continue;
+      }
+      const entry = this.fileEntry(path);
+      if (!entry) {
+        continue;
+      }
+      for (const symbol of entry.symbols) {
+        if (symbol.name === name) {
+          matches.push({ entry, symbol });
+        }
+      }
+    }
+    this.symbolMatchCache.set(name, matches);
+    return matches;
+  }
+
+  private referenceCount(name: string): number {
+    let value = this.refCountCache.get(name);
+    if (value === undefined) {
+      value = countEdgesByTargetName(this.db, name);
+      this.refCountCache.set(name, value);
+    }
+    return value;
+  }
+
+  private weight(name: string): number {
+    const definitionCount = this.matchesByName(name).length;
+    const referenceCount = this.referenceCount(name) || 1;
+    const descriptiveNameBoost = name.length >= 8 ? 10 : 1;
+    const privatePenalty = name.startsWith("_") ? 0.1 : 1;
+    const commonNamePenalty = definitionCount > 5 ? 0.1 : 1;
+    return Math.max(
+      0.001,
+      descriptiveNameBoost * privatePenalty * commonNamePenalty * Math.sqrt(referenceCount),
+    );
+  }
+
+  private importersOf(path: string): string[] {
+    if (!this.importers) {
+      this.importers = readImportersMap(this.db);
+    }
+    return this.importers.get(path) ?? [];
+  }
+
+  /** Resolve uma call-edge de um arquivo-fonte → tuplas caller/target (igual ao eager). */
+  private resolveCalls(source: FileStructuralEntry, edge: { from_symbol?: string; to: string; line?: number }): ResolvedCall[] {
+    const resolved = resolveCallTargets((name) => this.matchesByName(name), source, edge.to);
+    const caller = edge.from_symbol
+      ? source.symbols.find((symbol) => symbol.name === edge.from_symbol) ?? null
+      : findOwningSymbol(source, edge.line);
+    const callerNode = caller ? buildSymbolNode(source, caller) : buildFileNode(source);
+    return resolved.matches.map((match) => {
+      const targetNode = buildSymbolNode(match.entry, match.symbol);
+      const uncertain =
+        resolved.resolution === "global"
+          ? "Alvo resolvido globalmente por nome; não há import compatível comprovando o vínculo."
+          : resolved.matches.length > 1
+            ? "Mais de um alvo compatível permanece após resolução por import."
+            : caller
+              ? undefined
+              : "Símbolo chamador não identificado; chamada atribuída ao arquivo.";
+      return { callerNode, targetNode, uncertain };
+    });
+  }
+
+  /** Out-edges de um nó (forward + reverse), expandido no máximo uma vez. */
+  outEdges(node: TraceNode): TraceEdgeStep[] {
+    const cached = this.expanded.get(node.id);
+    if (cached) {
+      return cached;
+    }
+    const edges = node.node_type === "file" ? this.expandFile(node) : this.expandSymbol(node);
+    this.expanded.set(node.id, edges);
+    this.discovered.set(node.id, edges);
+    return edges;
+  }
+
+  private expandFile(node: TraceNode): TraceEdgeStep[] {
+    const entry = this.fileEntry(node.path);
+    if (!entry || !this.includeFile(node.path)) {
+      return [];
+    }
+    const fileNode = buildFileNode(entry);
+    const edges: TraceEdgeStep[] = [];
+
+    for (const symbol of entry.symbols) {
+      edges.push({ relation: "declares", from: fileNode, to: buildSymbolNode(entry, symbol), line: symbol.start_line });
+    }
+
+    for (const imported of entry.imports) {
+      if (!imported.resolved_path || !this.includeFile(imported.resolved_path)) {
+        continue;
+      }
+      const targetEntry = this.fileEntry(imported.resolved_path);
+      if (!targetEntry) {
+        continue;
+      }
+      edges.push({ relation: "imports", from: fileNode, to: buildFileNode(targetEntry) });
+    }
+
+    for (const importerPath of this.importersOf(node.path)) {
+      if (!this.includeFile(importerPath)) {
+        continue;
+      }
+      const importerEntry = this.fileEntry(importerPath);
+      if (!importerEntry) {
+        continue;
+      }
+      edges.push({ relation: "imported_by", from: fileNode, to: buildFileNode(importerEntry) });
+    }
+
+    // Calls cujo chamador não foi identificado: o eager atribui a aresta ao
+    // arquivo (callerNode = fileNode). Só essas saem do nó-arquivo.
+    for (const edge of entry.edges) {
+      if (edge.kind !== "calls") {
+        continue;
+      }
+      for (const call of this.resolveCalls(entry, edge)) {
+        if (call.callerNode.id !== fileNode.id) {
+          continue;
+        }
+        edges.push({
+          relation: "calls",
+          from: fileNode,
+          to: call.targetNode,
+          line: edge.line,
+          uncertain: call.uncertain,
+          weight: this.weight(call.targetNode.name),
+        });
+      }
+    }
+
+    return edges;
+  }
+
+  private expandSymbol(node: TraceNode): TraceEdgeStep[] {
+    const entry = this.fileEntry(node.path);
+    const edges: TraceEdgeStep[] = [];
+    if (entry) {
+      edges.push({ relation: "defined_in", from: node, to: buildFileNode(entry), line: node.line });
+
+      // Forward: calls/extends/implements de cujo dono é este símbolo.
+      for (const edge of entry.edges) {
+        if (edge.kind === "calls") {
+          for (const call of this.resolveCalls(entry, edge)) {
+            if (call.callerNode.id !== node.id) {
+              continue;
+            }
+            edges.push({
+              relation: "calls",
+              from: node,
+              to: call.targetNode,
+              line: edge.line,
+              uncertain: call.uncertain,
+              weight: this.weight(call.targetNode.name),
+            });
+          }
+        } else if ((edge.kind === "extends" || edge.kind === "implements") && edge.from_symbol) {
+          const originSymbol = entry.symbols.find((symbol) => symbol.name === edge.from_symbol);
+          if (!originSymbol || buildSymbolNode(entry, originSymbol).id !== node.id) {
+            continue;
+          }
+          const targetMatches = this.matchesByName(edge.to);
+          for (const match of targetMatches) {
+            edges.push({
+              relation: edge.kind,
+              from: node,
+              to: buildSymbolNode(match.entry, match.symbol),
+              line: edge.line,
+              uncertain: targetMatches.length > 1 ? "Múltiplos símbolos com o mesmo nome podem representar este alvo." : undefined,
+              weight: this.weight(match.symbol.name),
+            });
+          }
+        }
+      }
+    }
+
+    // Reverse called_by: quem chama este símbolo (candidatos por target_name).
+    for (const row of readEdgesByTargetName(this.db, node.name)) {
+      if (row.kind !== "calls" || !this.includeFile(row.relative_path)) {
+        continue;
+      }
+      const source = this.fileEntry(row.relative_path);
+      if (!source) {
+        continue;
+      }
+      for (const call of this.resolveCalls(source, { from_symbol: row.from_symbol ?? undefined, to: row.target, line: row.line ?? undefined })) {
+        if (call.targetNode.id !== node.id) {
+          continue;
+        }
+        edges.push({
+          relation: "called_by",
+          from: node,
+          to: call.callerNode,
+          line: row.line ?? undefined,
+          uncertain: call.uncertain,
+          weight: this.weight(node.name),
+        });
+      }
+    }
+
+    // Reverse extends_by/implements_by: quem herda deste símbolo (target cru == nome).
+    for (const row of readEdgesByRawTarget(this.db, node.name)) {
+      if ((row.kind !== "extends" && row.kind !== "implements") || !this.includeFile(row.relative_path) || !row.from_symbol) {
+        continue;
+      }
+      const source = this.fileEntry(row.relative_path);
+      const originSymbol = source?.symbols.find((symbol) => symbol.name === row.from_symbol);
+      if (!source || !originSymbol) {
+        continue;
+      }
+      const targetMatches = this.matchesByName(row.target);
+      if (!targetMatches.some((match) => buildSymbolNode(match.entry, match.symbol).id === node.id)) {
+        continue;
+      }
+      edges.push({
+        relation: `${row.kind}_by`,
+        from: node,
+        to: buildSymbolNode(source, originSymbol),
+        line: row.line ?? undefined,
+        uncertain: targetMatches.length > 1 ? "Múltiplos símbolos com o mesmo nome podem representar este alvo." : undefined,
+        weight: this.weight(node.name),
+      });
+    }
+
+    return edges;
+  }
+}
+
 function bfsTracePath(
-  adjacency: Map<string, TraceEdgeStep[]>,
+  outEdges: (node: TraceNode) => TraceEdgeStep[],
   fromNode: TraceNode,
   targetNode: TraceNode | null,
   maxHops: number,
@@ -1493,7 +1796,7 @@ function bfsTracePath(
     if (current.path.length >= maxHops) {
       continue;
     }
-    const nextEdges = adjacency.get(current.node.id) ?? [];
+    const nextEdges = outEdges(current.node);
     for (const edge of nextEdges) {
       if (visited.has(edge.to.id)) {
         continue;
@@ -1581,10 +1884,35 @@ function buildTraceStub(
     };
   }
 
-  const index = semanticStub.structuralIndex;
   const maxHops = Math.max(1, Math.min(args?.max_hops ?? 4, 6));
   const direction = args?.direction ?? "forward";
-  const fromResolved = resolveTraceTarget(cwd, index, from);
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return {
+      paths: [],
+      files: [],
+      symbols: [],
+      uncertainty_points: [],
+      ...stubResponse("falha", WORKSPACE_MISSING),
+    };
+  }
+  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  try {
+    return runTrace(db, semanticStub, { from, to: args?.to, direction, maxHops });
+  } finally {
+    closeIndexDb(db);
+  }
+}
+
+function runTrace(
+  db: Database,
+  semanticStub: SemanticStubEnvelope,
+  params: { from: string; to?: string; direction: "forward" | "backward" | "both"; maxHops: number },
+): ToolStubPayload {
+  const { from, to, direction, maxHops } = params;
+  const index = semanticStub.structuralIndex!;
+  const graph = new LazyTraceGraph(db, false);
+  const fromResolved = resolveTraceTarget(graph, db, from);
   if (!fromResolved) {
     return {
       paths: [],
@@ -1607,8 +1935,8 @@ function buildTraceStub(
     };
   }
 
-  const toResolved = args?.to ? resolveTraceTarget(cwd, index, args.to) : null;
-  if (args?.to && !toResolved) {
+  const toResolved = to ? resolveTraceTarget(graph, db, to) : null;
+  if (to && !toResolved) {
     return {
       paths: [],
       files: [],
@@ -1630,16 +1958,16 @@ function buildTraceStub(
     };
   }
 
-  const adjacency = buildTraceAdjacency(index, false);
+  const outEdges = (node: TraceNode): TraceEdgeStep[] => graph.outEdges(node);
   const fromNode = fromResolved.node!;
   const targetNode = toResolved?.node ?? null;
   let path =
     direction === "backward" && targetNode
-      ? bfsTracePath(adjacency, targetNode, fromNode, maxHops)
-      : bfsTracePath(adjacency, fromNode, targetNode, maxHops);
+      ? bfsTracePath(outEdges, targetNode, fromNode, maxHops)
+      : bfsTracePath(outEdges, fromNode, targetNode, maxHops);
 
   if (!path && direction === "both" && targetNode) {
-    path = bfsTracePath(adjacency, targetNode, fromNode, maxHops);
+    path = bfsTracePath(outEdges, targetNode, fromNode, maxHops);
   }
 
   if (!path || path.length === 0) {
@@ -1671,7 +1999,7 @@ function buildTraceStub(
   const payloadPath = toTracePathPayload(path);
   const pathFiles = payloadPath.files;
   const partialCoverage = pathFiles.some((relativePath) => {
-    const language = index.files.find((entry) => entry.relative_path === relativePath)?.language;
+    const language = graph.languageOf(relativePath);
     return language ? index.coverage_by_language[language]?.coverage_level === "partial" : false;
   });
   const uncertaintyPoints = collectTraceUncertainty(path, [
@@ -1769,12 +2097,50 @@ function buildImpactStub(
     };
   }
 
-  const index = semanticStub.structuralIndex;
   const includeTests = args?.include_tests ?? false;
   const depthLimit = Math.max(1, Math.min(args?.depth ?? 3, 8));
   const direction = args?.direction ?? "both";
   const traceDirection = mapImpactDirectionToTrace(direction);
-  const resolved = resolveTraceTarget(cwd, index, target, includeTests);
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return {
+      direct_affected: [],
+      indirect_affected: [],
+      files: [],
+      tests: [],
+      risk_summary: "",
+      ...stubResponse("falha", WORKSPACE_MISSING),
+    };
+  }
+  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  try {
+    return runImpact(db, semanticStub, {
+      target,
+      includeTests,
+      depthLimit,
+      traceDirection,
+      summaryOnly: args?.summary_only ?? false,
+    });
+  } finally {
+    closeIndexDb(db);
+  }
+}
+
+function runImpact(
+  db: Database,
+  semanticStub: SemanticStubEnvelope,
+  params: {
+    target: string;
+    includeTests: boolean;
+    depthLimit: number;
+    traceDirection: "forward" | "backward" | "both";
+    summaryOnly: boolean;
+  },
+): ToolStubPayload {
+  const index = semanticStub.structuralIndex!;
+  const { target, includeTests, depthLimit, traceDirection, summaryOnly } = params;
+  const graph = new LazyTraceGraph(db, includeTests);
+  const resolved = resolveTraceTarget(graph, db, target, includeTests);
 
   if (!resolved) {
     return {
@@ -1801,7 +2167,6 @@ function buildImpactStub(
     };
   }
 
-  const adjacency = buildTraceAdjacency(index, includeTests);
   const startNode = resolved.node!;
   const queue: Array<{ node: TraceNode; depth: number; via?: string }> = [{ node: startNode, depth: 0 }];
   const visited = new Set<string>([startNode.id]);
@@ -1814,7 +2179,7 @@ function buildImpactStub(
     if (current.depth >= depthLimit) {
       continue;
     }
-    const neighbors = adjacency.get(current.node.id) ?? [];
+    const neighbors = graph.outEdges(current.node);
     for (const edge of neighbors) {
       const relationAllowed =
         traceDirection === "both" ||
@@ -1851,7 +2216,7 @@ function buildImpactStub(
   // relativa ao seed antes do corte, então o slice preserva os afetados mais
   // estruturalmente relevantes em vez da ordem de descoberta do BFS. Empate
   // resolvido por profundidade (mais raso primeiro) e ordem de descoberta.
-  const pageRank = personalizedPageRank(adjacency, [startNode.id]);
+  const pageRank = personalizedPageRank(graph.discovered, [startNode.id]);
   const rankRefs = (items: Array<{ id: string; ref: ImpactRef }>): ImpactRef[] =>
     items
       .map((item, index) => ({ item, index, score: pageRank.get(item.id) ?? 0 }))
@@ -1870,7 +2235,7 @@ function buildImpactStub(
   );
   const tests = allFiles.filter((path) => fileMatchesTests(path));
   const partialCoverage = allFiles.some((relativePath) => {
-    const language = index.files.find((entry) => entry.relative_path === relativePath)?.language;
+    const language = graph.languageOf(relativePath);
     return language ? index.coverage_by_language[language]?.coverage_level === "partial" : false;
   });
   const riskSummary = summarizeImpactRisk(
@@ -1887,8 +2252,8 @@ function buildImpactStub(
         : "sucesso";
 
   return {
-    direct_affected: args?.summary_only ? [] : directUnique,
-    indirect_affected: args?.summary_only ? [] : indirectUnique,
+    direct_affected: summaryOnly ? [] : directUnique,
+    indirect_affected: summaryOnly ? [] : indirectUnique,
     files: allFiles,
     tests,
     risk_summary: riskSummary,
@@ -3622,9 +3987,11 @@ function buildToolStubInner(
     };
   }
 
-  // search/files não precisam do grafo: carregam meta-only e resolvem
-  // cobertura/tree por query alvo, matando o full-load no caminho quente.
-  const mode: StructuralLoadMode = tool === "search" || tool === "files" ? "lite" : "full";
+  // search/files/trace/impact não precisam do grafo materializado: carregam
+  // meta-only e resolvem cobertura/tree/grafo por query alvo (trace/impact via
+  // LazyTraceGraph), matando o full-load no caminho quente.
+  const mode: StructuralLoadMode =
+    tool === "search" || tool === "files" || tool === "trace" || tool === "impact" ? "lite" : "full";
   const semanticStub = buildSemanticStubEnvelope(cwd, mode);
 
   switch (tool) {
