@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "../src/mcp/tool-registry.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("tool-registry", () => {
@@ -49,7 +49,7 @@ describe("tool-registry", () => {
 
   it("cada stub declara state explícito parcial ou falha", () => {
     for (const tool of MCP_TOOL_NAMES) {
-      const payload = buildToolStub(tool);
+      const payload = buildToolResponse(tool);
       expect(["parcial", "falha"]).toContain(payload.state);
       expect(payload.message).toBeTruthy();
     }
@@ -57,7 +57,7 @@ describe("tool-registry", () => {
 
   it("stubs parciais incluem limitations[]", () => {
     for (const tool of MCP_TOOL_NAMES) {
-      const payload = buildToolStub(tool);
+      const payload = buildToolResponse(tool);
       if (payload.state === "parcial") {
         expect(payload.limitations?.length).toBeGreaterThan(0);
       }
@@ -66,7 +66,7 @@ describe("tool-registry", () => {
 
   it("status sem workspace retorna falha e initialized false", () => {
     const dir = useEmptyDir();
-    const payload = buildToolStub("status", dir);
+    const payload = buildToolResponse("status", dir);
     expect(payload.initialized).toBe(false);
     expect(payload.state).toBe("falha");
     expect(payload.message).toMatch(/E_WORKSPACE_INVALID/);
@@ -75,7 +75,7 @@ describe("tool-registry", () => {
   it("status com workspace preparado alinha shape SURFACE §8", () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
-    const payload = buildToolStub("status", dir, { response_format: "detailed" });
+    const payload = buildToolResponse("status", dir, { response_format: "detailed" });
     expect(payload.initialized).toBe(true);
     expect(payload.staleness).toBe("unknown");
     expect(payload.pending_files_count).toBe(0);
@@ -86,7 +86,7 @@ describe("tool-registry", () => {
 
   it("tools de retrieval falham sem workspace", () => {
     const dir = useEmptyDir();
-    const payload = buildToolStub("search", dir);
+    const payload = buildToolResponse("search", dir);
     expect(payload.state).toBe("falha");
     expect(payload.message).toMatch(/E_WORKSPACE_INVALID/);
   });
@@ -94,7 +94,7 @@ describe("tool-registry", () => {
   it("impact e diff_impact usam campos SURFACE §4–5", () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
-    const impact = buildToolStub("impact", dir);
+    const impact = buildToolResponse("impact", dir);
     expect(impact).toMatchObject({
       direct_affected: [],
       indirect_affected: [],
@@ -103,7 +103,7 @@ describe("tool-registry", () => {
       risk_summary: "",
     });
 
-    const diff = buildToolStub("diff_impact", dir);
+    const diff = buildToolResponse("diff_impact", dir);
     expect(diff).toMatchObject({
       changed_files: [],
       changed_symbols: [],
@@ -116,7 +116,7 @@ describe("tool-registry", () => {
   it("pack_context stub expõe campos de packing SURFACE §7", () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
-    const payload = buildToolStub("pack_context", dir, {
+    const payload = buildToolResponse("pack_context", dir, {
       sources: ["foo.ts"],
       goal: "entender",
       token_budget: 120,

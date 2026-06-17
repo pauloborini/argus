@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { SQLITE_SCHEMA_VERSION } from "../src/storage/sqlite-prepared.js";
 import { getIndexDbPath, initWorkspace } from "../src/workspace/workspace.js";
 
@@ -33,7 +33,7 @@ describe("status stub e staleness", () => {
 
   it("status sem manifest fica unknown/parcial", () => {
     const root = setupWorkspace();
-    const payload = buildToolStub("status", root);
+    const payload = buildToolResponse("status", root);
     expect(payload.initialized).toBe(true);
     expect(payload.state).toBe("parcial");
     expect(payload.staleness).toBe("unknown");
@@ -45,7 +45,7 @@ describe("status stub e staleness", () => {
     const root = setupWorkspace();
     const outside = mkdtempSync(join(tmpdir(), "cortex-status-outside-"));
     try {
-      const payload = buildToolStub("status", outside);
+      const payload = buildToolResponse("status", outside);
       expect(payload.state).toBe("falha");
       expect(String(payload.message)).toContain("E_PATH_OUTSIDE_WORKSPACE");
     } finally {
@@ -59,7 +59,7 @@ describe("status stub e staleness", () => {
     writeFileSync(join(root, "notes.md"), "# notes\n", "utf-8");
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("status", root, { response_format: "detailed" });
+    const payload = buildToolResponse("status", root, { response_format: "detailed" });
     expect(payload.state).toBe("parcial");
     const limitations = payload.limitations as string[];
     expect(limitations.some((line) => line.includes("não suportada"))).toBe(true);
@@ -68,7 +68,7 @@ describe("status stub e staleness", () => {
   it("status após index fica fresh/sucesso com coverage e backend sqlite", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
-    const payload = buildToolStub("status", root);
+    const payload = buildToolResponse("status", root);
     expect(payload.state).toBe("sucesso");
     expect(payload.staleness).toBe("fresh");
     expect(payload.pending_files_count).toBe(0);
@@ -85,7 +85,7 @@ describe("status stub e staleness", () => {
     writeFileSync(join(root, "asset.bin"), "x".repeat(2 * 1024 * 1024 + 1), "utf-8");
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("status", root);
+    const payload = buildToolResponse("status", root);
     expect(payload.staleness).toBe("fresh");
     expect(payload.pending_files_count).toBe(0);
     expect(payload.state).toBe("sucesso");
@@ -95,7 +95,7 @@ describe("status stub e staleness", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "main.ts"), "export const main = false;\n", "utf-8");
-    const payload = buildToolStub("status", root);
+    const payload = buildToolResponse("status", root);
     expect(payload.state).toBe("stale");
     expect(payload.staleness).toBe("stale");
     expect(Number(payload.pending_files_count)).toBeGreaterThan(0);
@@ -105,7 +105,7 @@ describe("status stub e staleness", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const packPayload = buildToolStub("pack_context", root, {
+    const packPayload = buildToolResponse("pack_context", root, {
       sources: ["main.ts"],
       goal: "entender fluxo",
       token_budget: 120,
@@ -128,7 +128,7 @@ describe("status stub e staleness", () => {
     manifest.files = [{ relative_path: "main.ts", content_hash: 123, size_bytes: "22", mtime_ms: null }];
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf-8");
 
-    const payload = buildToolStub("status", root);
+    const payload = buildToolResponse("status", root);
     expect(payload.state).toBe("parcial");
     expect(payload.staleness).toBe("unknown");
     expect(String(payload.message)).toContain("E_INDEX_CORRUPTED");
@@ -139,7 +139,7 @@ describe("status stub e staleness", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(getIndexDbPath(root), "not-a-sqlite-db", "utf-8");
 
-    const payload = buildToolStub("status", root);
+    const payload = buildToolResponse("status", root);
     expect(payload.state).toBe("falha");
     expect(String(payload.message)).toContain("E_INDEX_CORRUPTED");
   });

@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 // Trava a defesa em buildSearchStub independente de como o "unknown" surge.
@@ -52,7 +52,7 @@ describe("search com staleness indeterminada", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("search", root, {
+    const payload = buildToolResponse("search", root, {
       query: "calculateTotal",
       response_format: "detailed",
     });

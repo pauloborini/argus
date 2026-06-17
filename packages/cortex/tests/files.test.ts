@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("files stub com índice estrutural", () => {
@@ -32,7 +32,7 @@ describe("files stub com índice estrutural", () => {
 
   it("files parcial sem índice estrutural", () => {
     const root = setupWorkspace();
-    const payload = buildToolStub("files", root);
+    const payload = buildToolResponse("files", root);
     expect(payload.state).toBe("parcial");
     expect(payload.tree).toEqual([]);
   });
@@ -40,7 +40,7 @@ describe("files stub com índice estrutural", () => {
   it("files retorna tree com symbol_counts após index", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
-    const payload = buildToolStub("files", root);
+    const payload = buildToolResponse("files", root);
     expect(payload.state).toBe("sucesso");
     const tree = payload.tree as Array<{ path: string; symbol_counts?: { total: number } }>;
     expect(tree.length).toBeGreaterThan(0);
@@ -53,7 +53,7 @@ describe("files stub com índice estrutural", () => {
     writeFileSync(join(root, "nested.ts"), "export function nested() {}\n", "utf-8");
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("files", root, { pattern: "app", max_depth: 0 });
+    const payload = buildToolResponse("files", root, { pattern: "app", max_depth: 0 });
     const tree = payload.tree as Array<{ path: string }>;
     expect(tree).toHaveLength(1);
     expect(tree[0]?.path).toBe("app.ts");

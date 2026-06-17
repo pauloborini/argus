@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { openIndexDb } from "../src/storage/sqlite-index-store.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { getIndexDbPath, initWorkspace } from "../src/workspace/workspace.js";
 
 describe("pack context tool", () => {
@@ -41,7 +41,7 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: ["utils.ts"],
       goal: "entender refactor",
       token_budget: 400,
@@ -57,7 +57,7 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: ["utils.ts"],
       goal: "entender refactor",
       token_budget: 400,
@@ -80,13 +80,13 @@ describe("pack context tool", () => {
     );
     expect(await runIndex()).toBe(0);
 
-    const dart = buildToolStub("pack_context", root, {
+    const dart = buildToolResponse("pack_context", root, {
       sources: ["inline.dart"], goal: "assinatura", token_budget: 400, style: "balanced",
     });
-    const python = buildToolStub("pack_context", root, {
+    const python = buildToolResponse("pack_context", root, {
       sources: ["inline.py"], goal: "assinatura", token_budget: 400, style: "balanced",
     });
-    const typed = buildToolStub("pack_context", root, {
+    const typed = buildToolResponse("pack_context", root, {
       sources: ["typed.ts"], goal: "assinatura", token_budget: 400, style: "balanced",
     });
 
@@ -102,7 +102,7 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: ["utils.ts"],
       goal: "ver código",
       token_budget: 4000,
@@ -115,7 +115,7 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const packed = buildToolStub("pack_context", root, {
+    const packed = buildToolResponse("pack_context", root, {
       sources: ["utils.ts"],
       goal: "entender refactor",
       token_budget: 80,
@@ -123,7 +123,7 @@ describe("pack context tool", () => {
     });
     const handle = String(packed.retrieve_handle);
 
-    const expanded = buildToolStub("retrieve", root, { handle, context_lines: 1 });
+    const expanded = buildToolResponse("retrieve", root, { handle, context_lines: 1 });
     expect(["sucesso", "parcial"]).toContain(expanded.state);
     expect(expanded.context_lines).toBe(1);
     expect(String(expanded.content)).toContain("calculateTotal");
@@ -133,7 +133,7 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: ["utils.ts"],
       goal: "entender refactor",
       token_budget: 80,
@@ -153,7 +153,7 @@ describe("pack context tool", () => {
     db.close();
     expect(row?.handle).toBe(handle);
 
-    const replay = buildToolStub("pack_context", root, {
+    const replay = buildToolResponse("pack_context", root, {
       sources: [handle],
       goal: "reidratar",
       token_budget: 400,
@@ -162,7 +162,7 @@ describe("pack context tool", () => {
     expect(["sucesso", "parcial", "stale"]).toContain(replay.state);
     expect(String(replay.packed_context)).toContain("utils.ts");
 
-    const retrieved = buildToolStub("retrieve", root, { handle });
+    const retrieved = buildToolResponse("retrieve", root, { handle });
     expect(retrieved.state).toBe("sucesso");
     expect(retrieved.reversibility).toBe("full");
     expect(String(retrieved.content)).toContain("utils.ts");
@@ -183,7 +183,7 @@ describe("pack context tool", () => {
     db.close();
 
     // Pack com perda de budget → grava novo handle → dispara GC.
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: ["utils.ts"],
       goal: "forcar handle",
       token_budget: 80,
@@ -213,7 +213,7 @@ describe("pack context tool", () => {
     }
     db.close();
 
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: ["utils.ts"], goal: "forcar handle", token_budget: 80, style: "deep",
     });
     const handle = String(payload.retrieve_handle);
@@ -231,11 +231,11 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const traversal = buildToolStub("retrieve", root, { handle: "../manifest" });
+    const traversal = buildToolResponse("retrieve", root, { handle: "../manifest" });
     expect(traversal.state).toBe("falha");
     expect(String(traversal.message)).toContain("E_RETRIEVE_INVALID");
 
-    const missing = buildToolStub("retrieve", root, { handle: "rh_0123456789abcdef" });
+    const missing = buildToolResponse("retrieve", root, { handle: "rh_0123456789abcdef" });
     expect(missing.state).toBe("falha");
     expect(String(missing.message)).toContain("E_RETRIEVE_NOT_FOUND");
   });
@@ -257,7 +257,7 @@ describe("pack context tool", () => {
     );
 
     try {
-      const payload = buildToolStub("retrieve", root, { handle, response_format: "detailed" });
+      const payload = buildToolResponse("retrieve", root, { handle, response_format: "detailed" });
       expect(payload.state).toBe("falha");
       expect(String(payload.content)).not.toContain("segredo externo");
       expect((payload.limitations as string[]).some((item) => item.includes("fora do workspace"))).toBe(true);
@@ -274,7 +274,7 @@ describe("pack context tool", () => {
     mkdirSync(handleDir, { recursive: true });
     writeFileSync(join(handleDir, "manifest.json"), "{}", "utf-8");
 
-    const payload = buildToolStub("retrieve", root, { handle });
+    const payload = buildToolResponse("retrieve", root, { handle });
     expect(payload.state).toBe("falha");
     expect(String(payload.message)).toContain("E_RETRIEVE_UNAVAILABLE");
   });
@@ -283,7 +283,7 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: ["utils.ts", "dep.ts"],
       goal: "entender refactor",
       token_budget: 110,
@@ -292,7 +292,7 @@ describe("pack context tool", () => {
     const handle = String(payload.retrieve_handle);
     rmSync(join(root, ".cortex", "packed-handles", handle, "segment-001.txt"));
 
-    const replay = buildToolStub("pack_context", root, {
+    const replay = buildToolResponse("pack_context", root, {
       sources: [handle],
       goal: "reidratar parcial",
       token_budget: 400,
@@ -308,7 +308,7 @@ describe("pack context tool", () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("pack_context", root, {
+    const payload = buildToolResponse("pack_context", root, {
       sources: [],
       goal: "entender",
       token_budget: 120,

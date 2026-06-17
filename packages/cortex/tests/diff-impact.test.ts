@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("diff impact tool", () => {
@@ -49,7 +49,7 @@ describe("diff impact tool", () => {
     writeFileSync(join(root, "src/dep.ts"), "export function helper() { return 1; }\n", "utf-8");
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("diff_impact", root, { scope: "unstaged" });
+    const payload = buildToolResponse("diff_impact", root, { scope: "unstaged" });
     expect(["sucesso", "parcial", "stale"]).toContain(payload.state);
     expect(payload.changed_files).toContain("src/dep.ts");
     expect((payload.affected_tests as string[]).some((item) => item.endsWith("main.test.ts"))).toBe(true);
@@ -68,7 +68,7 @@ describe("diff impact tool", () => {
       "export function first() { return 10; }\n\nexport function second() { return 2; }\n",
       "utf-8",
     );
-    const payload = buildToolStub("diff_impact", root, { scope: "unstaged" });
+    const payload = buildToolResponse("diff_impact", root, { scope: "unstaged" });
     const symbols = payload.changed_symbols as Array<{ name: string }>;
     expect(symbols.map((item) => item.name)).toContain("first");
     expect(symbols.map((item) => item.name)).not.toContain("second");
@@ -82,7 +82,7 @@ describe("diff impact tool", () => {
     expect(await runIndex()).toBe(0);
     rmSync(join(root, "src/removed.ts"));
 
-    const payload = buildToolStub("diff_impact", root, { scope: "unstaged" });
+    const payload = buildToolResponse("diff_impact", root, { scope: "unstaged" });
     expect(payload.changed_hunks).toEqual([
       expect.objectContaining({ path: "src/removed.ts", start_line: 1, line_count: 1 }),
     ]);
@@ -104,7 +104,7 @@ describe("diff impact tool", () => {
     execFileSync("git", ["add", "src/main.ts"], { cwd: root, encoding: "utf-8" });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("diff_impact", root, { scope: "staged" });
+    const payload = buildToolResponse("diff_impact", root, { scope: "staged" });
     expect(["sucesso", "parcial", "stale"]).toContain(payload.state);
     expect(payload.changed_files).toContain("src/main.ts");
   });
@@ -115,7 +115,7 @@ describe("diff impact tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("diff_impact", root, { scope: "compare" });
+    const payload = buildToolResponse("diff_impact", root, { scope: "compare" });
     expect(payload.state).toBe("falha");
     expect(String(payload.message)).toContain("E_BASE_REF_REQUIRED");
   });
@@ -128,7 +128,7 @@ describe("diff impact tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "src/dep.ts"), "export function helper() { return 1; }\n", "utf-8");
 
-    const payload = buildToolStub("diff_impact", root, {
+    const payload = buildToolResponse("diff_impact", root, {
       scope: "unstaged",
       response_format: "detailed",
     });
@@ -145,7 +145,7 @@ describe("diff impact tool", () => {
     writeFileSync(join(root, "lib/dep.dart"), "void helper() { print(1); }\n", "utf-8");
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("diff_impact", root, {
+    const payload = buildToolResponse("diff_impact", root, {
       scope: "unstaged",
       response_format: "detailed",
     });

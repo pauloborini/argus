@@ -1,9 +1,9 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { serializePayload } from "../output.js";
 
 export function runDiffImpact(options?: { scope?: string; baseRef?: string }): number {
   try {
-    const payload = buildToolStub("diff_impact", process.cwd(), {
+    const payload = buildToolResponse("diff_impact", process.cwd(), {
       scope: options?.scope,
       base_ref: options?.baseRef,
     });

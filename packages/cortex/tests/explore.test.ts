@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("explore tool", () => {
@@ -41,7 +41,7 @@ describe("explore tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("explore", root, { target: "calculateTotal", mode: "symbol" });
+    const payload = buildToolResponse("explore", root, { target: "calculateTotal", mode: "symbol" });
     expect(payload.state).toBe("sucesso");
     expect(String(payload.summary)).toContain("calculateTotal");
     expect((payload.central_symbols as Array<{ name: string }>)[0]?.name).toBe("calculateTotal");
@@ -56,7 +56,7 @@ describe("explore tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("explore", root, { target: "calculateTotal", mode: "symbol" });
+    const payload = buildToolResponse("explore", root, { target: "calculateTotal", mode: "symbol" });
     const central = (payload.central_symbols as Array<{ name: string; signature?: string }>)[0];
     expect(central?.signature).toContain("calculateTotal");
     expect(central?.signature).not.toContain("return 1");
@@ -71,7 +71,7 @@ describe("explore tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("explore", root, { target: "run", mode: "symbol" });
+    const payload = buildToolResponse("explore", root, { target: "run", mode: "symbol" });
     expect(payload.state).toBe("ambigua");
     expect((payload.candidates as unknown[]).length).toBe(2);
   });
@@ -82,7 +82,7 @@ describe("explore tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("explore", root, { target: "feature/main.ts", mode: "file" });
+    const payload = buildToolResponse("explore", root, { target: "feature/main.ts", mode: "file" });
     expect(payload.state).toBe("sucesso");
     expect((payload.central_symbols as Array<{ name: string }>).length).toBeGreaterThan(0);
     expect(String(payload.summary)).toContain("feature/main.ts");
@@ -95,7 +95,7 @@ describe("explore tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "utils.ts"), 'export function calculateTotal() { return 2; }\n', "utf-8");
 
-    const payload = buildToolStub("explore", root, {
+    const payload = buildToolResponse("explore", root, {
       target: "calculateTotal",
       mode: "symbol",
       response_format: "detailed",
@@ -110,7 +110,7 @@ describe("explore tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("explore", root, {
+    const payload = buildToolResponse("explore", root, {
       target: "lib/main.dart",
       mode: "file",
       response_format: "detailed",

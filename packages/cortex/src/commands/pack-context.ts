@@ -1,4 +1,4 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { serializePayload } from "../output.js";
 
 export function runPackContext(options: {
@@ -8,7 +8,7 @@ export function runPackContext(options: {
   style?: string;
 }): number {
   try {
-    const payload = buildToolStub("pack_context", process.cwd(), {
+    const payload = buildToolResponse("pack_context", process.cwd(), {
       sources: options.sources,
       goal: options.goal,
       token_budget: options.tokenBudget,

@@ -1,4 +1,4 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
 import { serializePayload } from "../output.js";
 
 export function runExplore(
@@ -6,7 +6,7 @@ export function runExplore(
   options?: { mode?: string; depth?: number; includeTests?: boolean; budget?: number },
 ): number {
   try {
-    const payload = buildToolStub("explore", process.cwd(), {
+    const payload = buildToolResponse("explore", process.cwd(), {
       target,
       mode: options?.mode,
       depth: options?.depth,
