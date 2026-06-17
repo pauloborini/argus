@@ -77,11 +77,17 @@ export function extractGo(root: SyntaxNode): FileExtractionResult {
                   }
                 }
               } else if (kind === "interface") {
-                const embeds =
-                  spec.descendantsOfType("interface_type")[0]?.descendantsOfType("qualified_type") ??
-                  [];
+                const interfaceType = spec.descendantsOfType("interface_type")[0];
+                const embeds = interfaceType?.namedChildren.filter(
+                  (child) => child.type === "type_elem",
+                ) ?? [];
                 for (const embed of embeds) {
-                  const target = embed.descendantsOfType("type_identifier").at(-1)?.text ?? embed.text;
+                  const target =
+                    embed.descendantsOfType("type_identifier").at(-1)?.text ??
+                    embed.descendantsOfType("qualified_type")[0]?.text;
+                  if (!target) {
+                    continue;
+                  }
                   edges.push({
                     kind: "extends",
                     from_symbol: name,

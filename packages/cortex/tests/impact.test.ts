@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolStub, personalizedPageRank } from "../src/mcp/tools/stubs.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("impact tool", () => {
@@ -33,6 +33,22 @@ describe("impact tool", () => {
     process.chdir(tempDir);
     return tempDir;
   }
+
+  it("PageRank distribui massa proporcionalmente ao peso da edge", () => {
+    const node = (id: string) => ({ id, node_type: "symbol" as const, name: id, path: `${id}.ts` });
+    const seed = node("seed");
+    const low = node("low");
+    const high = node("high");
+    const adjacency = new Map([
+      [seed.id, [
+        { relation: "calls", from: seed, to: low, weight: 1 },
+        { relation: "calls", from: seed, to: high, weight: 10 },
+      ]],
+    ]);
+
+    const rank = personalizedPageRank(adjacency, [seed.id]);
+    expect(rank.get(high.id)).toBeGreaterThan(rank.get(low.id) ?? 0);
+  });
 
   it("impact dependencies retorna blast radius por símbolo", async () => {
     const root = setupWorkspace({

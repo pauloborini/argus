@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { openIndexDb } from "../src/storage/sqlite-index-store.js";
 import { buildToolStub } from "../src/mcp/tools/stubs.js";
@@ -12,6 +12,7 @@ describe("pack context tool", () => {
   let originalCwd: string | undefined;
 
   afterEach(() => {
+    vi.useRealTimers();
     if (originalCwd) {
       process.chdir(originalCwd);
       originalCwd = undefined;
@@ -66,6 +67,35 @@ describe("pack context tool", () => {
     expect(packed).toContain("calculateTotal");
     // Assinatura presente, corpo (`helper(); return 1`) ausente.
     expect(packed).not.toContain("return 1");
+  });
+
+  it("overview-first: balanced corta corpos expression-bodied e inline", async () => {
+    const root = setupWorkspace();
+    writeFileSync(join(root, "inline.dart"), "int load() => secret();\n", "utf-8");
+    writeFileSync(join(root, "inline.py"), "def load(): return secret()\n", "utf-8");
+    writeFileSync(
+      join(root, "typed.ts"),
+      "export function typed(): Promise<string> { return Promise.resolve('secret'); }\n",
+      "utf-8",
+    );
+    expect(await runIndex()).toBe(0);
+
+    const dart = buildToolStub("pack_context", root, {
+      sources: ["inline.dart"], goal: "assinatura", token_budget: 400, style: "balanced",
+    });
+    const python = buildToolStub("pack_context", root, {
+      sources: ["inline.py"], goal: "assinatura", token_budget: 400, style: "balanced",
+    });
+    const typed = buildToolStub("pack_context", root, {
+      sources: ["typed.ts"], goal: "assinatura", token_budget: 400, style: "balanced",
+    });
+
+    expect(String(dart.packed_context)).toContain("int load()");
+    expect(String(dart.packed_context)).not.toContain("secret()");
+    expect(String(python.packed_context)).toContain("def load():");
+    expect(String(python.packed_context)).not.toContain("return secret()");
+    expect(String(typed.packed_context)).toContain("typed(): Promise<string>");
+    expect(String(typed.packed_context)).not.toContain("return Promise.resolve");
   });
 
   it("deep inlina corpo completo (escape hatch)", async () => {
@@ -166,6 +196,35 @@ describe("pack context tool", () => {
     db2.close();
     expect(row).toBeUndefined();
     expect(existsSync(staleDir)).toBe(false);
+  });
+
+  it("GC preserva o handle recém-criado quando timestamps empatam no cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T12:00:00.000Z"));
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    const createdAt = new Date().toISOString();
+    const db = openIndexDb(getIndexDbPath(root));
+    for (let i = 0; i < 50; i += 1) {
+      db.prepare("INSERT INTO packed_handles (handle, created_at) VALUES (?, ?)").run(
+        `rh_${i.toString(16).padStart(16, "0")}`,
+        createdAt,
+      );
+    }
+    db.close();
+
+    const payload = buildToolStub("pack_context", root, {
+      sources: ["utils.ts"], goal: "forcar handle", token_budget: 80, style: "deep",
+    });
+    const handle = String(payload.retrieve_handle);
+    const db2 = openIndexDb(getIndexDbPath(root), { readonly: true });
+    const row = db2.prepare("SELECT handle FROM packed_handles WHERE handle = ?").get(handle);
+    const count = db2.prepare("SELECT COUNT(*) AS count FROM packed_handles").get() as { count: number };
+    db2.close();
+
+    expect(row).toBeDefined();
+    expect(count.count).toBe(50);
+    expect(existsSync(join(root, ".cortex", "packed-handles", handle))).toBe(true);
   });
 
   it("retrieve rejeita traversal e handles de outro workspace", async () => {
