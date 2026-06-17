@@ -5,8 +5,8 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "./tool-registry.js";
-import { buildToolResponseAsync } from "./tools/response.js";
+import { MCP_SERVER_NAME, MCP_TOOL_NAMES, TOOL_INPUT_JSON_SCHEMAS, TOOL_DESCRIPTIONS } from "./tool-registry.js";
+import { buildToolResponseAsync, buildToolResponseTsv } from "./tools/response.js";
 import { CORTEX_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
 import { isManifestStaleForAutoSync } from "../discovery/staleness.js";
@@ -72,126 +72,6 @@ const TOOL_INPUT_SCHEMAS = {
     limit: z.number().int().positive().max(100).optional(),
   }).passthrough(),
 } as const;
-
-const TOOL_INPUT_JSON_SCHEMAS = {
-  search: {
-    type: "object" as const,
-    properties: {
-      query: { type: "string" },
-      scope: { type: "string" },
-      kind: { type: "string" },
-      limit: { type: "integer", minimum: 1, maximum: 100 },
-    },
-    required: ["query"],
-    additionalProperties: true,
-  },
-  explore: {
-    type: "object" as const,
-    properties: {
-      target: { type: "string" },
-      mode: { type: "string", enum: ["symbol", "file", "topic"] },
-      depth: { type: "integer", minimum: 0, maximum: 5 },
-      include_tests: { type: "boolean" },
-      budget: { type: "integer", minimum: 1, maximum: 100 },
-    },
-    required: ["target"],
-    additionalProperties: true,
-  },
-  trace: {
-    type: "object" as const,
-    properties: {
-      from: { type: "string" },
-      to: { type: "string" },
-      direction: { type: "string", enum: ["forward", "backward", "both"] },
-      max_hops: { type: "integer", minimum: 1, maximum: 6 },
-    },
-    required: ["from"],
-    additionalProperties: true,
-  },
-  impact: {
-    type: "object" as const,
-    properties: {
-      target: { type: "string" },
-      direction: { type: "string", enum: ["dependents", "dependencies", "both"] },
-      depth: { type: "integer", minimum: 1, maximum: 8 },
-      include_tests: { type: "boolean" },
-      summary_only: { type: "boolean" },
-    },
-    required: ["target"],
-    additionalProperties: true,
-  },
-  files: {
-    type: "object" as const,
-    properties: {
-      pattern: { type: "string" },
-      max_depth: { type: "integer", minimum: 0, maximum: 32 },
-    },
-    additionalProperties: true,
-  },
-  status: {
-    type: "object" as const,
-    properties: {
-      path: { type: "string" },
-    },
-    additionalProperties: true,
-  },
-  diff_impact: {
-    type: "object" as const,
-    properties: {
-      scope: { type: "string", enum: ["unstaged", "staged", "all", "compare"] },
-      base_ref: { type: "string" },
-    },
-    additionalProperties: true,
-  },
-  pack_context: {
-    type: "object" as const,
-    properties: {
-      sources: {
-        type: "array",
-        items: { type: "string" },
-        minItems: 1,
-      },
-      goal: { type: "string" },
-      token_budget: { type: "integer", minimum: 1, maximum: 8000 },
-      style: { type: "string", enum: ["brief", "balanced", "deep"] },
-    },
-    required: ["sources", "goal", "token_budget"],
-    additionalProperties: true,
-  },
-  retrieve: {
-    type: "object" as const,
-    properties: {
-      handle: { type: "string", pattern: "^rh_[a-f0-9]{16}$" },
-    },
-    required: ["handle"],
-    additionalProperties: false,
-  },
-  semantic_search: {
-    type: "object" as const,
-    properties: {
-      query: { type: "string" },
-      mode: { type: "string", enum: ["dense", "hybrid"] },
-      scope: { type: "string" },
-      kind: { type: "string" },
-      limit: { type: "integer", minimum: 1, maximum: 100 },
-    },
-    required: ["query"],
-    additionalProperties: true,
-  },
-} as const;
-
-const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
-  search: "Localizar símbolos indexados via FTS local",
-  explore: "Entender como algo funciona com contexto estrutural composto",
-  trace: "Fluxo/execução provável entre pontos indexados",
-  impact: "Blast radius provável de símbolo ou arquivo com risco resumido",
-  diff_impact: "Impacto provável do diff Git atual com áreas e testes afetados",
-  files: "Estrutura indexada do workspace",
-  pack_context: "Empacotar contexto curto para o modelo com refs rastreáveis e handle opcional",
-  retrieve: "Recuperar explicitamente conteúdo original de um retrieve_handle local",
-  status: "Saúde, staleness e confiança do índice local",
-  semantic_search: "Busca semântica densa (embeddings) com fusão híbrida; use quando o lexical vier vazio",
-};
 
 export function createMcpServer(options: McpServerOptions = {}): Server {
   const autoSync = options.autoSync !== false;
@@ -266,27 +146,11 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     { capabilities: { tools: {} } },
   );
 
-  // `response_format` é aceito por toda tool (default `concise`): envelope
-  // mínimo (state + códigos `E_*`); `detailed` restaura message/limitations/
-  // staleness_hint em prosa. Injetado em todo inputSchema para descoberta pelo
-  // agente; o passthrough das schemas zod já o deixa fluir até `buildToolResponse`.
-  const withResponseFormat = (schema: { properties: Record<string, unknown> }) => ({
-    ...schema,
-    properties: {
-      ...schema.properties,
-      response_format: {
-        type: "string" as const,
-        enum: ["concise", "detailed"],
-        description: "concise (default, mínimo tokens) | detailed (prosa completa)",
-      },
-    },
-  });
-
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: MCP_TOOL_NAMES.map((name) => ({
       name,
       description: TOOL_DESCRIPTIONS[name],
-      inputSchema: withResponseFormat(TOOL_INPUT_JSON_SCHEMAS[name]),
+      inputSchema: TOOL_INPUT_JSON_SCHEMAS[name],
     })),
   }));
 
@@ -326,6 +190,20 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     await autoSyncIfDirty();
 
     const pathArg = typeof args.path === "string" ? args.path : process.cwd();
+
+    if (args.response_format === "tsv") {
+      const { text, truncationNote, isError } = buildToolResponseTsv(
+        toolName as (typeof MCP_TOOL_NAMES)[number],
+        pathArg,
+        args,
+      );
+      const fullText = truncationNote ? `${text}\n# ${truncationNote}` : text;
+      return {
+        content: [{ type: "text" as const, text: fullText }],
+        isError,
+      };
+    }
+
     const payload = await buildToolResponseAsync(
       toolName as (typeof MCP_TOOL_NAMES)[number],
       pathArg,
