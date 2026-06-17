@@ -337,6 +337,17 @@ recolado), idealmente (d) um agente vivo. Reportar a contribuição do **índice
 separada da contribuição do **formato**. Até lá, qualificar o número no README
 como "limite superior interno scriptado".
 
+> **✅ Resolvido (item 21).** `run-mvp.ts` foi reescrito: três arms (baseline
+> file-reads → formato-só → atlas), ground-truth verificável por task (sem
+> auto-pontuação; `uncertaintyDisclosure` medido), tokenizer subword offline
+> (heurística documentada, sem `chars/4`), e split cirúrgica×varredura. Headline
+> honesto: **−92,7% tokens / −11,8% tool calls**, atlas acerta **6/6**. A
+> decomposição expõe que o ganho de **formato é ~0%** (whitespace quase não
+> tokeniza) e quase tudo vem do **índice** entregar menos conteúdo; o índice
+> compensa muito mais em **cirúrgica (−97,8%)** que em **varredura (−55,7%)**.
+> Ainda é scriptado — agente vivo fica como follow-up (hook `runLiveAgent`
+> reservado). Ver `.atlas/benchmark/latest/SUMMARY.md`.
+
 ---
 
 ## 6. Estado da arte — como nos posicionar
