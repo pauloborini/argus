@@ -1,6 +1,8 @@
 import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
-import { endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+import { enclosingSymbolName, endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+
+const RUST_CALL_DEFINERS: ReadonlySet<string> = new Set(["function_item"]);
 
 export function extractRust(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
@@ -44,6 +46,26 @@ export function extractRust(root: SyntaxNode): FileExtractionResult {
         }
         break;
       }
+      case "impl_item": {
+        // `impl Trait for Type` → relação de subtipo (Type implements Trait),
+        // útil p/ impact/trace. `impl Type {}` (sem trait) só agrupa métodos —
+        // os function_item internos já são capturados pelo walk recursivo.
+        const typeNode = node.childForFieldName("type");
+        const traitNode = node.childForFieldName("trait");
+        const typeName = typeNode
+          ? (typeNode.descendantsOfType("type_identifier")[0]?.text ?? typeNode.text)
+          : null;
+        if (typeName && traitNode) {
+          const traitName = traitNode.descendantsOfType("type_identifier")[0]?.text ?? traitNode.text;
+          edges.push({
+            kind: "implements",
+            from_symbol: typeName,
+            to: traitName,
+            line: startLine(node),
+          });
+        }
+        break;
+      }
       case "use_declaration": {
         const path = node.descendantsOfType("scoped_identifier")[0]?.text
           ?? node.descendantsOfType("identifier")[0]?.text;
@@ -56,7 +78,13 @@ export function extractRust(root: SyntaxNode): FileExtractionResult {
       case "call_expression": {
         const fn = node.childForFieldName("function");
         if (fn) {
-          edges.push({ kind: "calls", to: fn.text, line: startLine(node) });
+          const from = enclosingSymbolName(node, RUST_CALL_DEFINERS);
+          edges.push({
+            kind: "calls",
+            from_symbol: from ?? undefined,
+            to: fn.text,
+            line: startLine(node),
+          });
         }
         break;
       }

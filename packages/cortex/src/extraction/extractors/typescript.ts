@@ -1,6 +1,34 @@
 import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
-import { endLine, namedIdentifier, startLine, stripQuotes, walkTree } from "./ast-utils.js";
+import {
+  enclosingSymbolName,
+  endLine,
+  namedIdentifier,
+  startLine,
+  stripQuotes,
+  walkTree,
+} from "./ast-utils.js";
+
+// Nós que definem um símbolo dono de uma chamada, p/ atribuir `from_symbol` pela
+// subida de ancestral. `variable_declarator` cobre `const f = () => {}`.
+const TS_CALL_DEFINERS: ReadonlySet<string> = new Set([
+  "function_declaration",
+  "generator_function_declaration",
+  "method_definition",
+  "variable_declarator",
+]);
+
+/** `const x = () => {}` / `const x = function(){}` é função, não variável. */
+function declaratorIsFunction(declarator: SyntaxNode): boolean {
+  const value = declarator.childForFieldName("value");
+  const type = value?.type;
+  return (
+    type === "arrow_function" ||
+    type === "function" ||
+    type === "function_expression" ||
+    type === "generator_function"
+  );
+}
 
 function isExported(node: SyntaxNode): boolean {
   return node.parent?.type === "export_statement";
@@ -128,7 +156,7 @@ export function extractTypeScriptLike(root: SyntaxNode): FileExtractionResult {
             if (name) {
               symbols.push({
                 name,
-                kind: "variable",
+                kind: declaratorIsFunction(child) ? "function" : "variable",
                 start_line: startLine(child),
                 end_line: endLine(child),
                 exported: isExported(node),
@@ -152,7 +180,13 @@ export function extractTypeScriptLike(root: SyntaxNode): FileExtractionResult {
       case "call_expression": {
         const callee = node.childForFieldName("function") ?? firstChildIdentifier(node);
         if (callee) {
-          edges.push({ kind: "calls", to: callee.text, line: startLine(node) });
+          const from = enclosingSymbolName(node, TS_CALL_DEFINERS);
+          edges.push({
+            kind: "calls",
+            from_symbol: from ?? undefined,
+            to: callee.text,
+            line: startLine(node),
+          });
         }
         break;
       }

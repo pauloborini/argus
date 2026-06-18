@@ -1,6 +1,8 @@
 import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
-import { endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+import { enclosingSymbolName, endLine, namedIdentifier, startLine, walkTree } from "./ast-utils.js";
+
+const PY_CALL_DEFINERS: ReadonlySet<string> = new Set(["function_definition"]);
 
 export function extractPython(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
@@ -31,20 +33,25 @@ export function extractPython(root: SyntaxNode): FileExtractionResult {
             end_line: endLine(node),
           });
 
-          walkTree(node, (child) => {
-            if (child.type === "argument_list") {
-              walkTree(child, (arg) => {
-                if (arg.type === "identifier") {
-                  edges.push({
-                    kind: "extends",
-                    from_symbol: name,
-                    to: arg.text,
-                    line: startLine(arg),
-                  });
-                }
-              });
+          // Superclasses = argumentos **posicionais** diretos da argument_list.
+          // Antes, o walk recursivo capturava também `metaclass=M` (valor do
+          // keyword_argument), `Generic[T]` (subscript) e args de keyword como se
+          // fossem superclasses — ruído. Aqui só identifier/attribute diretos.
+          const argList = node.childForFieldName("superclasses")
+            ?? node.descendantsOfType("argument_list")[0];
+          if (argList) {
+            for (let i = 0; i < argList.namedChildCount; i += 1) {
+              const arg = argList.namedChild(i);
+              if (arg && (arg.type === "identifier" || arg.type === "attribute")) {
+                edges.push({
+                  kind: "extends",
+                  from_symbol: name,
+                  to: arg.text,
+                  line: startLine(arg),
+                });
+              }
             }
-          });
+          }
         }
         break;
       }
@@ -72,7 +79,13 @@ export function extractPython(root: SyntaxNode): FileExtractionResult {
       case "call": {
         const fn = node.childForFieldName("function");
         if (fn) {
-          edges.push({ kind: "calls", to: fn.text, line: startLine(node) });
+          const from = enclosingSymbolName(node, PY_CALL_DEFINERS);
+          edges.push({
+            kind: "calls",
+            from_symbol: from ?? undefined,
+            to: fn.text,
+            line: startLine(node),
+          });
         }
         break;
       }

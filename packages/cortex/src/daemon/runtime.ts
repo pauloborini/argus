@@ -20,10 +20,28 @@ import {
 import { acquireDaemonLock } from "./lock.js";
 
 const DEFAULT_DEBOUNCE_MS = 400;
+const DEFAULT_MAX_DEBOUNCE_MS = 3_000;
 const STATUS_INTERVAL_MS = 15_000;
 const SNAPSHOT_INTERVAL_MS = 30_000;
 const MAX_RESUBSCRIBE_BACKOFF_MS = 30_000;
 const POLL_INTERVAL_MS = 30_000;
+
+/**
+ * Reconhece exaustão de watches do SO (inotify no Linux, descritores no
+ * macOS/BSD). Quando o backend nativo estoura, resubscrever rápido só queima
+ * CPU — o limite é do SO, não transitório. Retorna `null` para erros comuns.
+ */
+export function watcherExhaustionHint(err: Error): string | null {
+  const text = `${(err as NodeJS.ErrnoException).code ?? ""} ${err.message}`;
+  if (/ENOSPC|EMFILE|ENFILE|inotify|too many open files|watch(?:er)? limit/i.test(text)) {
+    return (
+      "Limite de watches do SO esgotado (ENOSPC/EMFILE). " +
+      "Aumente fs.inotify.max_user_watches (Linux) ou o limite de descritores; " +
+      "auto-sync degradou para polling a cada 30s até o limite subir."
+    );
+  }
+  return null;
+}
 
 interface WorkspaceState {
   root: string;
@@ -44,6 +62,7 @@ interface WorkspaceState {
 
 export interface DaemonRuntimeOptions {
   debounceMs?: number;
+  maxDebounceMs?: number;
 }
 
 /** Estado serializável publicado no status file para `cortex daemon status`. */
@@ -86,6 +105,7 @@ function writeFileAtomic(path: string, content: string): void {
 export class DaemonRuntime {
   private readonly states = new Map<string, WorkspaceState>();
   private readonly debounceMs: number;
+  private readonly maxDebounceMs: number;
   private readonly startedAt = new Date().toISOString();
   private statusTimer: NodeJS.Timeout | null = null;
   private snapshotTimer: NodeJS.Timeout | null = null;
@@ -94,6 +114,7 @@ export class DaemonRuntime {
 
   constructor(options: DaemonRuntimeOptions = {}) {
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.maxDebounceMs = options.maxDebounceMs ?? DEFAULT_MAX_DEBOUNCE_MS;
   }
 
   async start(): Promise<boolean> {
@@ -158,7 +179,7 @@ export class DaemonRuntime {
             s.lastError = err.message;
           }
         },
-      }),
+      }, this.maxDebounceMs),
       subscription: null,
       snapshotPath,
       watching: false,
@@ -217,12 +238,15 @@ export class DaemonRuntime {
   private onWatcherError(state: WorkspaceState, err: Error): void {
     state.watching = false;
     state.watchBackend = "poll";
-    state.lastError = err.message;
+    const exhaustion = watcherExhaustionHint(err);
+    state.lastError = exhaustion ?? err.message;
     if (this.stopping) {
       return;
     }
     this.startPolling(state);
-    const delay = state.resubscribeBackoffMs;
+    // Exaustão é limite do SO, não transitório: vai direto ao backoff máximo para
+    // não martelar o subscribe enquanto o polling cobre as mudanças.
+    const delay = exhaustion ? MAX_RESUBSCRIBE_BACKOFF_MS : state.resubscribeBackoffMs;
     state.resubscribeBackoffMs = Math.min(delay * 2, MAX_RESUBSCRIBE_BACKOFF_MS);
     setTimeout(() => {
       if (!this.stopping && this.states.has(state.root)) {
