@@ -10,12 +10,20 @@ Without a global install, prefix any command with `npx atlas-cortex …`.
 
 ## Conventions
 
-- Every tool prints **JSON** to stdout.
-- Shared fields: `state` (`sucesso` · `ambigua` · `parcial` · `stale` ·
-  `falha`), `confidence` (`high` · `medium` · `low`), and, when relevant,
-  `limitations[]` and `staleness_hint`.
+- Every tool prints compact **JSON** to stdout (machine-friendly by default).
+- Core shared field: `state` (`sucesso` · `ambigua` · `parcial` · `stale` · `falha`).
+  Errors also include `message` with an `E_*` / `W_*` code. Fields `confidence`,
+  `limitations[]`, and `staleness_hint` (with a `STALE_*` code prefix) appear only in
+  `--detailed` mode.
 - Exit code is non-zero only when `state` is `falha`.
 - Commands are scriptable: pipe stdout into `jq` freely.
+
+**Global flags** (work before any subcommand):
+
+| Flag | Effect |
+|------|--------|
+| `--pretty` | Indent JSON for human reading (~30–40 % more tokens) |
+| `--detailed` | Full envelope: `confidence`, `limitations[]`, `staleness_hint` in prose |
 
 ---
 
@@ -83,6 +91,43 @@ Output reports the path taken — `via full` · `via git-delta` · `via dirty-fl
 · `via watch` (explicit-paths delta from the daemon) — and, when a dirty-flag
 was consumed, the number of pending paths.
 
+### `cortex embed`
+Generate semantic embeddings of the structural index — **optional and
+off-by-default**. Powers the `semantic_search` tool. Local bge-small model
+(downloads on first use, transformers.js cache), int8-quantized vectors stored
+in the same SQLite. **Not auto-synced**: re-run after meaningful changes (a full
+`cortex index` clears the vectors; an incremental `cortex sync` leaves them
+stale, signalled at search time).
+
+```bash
+cortex embed
+cortex embed --batch 64   # inference batch size (default 32)
+```
+
+| Flag | Meaning |
+|---|---|
+| `--batch <n>` | Symbols per inference batch. |
+
+### `cortex scip import`
+Import precise edges from a SCIP index file — **optional and off-by-default**.
+SCIP (Sourcegraph Code Intelligence Protocol) provides globally-stable symbol IDs
+with accurate go-to-def/find-refs. When imported, SCIP edges override heuristic
+tree-sitter edges for covered symbol pairs. Requires `cortex index` first; re-run
+after reindex (reindex clears SCIP edges).
+
+```bash
+cortex scip import                     # default: <workspace>/index.scip
+cortex scip import ./build/index.scip  # explicit path
+```
+
+| Argument | Meaning |
+|---|---|
+| `[path]` | Path to `index.scip` file. Default: `<workspace>/index.scip`. |
+
+Output: count of imported edges, matched/missing files, covered symbols.
+SCIP requires a build step in CI (`scip-typescript`, `scip-python`, etc.) — gain
+is conditional on the repo emitting `index.scip`.
+
 ### `cortex status`
 Health and staleness of the local index.
 
@@ -108,6 +153,7 @@ Lexical + structural symbol search over the local FTS index.
 ```bash
 cortex search "calculateTotal"
 cortex search "calculate" --scope src/ --kind function --limit 5
+cortex search "runSync" --format tsv | cut -f1,2   # pipe-friendly TSV
 ```
 
 | Flag | Meaning |
@@ -115,10 +161,38 @@ cortex search "calculate" --scope src/ --kind function --limit 5
 | `--scope <path>` | Restrict candidates to a path/dir. |
 | `--kind <kind>` | Restrict by symbol kind (`function`, `class`, …). |
 | `--limit <n>` | Max candidates. |
+| `--format <fmt>` | `concise` (default) · `detailed` · `tsv` (tab-separated, ideal for pipes). |
 
 Each candidate: `id`, `kind`, `name`, `path`, `start_line`, `end_line`,
 `score`, `match_reason`. `start_line`/`end_line` distinguish same-named symbols
 in one file and let you jump straight to them.
+
+TSV columns: `name`, `path`, `kind`, `line`, `score`. Truncates at 50 results
+(note goes to stderr); add `--limit` to narrow the set first.
+
+### `cortex semantic-search <query>`
+Search by **meaning** via embeddings (local bge-small), fused with lexical via
+RRF. Use when `search` comes back empty or intent doesn't match literal names —
+e.g. *"OS file-watcher limit reached"* finds `watcherExhaustionHint` without the
+term in its name. Requires `cortex embed` first (off-by-default); with no
+vectors it degrades honestly (`W_EMBEDDINGS_UNAVAILABLE`) and falls back to
+lexical results.
+
+```bash
+cortex semantic-search "where do we handle the OS file-watcher limit"
+cortex semantic-search "combine lexical and dense ranking" --mode dense --limit 5
+```
+
+| Flag | Meaning |
+|---|---|
+| `--mode <mode>` | `dense` (vectors only) · `hybrid` (RRF fusion with lexical, default). |
+| `--scope <path>` | Restrict candidates to a path/dir. |
+| `--kind <kind>` | Restrict by symbol kind. |
+| `--limit <n>` | Max candidates. |
+
+Same candidate shape as `search`, with `match_reason` ∈ `semantic` · `lexical` ·
+`hybrid`. `state` may be `stale` (`W_EMBEDDINGS_STALE`) when the index moved
+ahead of the last `embed` — results still served with the warning.
 
 ### `cortex files`
 List the indexed structure of the workspace.
@@ -126,14 +200,19 @@ List the indexed structure of the workspace.
 ```bash
 cortex files
 cortex files --pattern src --max-depth 3
+cortex files --format tsv | awk -F'\t' '$3 > 10'   # files with >10 symbols
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--pattern <pattern>` | Substring filter on paths. |
 | `--max-depth <n>` | Max path depth. |
+| `--format <fmt>` | `concise` (default) · `detailed` · `tsv` (tab-separated, ideal for pipes). |
 
 Output: a `tree` of paths with `symbol_counts`.
+
+TSV columns: `path`, `language`, `symbol_count`. Truncates at 50 results
+(note goes to stderr).
 
 ### `cortex explore <target>`
 Composite structural context for a symbol, file, or topic — central symbols,

@@ -23,7 +23,8 @@ export type SupportedLanguage =
   | "java"
   | "rust"
   | "kotlin"
-  | "dart";
+  | "dart"
+  | "csharp";
 
 export interface ExtractedSymbol {
   name: string;
@@ -44,6 +45,7 @@ export interface ExtractedEdge {
   from_symbol?: string;
   to: string;
   line?: number;
+  source?: string;
 }
 
 export interface ParseError {

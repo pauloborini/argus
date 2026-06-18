@@ -21,13 +21,21 @@ Agentes queimam tokens e tool calls redescobrindo o código: `grep`, abre
 arquivo, `grep` de novo, abre mais três. O Atlas Cortex colapsa isso em
 respostas únicas e estruturadas apoiadas num índice local.
 
-No benchmark interno (tarefas reais de engenharia, 6 repos):
+No benchmark interno (6 tarefas reais de engenharia, **scriptado — sem agente
+vivo**, tokens por heurística offline documentada):
 
-| Métrica | Baseline | Atlas Cortex |
-|---|---|---|
-| Tool calls | 24 | **14** (−41,7%) |
-| Tokens aprox. | 76.209 | **8.940** (−88,1%) |
-| Utilidade média | — | **4,17 / 5** |
+| Métrica (baseline → Atlas) | Resultado |
+|---|---|
+| Tokens aprox. | **−92,7%** |
+| Tool calls | **−11,8%** |
+| Ground-truth respondido (arm Atlas) | **6/6** |
+
+O ganho de tokens vem quase todo do **índice entregar menos conteúdo** (ranges +
+handles em vez de arquivos inteiros), não de formato — isolado, o ganho só-de-formato
+é **~0%**. Compensa mais em **lookup cirúrgico** (−97,8%) e menos em **varredura
+ampla** (−55,7%), onde o agente leria muitos arquivos de qualquer jeito. É um
+**limite superior interno scriptado** até rodar com agente vivo; metodologia e
+números por task em [`.atlas/benchmark/latest/SUMMARY.md`](.atlas/benchmark/latest/SUMMARY.md).
 
 É **local-first**: nada é indexado ou enviado para serviço remoto, e o contexto
 recuperado nunca sai do workspace.
@@ -83,15 +91,15 @@ Aponte seu agente ou IDE para o servidor MCP stdio:
   "mcpServers": {
     "atlas-cortex": {
       "command": "npx",
-      "args": ["-y", "atlas-cortex@1.0.0", "serve", "--mcp"]
+      "args": ["-y", "atlas-cortex@latest", "serve", "--mcp"]
     }
   }
 }
 ```
 
-O servidor expõe nove tools: `search`, `explore`, `trace`, `impact`,
-`diff_impact`, `files`, `pack_context`, `retrieve`, `status`. Todas leem apenas
-estado local.
+O servidor expõe dez tools: `search`, `explore`, `trace`, `impact`,
+`diff_impact`, `files`, `pack_context`, `retrieve`, `status` e
+`semantic_search`. Todas leem apenas estado local.
 
 ---
 
@@ -140,19 +148,23 @@ Duas ideias que valem conhecer:
 | Camada | Linguagens | Cobertura |
 |---|---|---|
 | Core | TypeScript/JavaScript, Python, Go, Java, Rust | completa |
-| Extensão | Dart, Kotlin | parcial (degradação honesta) |
+| Extensão | Dart, Kotlin, C# | completa |
 
 Dart tem extração estrutural de primeira classe (classes, mixins, typedefs,
-constantes top-level, relações `with`/`on`) por causa do Flutter.
+constantes top-level, relações `with`/`on`) por causa do Flutter. C# cobre
+namespaces, classes, structs, records, interfaces, enums e membros top-level
+(`.cs`/`.csx`).
 
 ---
 
 ## Limitações conhecidas
 
-- Chamadas sem import resolvido degradam para correspondência global por nome.
-- Dart/Kotlin mantêm cobertura parcial explícita.
+- Chamadas sem import resolvido degradam para correspondência global por nome (mitigável via importação SCIP opcional — `cortex scip import`).
 - Resolução dinâmica/reflexiva não é tratada como causalidade comprovada.
-- `search` rankeia lexical e estruturalmente — **sem embeddings**.
+- `search` rankeia lexical e estruturalmente (sempre fresco). Busca semântica
+  por **embeddings é opcional e off-by-default**: rode `cortex embed` e use a tool
+  `semantic_search` (denso bge-small + fusão híbrida RRF). Os vetores não são
+  auto-sincronizados — podem ficar stale e a tool sinaliza honestamente.
 
 ---
 

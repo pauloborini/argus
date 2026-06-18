@@ -10,12 +10,20 @@ Sem instalação global, prefixe qualquer comando com `npx atlas-cortex …`.
 
 ## Convenções
 
-- Toda tool imprime **JSON** no stdout.
-- Campos comuns: `state` (`sucesso` · `ambigua` · `parcial` · `stale` ·
-  `falha`), `confidence` (`high` · `medium` · `low`) e, quando relevante,
-  `limitations[]` e `staleness_hint`.
+- Toda tool imprime **JSON** compacto no stdout (friendly para máquina por padrão).
+- Campo essencial compartilhado: `state` (`sucesso` · `ambigua` · `parcial` · `stale` · `falha`).
+  Erros também incluem `message` com código `E_*` / `W_*`. Os campos `confidence`,
+  `limitations[]` e `staleness_hint` (prefixado com código `STALE_*`) aparecem apenas no
+  modo `--detailed`.
 - O exit code só é diferente de zero quando `state` é `falha`.
 - Comandos são scriptáveis: jogue o stdout no `jq` à vontade.
+
+**Flags globais** (funcionam antes de qualquer subcomando):
+
+| Flag | Efeito |
+|------|--------|
+| `--pretty` | Formata o JSON com indentação para leitura humana (~30–40 % mais tokens) |
+| `--detailed` | Envelope completo: `confidence`, `limitations[]`, `staleness_hint` em prosa |
 
 ---
 
@@ -84,6 +92,42 @@ A saída reporta o caminho usado — `via full` · `via git-delta` · `via dirty
 · `via watch` (delta por paths explícitos do daemon) — e, quando uma dirty-flag
 foi consumida, o número de paths pendentes.
 
+### `cortex embed`
+Gera embeddings semânticos do índice estrutural — **opcional e off-by-default**.
+Alimenta a tool `semantic_search`. Modelo bge-small local (baixa no 1º uso,
+cache do transformers.js), vetores quantizados int8 no próprio SQLite. **Não
+auto-sincroniza**: re-rode após mudanças relevantes (um `cortex index` completo
+zera os vetores; `cortex sync` incremental os deixa stale, sinalizado na busca).
+
+```bash
+cortex embed
+cortex embed --batch 64   # tamanho do lote de inferência (default 32)
+```
+
+| Flag | Significado |
+|---|---|
+| `--batch <n>` | Símbolos por lote de inferência. |
+
+### `cortex scip import`
+Importa edges precisas de um arquivo SCIP — **opcional e off-by-default**.
+SCIP (Sourcegraph Code Intelligence Protocol) fornece IDs de símbolo globalmente
+estáveis com go-to-def/find-refs precisos. Ao importar, edges SCIP sobrescrevem
+as heurísticas tree-sitter para os pares de símbolos cobertos. Requer `cortex index`
+prévio; re-rode após reindex (reindex zera edges SCIP).
+
+```bash
+cortex scip import                     # default: <workspace>/index.scip
+cortex scip import ./build/index.scip  # path explícito
+```
+
+| Argumento | Significado |
+|---|---|
+| `[path]` | Caminho do `index.scip`. Default: `<workspace>/index.scip`. |
+
+Saída: contagem de edges importadas, arquivos casados/ausentes, símbolos cobertos.
+SCIP exige um passo de build em CI (`scip-typescript`, `scip-python`, etc.) — o
+ganho é condicional ao repo emitir `index.scip`.
+
 ### `cortex status`
 Saúde e staleness do índice local.
 
@@ -109,6 +153,7 @@ Busca lexical + estrutural de símbolos sobre o índice FTS local.
 ```bash
 cortex search "calculateTotal"
 cortex search "calculate" --scope src/ --kind function --limit 5
+cortex search "runSync" --format tsv | cut -f1,2   # TSV ideal para pipes
 ```
 
 | Flag | Significado |
@@ -116,10 +161,38 @@ cortex search "calculate" --scope src/ --kind function --limit 5
 | `--scope <path>` | Restringe candidatos a um path/dir. |
 | `--kind <kind>` | Restringe por tipo de símbolo (`function`, `class`, …). |
 | `--limit <n>` | Máximo de candidatos. |
+| `--format <fmt>` | `concise` (default) · `detailed` · `tsv` (tab-separated, ideal para pipes). |
 
 Cada candidato: `id`, `kind`, `name`, `path`, `start_line`, `end_line`,
 `score`, `match_reason`. `start_line`/`end_line` distinguem símbolos homônimos
 no mesmo arquivo e permitem ir direto a eles.
+
+Colunas TSV: `name`, `path`, `kind`, `line`, `score`. Trunca em 50 resultados
+(nota vai para stderr); use `--limit` para restringir antes.
+
+### `cortex semantic-search <query>`
+Busca por **significado** via embeddings (bge-small local), fundida com o
+lexical por RRF. Use quando `search` vier vazio ou a intenção não casar com
+nomes literais — ex.: *"limite de watchers do SO esgotado"* acha
+`watcherExhaustionHint` mesmo sem o termo no nome. Requer `cortex embed` antes
+(off-by-default); sem vetores, degrada honesto (`W_EMBEDDINGS_UNAVAILABLE`) e cai
+para resultados lexicais.
+
+```bash
+cortex semantic-search "onde tratamos limite de file watchers do SO"
+cortex semantic-search "combinar ranking lexical e denso" --mode dense --limit 5
+```
+
+| Flag | Significado |
+|---|---|
+| `--mode <mode>` | `dense` (só vetores) · `hybrid` (fusão RRF com lexical, default). |
+| `--scope <path>` | Restringe candidatos a um path/dir. |
+| `--kind <kind>` | Restringe por tipo de símbolo. |
+| `--limit <n>` | Máximo de candidatos. |
+
+Mesmo shape de candidato do `search`, com `match_reason` ∈ `semantic` ·
+`lexical` · `hybrid`. `state` pode vir `stale` (`W_EMBEDDINGS_STALE`) quando o
+índice avançou desde o `embed` — resultados servidos com o aviso.
 
 ### `cortex files`
 Lista a estrutura indexada do workspace.
@@ -127,14 +200,19 @@ Lista a estrutura indexada do workspace.
 ```bash
 cortex files
 cortex files --pattern src --max-depth 3
+cortex files --format tsv | awk -F'\t' '$3 > 10'   # arquivos com >10 símbolos
 ```
 
 | Flag | Significado |
 |---|---|
 | `--pattern <pattern>` | Filtro por substring no path. |
 | `--max-depth <n>` | Profundidade máxima do path. |
+| `--format <fmt>` | `concise` (default) · `detailed` · `tsv` (tab-separated, ideal para pipes). |
 
 Saída: uma `tree` de paths com `symbol_counts`.
+
+Colunas TSV: `path`, `language`, `symbol_count`. Trunca em 50 resultados
+(nota vai para stderr).
 
 ### `cortex explore <target>`
 Contexto estrutural composto de um símbolo, arquivo ou tema — símbolos

@@ -1,1 +1,1 @@
-export const CORTEX_VERSION = "1.0.0";
+export const CORTEX_VERSION = "1.0.1";

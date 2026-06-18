@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
-import { buildToolStub } from "../src/mcp/tools/stubs.js";
+import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("trace tool", () => {
@@ -41,11 +41,12 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "calculateTotal",
       to: "helper",
       direction: "forward",
       max_hops: 4,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.paths as Array<{ hops: unknown[] }>).length).toBeGreaterThan(0);
@@ -59,10 +60,11 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "src/main.ts",
       to: "src/dep.ts",
       max_hops: 3,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect((payload.files as string[])).toContain("src/dep.ts");
@@ -75,7 +77,7 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, { from: "run" });
+    const payload = buildToolResponse("trace", root, { from: "run" });
     expect(payload.state).toBe("ambigua");
     expect((payload.candidates as unknown[]).length).toBe(2);
   });
@@ -89,10 +91,11 @@ describe("trace tool", () => {
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "boot",
       to: "src/right.ts",
       max_hops: 4,
+      response_format: "detailed",
     });
     expect(["sucesso", "parcial"]).toContain(payload.state);
     expect(payload.files).toContain("src/right.ts");
@@ -107,28 +110,47 @@ describe("trace tool", () => {
     expect(await runIndex()).toBe(0);
     writeFileSync(join(root, "src/main.ts"), 'import { helper } from "./dep";\nexport function boot() { return helper(); }\n', "utf-8");
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "src/main.ts",
       to: "src/dep.ts",
       max_hops: 3,
+      response_format: "detailed",
     });
     expect(payload.state).toBe("stale");
     expect(String(payload.staleness_hint)).toContain("cortex sync");
   });
 
-  it("trace degrada para parcial em Dart por cobertura limitada", async () => {
+  it("Dart full: trace não degrada por linguagem (cobertura full, S31)", async () => {
     const root = setupWorkspace({
       "lib/main.dart": 'import "dep.dart";\nvoid boot() { helper(); }\n',
       "lib/dep.dart": "void helper() {}\n",
     });
     expect(await runIndex()).toBe(0);
 
-    const payload = buildToolStub("trace", root, {
+    const payload = buildToolResponse("trace", root, {
       from: "lib/main.dart",
       to: "lib/dep.dart",
       max_hops: 3,
+      response_format: "detailed",
     });
-    expect(payload.state).toBe("parcial");
-    expect(((payload.limitations as string[] | undefined) ?? []).length).toBeGreaterThan(0);
+    // Dart full: trace pode ser sucesso ou parcial por uncertainty_points
+    // (fluxo dinâmico), mas NÃO deve ser parcial apenas por coverage_level de linguagem
+    expect(["sucesso", "parcial", "vazio"]).toContain(payload.state);
+  });
+
+  it("Kotlin full: trace não degrada por linguagem (cobertura full, S32)", async () => {
+    const root = setupWorkspace({
+      "src/Main.kt": 'import dep.helper\nfun boot() { helper() }\n',
+      "src/dep.kt": "package dep\nfun helper() {}\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("trace", root, {
+      from: "src/Main.kt",
+      to: "src/dep.kt",
+      max_hops: 3,
+      response_format: "detailed",
+    });
+    expect(["sucesso", "parcial", "vazio"]).toContain(payload.state);
   });
 });

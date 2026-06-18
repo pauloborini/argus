@@ -29,7 +29,9 @@ jobs:
           mkdir -p dist-release
           npm pack --workspace=atlas-cortex --pack-destination dist-release
           (cd dist-release && shasum -a 256 *.tgz > SHA256SUMS)
-      - name: Publish npm with provenance
+      # Provenance npm exige repositório-fonte público. Ao tornar o repo público,
+      # acrescentar --provenance ao comando (id-token: write deve estar habilitado).
+      - name: Publish npm
         run: npm publish --workspace=atlas-cortex --access public
       - name: Publish GitHub release
         env:
