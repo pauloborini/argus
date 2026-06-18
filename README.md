@@ -147,17 +147,18 @@ Two ideas worth knowing:
 | Tier | Languages | Coverage |
 |---|---|---|
 | Core | TypeScript/JavaScript, Python, Go, Java, Rust | full |
-| Extension | Dart, Kotlin | partial (honest degradation) |
+| Extension | Dart, Kotlin, C# | full |
 
 Dart gets first-class structural extraction (classes, mixins, typedefs,
-top-level constants, `with`/`on` relations) because of Flutter.
+top-level constants, `with`/`on` relations) because of Flutter. C# covers
+namespaces, classes, structs, records, interfaces, enums, and top-level
+members (`.cs`/`.csx`).
 
 ---
 
 ## Known limitations
 
 - Calls without a resolved import degrade to global name matching (mitigable via optional SCIP import — `cortex scip import`).
-- Dart/Kotlin keep explicit partial coverage.
 - Dynamic/reflective resolution is not treated as proven causality.
 - `search` ranks lexically and structurally (always fresh). Semantic
   **embeddings are optional and off-by-default**: run `cortex embed` and use the

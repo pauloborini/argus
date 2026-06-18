@@ -148,17 +148,18 @@ Duas ideias que valem conhecer:
 | Camada | Linguagens | Cobertura |
 |---|---|---|
 | Core | TypeScript/JavaScript, Python, Go, Java, Rust | completa |
-| Extensão | Dart, Kotlin | parcial (degradação honesta) |
+| Extensão | Dart, Kotlin, C# | completa |
 
 Dart tem extração estrutural de primeira classe (classes, mixins, typedefs,
-constantes top-level, relações `with`/`on`) por causa do Flutter.
+constantes top-level, relações `with`/`on`) por causa do Flutter. C# cobre
+namespaces, classes, structs, records, interfaces, enums e membros top-level
+(`.cs`/`.csx`).
 
 ---
 
 ## Limitações conhecidas
 
 - Chamadas sem import resolvido degradam para correspondência global por nome (mitigável via importação SCIP opcional — `cortex scip import`).
-- Dart/Kotlin mantêm cobertura parcial explícita.
 - Resolução dinâmica/reflexiva não é tratada como causalidade comprovada.
 - `search` rankeia lexical e estruturalmente (sempre fresco). Busca semântica
   por **embeddings é opcional e off-by-default**: rode `cortex embed` e use a tool
