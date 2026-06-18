@@ -32,16 +32,38 @@ Without a global install, prefix any command with `npx atlas-cortex …`.
 ### `cortex install` ⭐ (entry-point command)
 Zero-touch wiring of a repository, in **one command**: prepares the workspace,
 builds the index, writes the agent rules (CLAUDE.md/AGENTS.md), registers the
-MCP server in detected hosts (Claude Code, Cursor) and registers the repo with
-the auto-sync daemon (with an auto-start user service). Idempotent.
+MCP server in detected hosts and registers the repo with the auto-sync daemon
+(with an auto-start user service). Idempotent.
+
+Without `--hosts`, it wires **Claude Code** and **Cursor** always (project
+idiom) and **auto-detects** Codex, OpenCode and Pi when installed on this machine.
 
 ```bash
-cortex install                     # full wiring
+cortex install                     # full wiring (auto-detects hosts)
 cortex install --no-daemon         # index + MCP only (no daemon/service)
 cortex install --no-mcp            # don't register MCP in hosts
-cortex install --hosts claude-code # restrict MCP hosts (CSV)
+cortex install --hosts claude-code,codex  # restrict MCP hosts (CSV)
+cortex install --global            # global MCP for codex/opencode/pi (their default)
+cortex install --local             # MCP for this repo only
+cortex install --scope global      # same as --global
 cortex install --with-hooks        # add git hooks as a daemon-down fallback
 ```
+
+**Supported hosts and where each registers the MCP:**
+
+| Host | Mechanism | Default scope | Config |
+|------|-----------|---------------|--------|
+| `claude-code` | JSON `mcpServers` | local (repo) | `.mcp.json` |
+| `cursor` | JSON `mcpServers` | local (repo) | `.cursor/mcp.json` |
+| `codex` | CLI `codex mcp add/remove` | global | `~/.codex/config.toml` (managed by Codex) |
+| `opencode` | JSON `mcp`/`type:local` | global | `~/.config/opencode/opencode.json` (`XDG_CONFIG_HOME`) or repo |
+| `pi` | JSON `mcpServers` | global | `~/.pi/agent/mcp.json` (`PI_CODING_AGENT_DIR`) or repo |
+
+In global mode the MCP is registered with an **absolute path** (cwd-independent),
+valid across all projects. Existing config is always **merged** — other user
+servers are preserved. Codex is wired through its own CLI (`codex mcp add`),
+preserving `config.toml` comments; if `codex` is not on PATH the host is reported
+as "not detected" without a hard failure.
 
 After this you just code — the daemon keeps the index fresh on its own.
 
@@ -51,6 +73,8 @@ block, git hooks and the daemon registration. `--purge` also removes `.cortex/`.
 
 ```bash
 cortex uninstall
+cortex uninstall --global          # also clears the global MCP registration
+cortex uninstall --hosts codex     # clear specific hosts only (CSV)
 cortex uninstall --purge
 ```
 
