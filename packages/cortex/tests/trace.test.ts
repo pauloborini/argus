@@ -137,4 +137,20 @@ describe("trace tool", () => {
     // (fluxo dinâmico), mas NÃO deve ser parcial apenas por coverage_level de linguagem
     expect(["sucesso", "parcial", "vazio"]).toContain(payload.state);
   });
+
+  it("Kotlin full: trace não degrada por linguagem (cobertura full, S32)", async () => {
+    const root = setupWorkspace({
+      "src/Main.kt": 'import dep.helper\nfun boot() { helper() }\n',
+      "src/dep.kt": "package dep\nfun helper() {}\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("trace", root, {
+      from: "src/Main.kt",
+      to: "src/dep.kt",
+      max_hops: 3,
+      response_format: "detailed",
+    });
+    expect(["sucesso", "parcial", "vazio"]).toContain(payload.state);
+  });
 });

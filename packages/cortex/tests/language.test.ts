@@ -20,7 +20,7 @@ describe("language detection", () => {
     expect(detectLanguageFromPath("Main.kt")).toMatchObject({
       status: "supported",
       language: "kotlin",
-      coverage_level: "partial",
+      coverage_level: "full",
     });
     expect(detectLanguageFromPath("widget.dart")).toMatchObject({
       status: "supported",

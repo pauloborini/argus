@@ -30,7 +30,7 @@ const COVERAGE_BY_LANGUAGE: Record<SupportedLanguage, CoverageLevel> = {
   go: "full",
   java: "full",
   rust: "full",
-  kotlin: "partial",
+  kotlin: "full",
   dart: "full",
 };
 

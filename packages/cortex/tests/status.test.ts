@@ -80,6 +80,20 @@ describe("status stub e staleness", () => {
     expect(coverage.typescript?.symbols).toBeGreaterThan(0);
   });
 
+  it("status após index Kotlin reporta coverage_level full (S32)", async () => {
+    const root = setupWorkspace();
+    writeFileSync(join(root, "Feature.kt"), "class FeatureController { fun run() {} }\n", "utf-8");
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("status", root, { response_format: "detailed" });
+    const coverage = payload.coverage_by_language as Record<
+      string,
+      { symbols: number; coverage_level?: string }
+    >;
+    expect(coverage.kotlin?.symbols).toBeGreaterThan(0);
+    expect(coverage.kotlin?.coverage_level).toBe("full");
+  });
+
   it("arquivo grande (MAX_FILE_SIZE) não envenena staleness; permanece fresh", async () => {
     const root = setupWorkspace();
     writeFileSync(join(root, "asset.bin"), "x".repeat(2 * 1024 * 1024 + 1), "utf-8");
