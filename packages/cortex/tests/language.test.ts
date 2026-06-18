@@ -37,6 +37,7 @@ describe("language detection", () => {
   it("expõe lista de linguagens suportadas", () => {
     expect(SUPPORTED_LANGUAGES).toContain("typescript");
     expect(SUPPORTED_LANGUAGES).toContain("dart");
-    expect(SUPPORTED_LANGUAGES.length).toBe(8);
+    expect(SUPPORTED_LANGUAGES).toContain("csharp");
+    expect(SUPPORTED_LANGUAGES.length).toBe(9);
   });
 });

@@ -23,7 +23,8 @@ export type SupportedLanguage =
   | "java"
   | "rust"
   | "kotlin"
-  | "dart";
+  | "dart"
+  | "csharp";
 
 export interface ExtractedSymbol {
   name: string;
