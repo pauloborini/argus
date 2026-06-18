@@ -181,4 +181,23 @@ describe("search tool", () => {
       ) ?? false,
     ).toBe(false);
   });
+
+  it("Kotlin full: search retorna sucesso (cobertura full, S32)", async () => {
+    const root = setupWorkspace({
+      "src/Feature.kt": "class FeatureController { fun run() {} }\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("search", root, {
+      query: "FeatureController",
+      response_format: "detailed",
+    });
+    expect(["sucesso", "parcial"]).toContain(payload.state);
+    expect((payload.candidates as Array<{ path: string }>)[0]?.path).toBe("src/Feature.kt");
+    expect(
+      (payload.limitations as string[] | undefined)?.some((item) =>
+        item.includes("Cobertura parcial"),
+      ) ?? false,
+    ).toBe(false);
+  });
 });

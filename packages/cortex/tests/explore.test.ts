@@ -124,4 +124,23 @@ describe("explore tool", () => {
     ).toBe(false);
   });
 
+  it("Kotlin full: explore retorna sucesso (cobertura full, S32)", async () => {
+    const root = setupWorkspace({
+      "src/Main.kt": "class MainFeature {}\nfun boot() {}\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("explore", root, {
+      target: "src/Main.kt",
+      mode: "file",
+      response_format: "detailed",
+    });
+    expect(payload.state).toBe("sucesso");
+    expect(
+      (payload.limitations as string[] | undefined)?.some((item) =>
+        item.toLowerCase().includes("kotlin"),
+      ) ?? false,
+    ).toBe(false);
+  });
+
 });

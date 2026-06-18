@@ -23,6 +23,149 @@ describe("extractors kotlin e dart", () => {
     expect(result.imports.some((i) => i.source.includes("foo"))).toBe(true);
   });
 
+  // --- Paridade S32 (Kotlin full) ---
+
+  it("Kotlin: fixture sample.kt cobre construtos idiomáticos", () => {
+    const source = readFileSync(join(fixturesDir, "sample.kt"), "utf-8");
+    const { rootNode } = parseFile("kotlin", source);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.some((s) => s.name === "com.example.app" && s.kind === "module")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "Repo" && s.kind === "interface")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "Singleton" && s.kind === "class")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "count" && s.kind === "variable")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "Status" && s.kind === "enum")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "ACTIVE" && s.kind === "variable")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "Handler" && s.kind === "type")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "id" && s.kind === "variable")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "Factory" && s.kind === "class")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "operator+" && s.kind === "function")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "String.extension" && s.kind === "function")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "topLevel" && s.kind === "variable")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "create" && s.kind === "function")).toBe(true);
+    expect(result.symbols.filter((s) => s.name === "bump" && s.kind === "function").length).toBe(1);
+
+    expect(result.imports.some((i) => i.source === "foo.Bar" && i.symbols?.includes("Baz"))).toBe(true);
+    expect(result.imports.some((i) => i.source === "foo.*")).toBe(true);
+
+    expect(
+      result.edges.some((e) => e.kind === "extends" && e.from_symbol === "A" && e.to === "Base"),
+    ).toBe(true);
+    expect(
+      result.edges.some((e) => e.kind === "implements" && e.from_symbol === "A" && e.to === "Repo"),
+    ).toBe(true);
+    expect(
+      result.edges.some(
+        (e) => e.kind === "implements" && e.from_symbol === "A" && e.to === "Serializable",
+      ),
+    ).toBe(true);
+  });
+
+  it("Kotlin: construtores primário e secundário são símbolos navegáveis", () => {
+    const src =
+      "class MyWidget(val label: String) {\n" +
+      "  constructor(x: Int) : this(\"\") { }\n" +
+      "}\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.filter((s) => s.name === "MyWidget" && s.kind === "function").length).toBeGreaterThanOrEqual(2);
+    expect(result.symbols.some((s) => s.name === "label" && s.kind === "variable")).toBe(true);
+  });
+
+  it("Kotlin: operator fun é símbolo navegável", () => {
+    const src =
+      "class Vec {\n" +
+      "  operator fun plus(other: Vec): Vec = other\n" +
+      "  operator fun get(index: Int): Int = 0\n" +
+      "}\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.some((s) => s.name === "operator+" && s.kind === "function")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "operator[]" && s.kind === "function")).toBe(true);
+  });
+
+  it("Kotlin: enum entries são extraídos como variable", () => {
+    const src = "enum class Status { ACTIVE, INACTIVE }\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.some((s) => s.name === "Status" && s.kind === "enum")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "ACTIVE" && s.kind === "variable")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "INACTIVE" && s.kind === "variable")).toBe(true);
+  });
+
+  it("Kotlin: interface-only delegation vira implements", () => {
+    const src = "interface Repo {}\nclass A : Repo {}\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(
+      result.edges.some((e) => e.kind === "implements" && e.from_symbol === "A" && e.to === "Repo"),
+    ).toBe(true);
+    expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "A")).toBe(false);
+  });
+
+  it("Kotlin: interface externa sem construtor vira implements", () => {
+    const src =
+      "import java.io.Closeable\n" +
+      "class Service : Closeable {\n" +
+      "  override fun close() {}\n" +
+      "}\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(
+      result.edges.some(
+        (e) => e.kind === "implements" && e.from_symbol === "Service" && e.to === "Closeable",
+      ),
+    ).toBe(true);
+    expect(result.edges.some((e) => e.kind === "extends" && e.from_symbol === "Service")).toBe(
+      false,
+    );
+  });
+
+  it("Kotlin: parâmetros val/var do construtor primário viram properties", () => {
+    const src = "class User(val name: String, var age: Int)\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.some((s) => s.name === "name" && s.kind === "variable")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "age" && s.kind === "variable")).toBe(true);
+  });
+
+  it("Kotlin: funções em object não duplicam símbolos", () => {
+    const src = "object Singleton {\n  fun bump() {}\n}\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.filter((s) => s.name === "bump" && s.kind === "function").length).toBe(1);
+  });
+
+  it("Kotlin: companion object extrai funções internas", () => {
+    const src =
+      "class Widget {\n" +
+      "  companion object Factory {\n" +
+      "    fun create(): Widget = Widget()\n" +
+      "  }\n" +
+      "}\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.some((s) => s.name === "Factory" && s.kind === "class")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "create" && s.kind === "function")).toBe(true);
+  });
+
+  it("Kotlin: companion object sem nome usa Companion", () => {
+    const src = "class Widget {\n  companion object {\n    fun build(): Widget = Widget()\n  }\n}\n";
+    const { rootNode } = parseFile("kotlin", src);
+    const result = extractKotlin(rootNode);
+
+    expect(result.symbols.some((s) => s.name === "Companion" && s.kind === "class")).toBe(true);
+    expect(result.symbols.some((s) => s.name === "build" && s.kind === "function")).toBe(true);
+  });
+
   it("extrai classe, método e import em Dart", () => {
     const source = readFileSync(join(fixturesDir, "sample.dart"), "utf-8");
     const { rootNode } = parseFile("dart", source);
