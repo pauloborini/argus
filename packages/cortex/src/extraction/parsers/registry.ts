@@ -5,6 +5,7 @@ import type { SyntaxNode } from "tree-sitter";
 import Go from "tree-sitter-go";
 import Java from "tree-sitter-java";
 import Kotlin from "tree-sitter-kotlin";
+import CSharp from "tree-sitter-c-sharp";
 import Python from "tree-sitter-python";
 import Rust from "tree-sitter-rust";
 import TypeScript from "tree-sitter-typescript";
@@ -58,6 +59,9 @@ function getNativeParser(language: SupportedLanguage): Parser {
       break;
     case "kotlin":
       parser.setLanguage(Kotlin);
+      break;
+    case "csharp":
+      parser.setLanguage(CSharp);
       break;
     default:
       throw new Error(`Linguagem sem parser nativo: ${language}`);

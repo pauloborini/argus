@@ -20,17 +20,25 @@ export class WorkspacePipeline {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private pending = false;
+  // Marca o primeiro evento da rajada não-sincronizada atual. Permite capar a
+  // espera total em `maxDebounceMs` para que um fluxo contínuo de saves
+  // (<debounceMs) não rearme o timer para sempre (starvation).
+  private firstEventAt: number | null = null;
 
   constructor(
     private readonly root: string,
     private readonly debounceMs: number,
     private readonly events: PipelineEvents = {},
+    private readonly maxDebounceMs = 3_000,
   ) {}
 
   /** Adiciona paths (absolutos) ao buffer e (re)arma o debounce. */
   enqueue(paths: string[]): void {
     for (const p of paths) {
       this.buffer.add(p);
+    }
+    if (this.firstEventAt === null) {
+      this.firstEventAt = Date.now();
     }
     this.arm();
   }
@@ -39,10 +47,15 @@ export class WorkspacePipeline {
     if (this.timer) {
       clearTimeout(this.timer);
     }
+    // Teto duro: nunca espera além de maxDebounceMs desde o primeiro evento da
+    // rajada, mesmo sob saves contínuos. delay = min(debounce, restante do teto).
+    const elapsed = this.firstEventAt === null ? 0 : Date.now() - this.firstEventAt;
+    const remainingCap = Math.max(0, this.maxDebounceMs - elapsed);
+    const delay = Math.min(this.debounceMs, remainingCap);
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.flush();
-    }, this.debounceMs);
+    }, delay);
   }
 
   private async flush(): Promise<void> {
@@ -58,6 +71,8 @@ export class WorkspacePipeline {
 
     const paths = [...this.buffer];
     this.buffer.clear();
+    // Janela não-sincronizada fechou: o próximo evento reabre o teto.
+    this.firstEventAt = null;
     this.running = true;
     const startedAt = Date.now();
 

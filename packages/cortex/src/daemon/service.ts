@@ -34,7 +34,27 @@ function xmlEscape(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-function buildPlist(node: string, cli: string, log: string): string {
+export interface ServiceEnv {
+  PATH: string;
+  HOME: string;
+}
+
+/**
+ * Captura o ambiente mínimo que o daemon precisa em runtime. launchd e systemd
+ * --user partem de um PATH enxuto (`/usr/bin:/bin`); sem isto, ferramentas fora
+ * dele — como o `git` do Homebrew em `/opt/homebrew/bin` — somem e o auto-sync
+ * (que depende de git) falha silenciosamente. Congelamos o PATH/HOME do shell
+ * onde o usuário rodou o install, que tem o ambiente completo.
+ */
+export function resolveServiceEnv(): ServiceEnv {
+  const fallbackPath = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin";
+  return {
+    PATH: process.env.PATH && process.env.PATH.length > 0 ? process.env.PATH : fallbackPath,
+    HOME: process.env.HOME || homedir(),
+  };
+}
+
+export function buildPlist(node: string, cli: string, log: string, env: ServiceEnv): string {
   const args = [node, cli, "daemon"]
     .map((a) => `    <string>${xmlEscape(a)}</string>`)
     .join("\n");
@@ -48,6 +68,13 @@ function buildPlist(node: string, cli: string, log: string): string {
   <array>
 ${args}
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${xmlEscape(env.PATH)}</string>
+    <key>HOME</key>
+    <string>${xmlEscape(env.HOME)}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -66,7 +93,7 @@ function systemdQuote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function buildSystemdUnit(node: string, cli: string): string {
+export function buildSystemdUnit(node: string, cli: string, env: ServiceEnv): string {
   const execStart = `${systemdQuote(node)} ${systemdQuote(cli)} daemon`;
   return `[Unit]
 Description=Atlas Cortex auto-sync daemon
@@ -74,6 +101,8 @@ After=default.target
 
 [Service]
 Type=simple
+Environment="PATH=${env.PATH}"
+Environment="HOME=${env.HOME}"
 ExecStart=${execStart}
 Restart=on-failure
 RestartSec=2
@@ -92,12 +121,13 @@ export function installService(): ServiceResult {
   const node = process.execPath;
   const cli = resolveCliEntry();
   const log = daemonLogPath();
+  const env = resolveServiceEnv();
   mkdirSync(dirname(log), { recursive: true });
 
   if (process.platform === "darwin") {
     const plist = launchdPlistPath();
     mkdirSync(dirname(plist), { recursive: true });
-    writeFileSync(plist, buildPlist(node, cli, log), "utf-8");
+    writeFileSync(plist, buildPlist(node, cli, log, env), "utf-8");
     try {
       // Recarrega de forma idempotente: unload silencioso antes do load -w.
       try {
@@ -116,7 +146,7 @@ export function installService(): ServiceResult {
   if (process.platform === "linux") {
     const unit = systemdUnitPath();
     mkdirSync(dirname(unit), { recursive: true });
-    writeFileSync(unit, buildSystemdUnit(node, cli), "utf-8");
+    writeFileSync(unit, buildSystemdUnit(node, cli, env), "utf-8");
     try {
       execFileSync("systemctl", ["--user", "daemon-reload"], { stdio: "ignore" });
       execFileSync("systemctl", ["--user", "enable", "--now", SYSTEMD_UNIT], { stdio: "ignore" });

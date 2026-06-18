@@ -9,6 +9,9 @@ import { runIndex } from "./commands/index-cmd.js";
 import { runPackContext } from "./commands/pack-context.js";
 import { runRetrieve } from "./commands/retrieve.js";
 import { runSearch } from "./commands/search.js";
+import { runSemanticSearch } from "./commands/semantic-search.js";
+import { runEmbed } from "./commands/embed-cmd.js";
+import { runScipImport } from "./commands/scip-import.js";
 import { runStatus } from "./commands/status.js";
 import { runSync } from "./commands/sync.js";
 import { runTrace } from "./commands/trace.js";
@@ -29,6 +32,8 @@ import {
 } from "./commands/daemon.js";
 import { SUPPORTED_HOSTS, type McpHostId } from "./install/mcp-hosts.js";
 import { CORTEX_VERSION } from "./version.js";
+import { setPrettyOutput } from "./output.js";
+import { setDefaultResponseFormat } from "./mcp/tools/response.js";
 
 /** Parse e valida a flag `--hosts a,b`; vazio → todos os suportados. */
 function parseHosts(value?: string): McpHostId[] | undefined {
@@ -79,7 +84,18 @@ function resolveGitignoreOverride(opts: {
 program
   .name("cortex")
   .description("Atlas Cortex — CLI local de retrieval e context packing")
-  .version(CORTEX_VERSION);
+  .version(CORTEX_VERSION)
+  .option("--pretty", "Saída JSON identada para leitura humana (default: compacto)")
+  .option("--detailed", "Envelope detalhado (message/limitations/staleness_hint em prosa)");
+
+// Default compacto + conciso: pretty-print desperdiça ~30-40% de tokens e o
+// envelope em prosa ~50-70% dos tokens de envelope; o consumidor primário é
+// máquina. `--pretty` reativa a identação; `--detailed` restaura a prosa.
+program.hook("preAction", (thisCommand) => {
+  const opts = thisCommand.optsWithGlobals();
+  setPrettyOutput(opts.pretty === true);
+  setDefaultResponseFormat(opts.detailed === true ? "detailed" : "concise");
+});
 
 program
   .command("init")
@@ -162,16 +178,52 @@ program
   .option("--scope <path>", "Restringir candidatos por path")
   .option("--kind <kind>", "Restringir por tipo de símbolo")
   .option("--limit <n>", "Máximo de candidatos", (value) => Number(value))
-  .action((query: string, opts: { scope?: string; kind?: string; limit?: number }) => {
+  .option("--format <fmt>", "Formato de saída: concise | detailed | tsv")
+  .action((query: string, opts: { scope?: string; kind?: string; limit?: number; format?: string }) => {
     finish(runSearch(query, opts));
   });
+
+program
+  .command("embed")
+  .description("Gerar embeddings semânticos do índice (opcional, off-by-default)")
+  .option("--batch <n>", "Tamanho do lote de inferência", (value) => Number(value))
+  .action(async (opts: { batch?: number }) => {
+    finish(await runEmbed({ batch: opts.batch }));
+  });
+
+const scipCmd = program.command("scip").description("Ingestão SCIP (tier de precisão sobre tree-sitter)");
+scipCmd
+  .command("import")
+  .description("Importar edges precisas de um index.scip (off-by-default)")
+  .argument("[path]", "Caminho do index.scip (default: <workspace>/index.scip)")
+  .action(async (path?: string) => {
+    finish(await runScipImport({ path }));
+  });
+
+program
+  .command("semantic-search")
+  .description("Busca semântica (embeddings) com fusão híbrida; requer cortex embed")
+  .argument("<query>", "Query em linguagem natural")
+  .option("--mode <mode>", "dense | hybrid (default hybrid)")
+  .option("--scope <path>", "Restringir candidatos por path")
+  .option("--kind <kind>", "Restringir por tipo de símbolo")
+  .option("--limit <n>", "Máximo de candidatos", (value) => Number(value))
+  .action(
+    async (
+      query: string,
+      opts: { mode?: "dense" | "hybrid"; scope?: string; kind?: string; limit?: number },
+    ) => {
+      finish(await runSemanticSearch(query, opts));
+    },
+  );
 
 program
   .command("files")
   .description("Listar estrutura indexada do workspace")
   .option("--pattern <pattern>", "Filtro simples por substring do path")
   .option("--max-depth <n>", "Profundidade máxima por path", (value) => Number(value))
-  .action((opts: { pattern?: string; maxDepth?: number }) => {
+  .option("--format <fmt>", "Formato de saída: concise | detailed | tsv")
+  .action((opts: { pattern?: string; maxDepth?: number; format?: string }) => {
     finish(runFiles(opts));
   });
 

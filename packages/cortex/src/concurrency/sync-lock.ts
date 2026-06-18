@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
+import { closeSync, futimesSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { getWorkspacePath } from "../workspace/workspace.js";
 
@@ -8,8 +8,15 @@ function sleepMs(ms: number): void {
 }
 
 const LOCK_FILE = "sync.lock";
-/** Lock considerado órfão após este tempo sem o dono vivo. */
+/**
+ * Lock considerado órfão após este tempo **sem heartbeat** (mtime do arquivo).
+ * O dono vivo refresca o mtime periodicamente ({@link HEARTBEAT_MS}), então um
+ * sync longo e saudável nunca cruza este limiar; só um dono morto/travado, que
+ * parou de refrescar, envelhece o mtime até aqui.
+ */
 const STALE_LOCK_MS = 60_000;
+/** Intervalo do heartbeat que refresca o mtime do lock enquanto `fn` roda. */
+const HEARTBEAT_MS = 20_000;
 
 interface LockRecord {
   pid: number;
@@ -65,8 +72,13 @@ function tryStealStale(path: string): void {
     return;
   }
 
-  const age = Date.now() - record.acquired_at;
-  if (!isProcessAlive(record.pid) || age > STALE_LOCK_MS) {
+  // Rouba se o dono morreu (recuperação rápida) ou se o heartbeat parou
+  // (mtime envelhecido além de STALE_LOCK_MS — dono vivo mas travado, ou pid
+  // reciclado). NÃO usa `record.acquired_at`: ele é fixo na aquisição, então um
+  // sync longo e saudável pareceria "velho" e teria o lock roubado no meio da
+  // escrita → dois escritores → corrupção. O mtime, refrescado pelo heartbeat,
+  // distingue "demorado" de "morto".
+  if (!isProcessAlive(record.pid) || lockAgeMs(path) > STALE_LOCK_MS) {
     rmSync(path, { force: true });
   }
 }
@@ -107,13 +119,29 @@ export async function withSyncLock<T>(
     }
   }
 
+  const lockFd = fd;
+  // Heartbeat: refresca o mtime do lock enquanto `fn` roda, sinalizando que o
+  // dono está vivo. Sem isto, um sync legítimo mais longo que STALE_LOCK_MS
+  // teria o lock roubado por outro processo. `unref` para não segurar o event
+  // loop após o término natural do processo.
+  const heartbeat = setInterval(() => {
+    try {
+      const now = Date.now() / 1000;
+      futimesSync(lockFd, now, now);
+    } catch {
+      /* lock removido sob nós (roubo): o finally limpa, a query degrada */
+    }
+  }, HEARTBEAT_MS);
+  heartbeat.unref?.();
+
   try {
     const record: LockRecord = { pid: process.pid, acquired_at: Date.now() };
     writeSync(fd, JSON.stringify(record));
     const result = await fn();
     return { acquired: true, result };
   } finally {
-    closeSync(fd);
+    clearInterval(heartbeat);
+    closeSync(lockFd);
     rmSync(path, { force: true });
   }
 }

@@ -1,6 +1,18 @@
 import type { SyntaxNode } from "tree-sitter";
 import type { FileExtractionResult } from "../types.js";
-import { endLine, namedIdentifier, startLine, stripQuotes, walkTree } from "./ast-utils.js";
+import {
+  enclosingSymbolName,
+  endLine,
+  namedIdentifier,
+  startLine,
+  stripQuotes,
+  walkTree,
+} from "./ast-utils.js";
+
+const GO_CALL_DEFINERS: ReadonlySet<string> = new Set([
+  "function_declaration",
+  "method_declaration",
+]);
 
 export function extractGo(root: SyntaxNode): FileExtractionResult {
   const symbols: FileExtractionResult["symbols"] = [];
@@ -26,7 +38,12 @@ export function extractGo(root: SyntaxNode): FileExtractionResult {
         walkTree(node, (spec) => {
           if (spec.type === "type_spec") {
             const name = namedIdentifier(spec);
-            const kind = spec.descendantsOfType("struct_type").length > 0 ? "class" : "type";
+            const kind =
+              spec.descendantsOfType("interface_type").length > 0
+                ? "interface"
+                : spec.descendantsOfType("struct_type").length > 0
+                  ? "class"
+                  : "type";
             if (name) {
               symbols.push({
                 name,
@@ -34,6 +51,51 @@ export function extractGo(root: SyntaxNode): FileExtractionResult {
                 start_line: startLine(spec),
                 end_line: endLine(spec),
               });
+
+              // Embedding Go = composição com promoção de métodos (a herança
+              // do Go). Struct: field_declaration sem field_identifier (campo
+              // anônimo). Interface: qualified_type embutido (`io.Reader`).
+              // Modelado como extends p/ impact/trace cruzar o tipo embutido.
+              if (kind === "class") {
+                const fields = spec
+                  .descendantsOfType("struct_type")[0]
+                  ?.descendantsOfType("field_declaration") ?? [];
+                for (const field of fields) {
+                  if (field.descendantsOfType("field_identifier").length > 0) {
+                    continue;
+                  }
+                  const embedded =
+                    field.descendantsOfType("qualified_type")[0]?.text ??
+                    field.descendantsOfType("type_identifier").at(-1)?.text;
+                  if (embedded) {
+                    edges.push({
+                      kind: "extends",
+                      from_symbol: name,
+                      to: embedded.split(".").at(-1) ?? embedded,
+                      line: startLine(field),
+                    });
+                  }
+                }
+              } else if (kind === "interface") {
+                const interfaceType = spec.descendantsOfType("interface_type")[0];
+                const embeds = interfaceType?.namedChildren.filter(
+                  (child) => child.type === "type_elem",
+                ) ?? [];
+                for (const embed of embeds) {
+                  const target =
+                    embed.descendantsOfType("type_identifier").at(-1)?.text ??
+                    embed.descendantsOfType("qualified_type")[0]?.text;
+                  if (!target) {
+                    continue;
+                  }
+                  edges.push({
+                    kind: "extends",
+                    from_symbol: name,
+                    to: target,
+                    line: startLine(embed),
+                  });
+                }
+              }
             }
           }
         });
@@ -55,7 +117,13 @@ export function extractGo(root: SyntaxNode): FileExtractionResult {
       case "call_expression": {
         const fn = node.childForFieldName("function");
         if (fn) {
-          edges.push({ kind: "calls", to: fn.text, line: startLine(node) });
+          const from = enclosingSymbolName(node, GO_CALL_DEFINERS);
+          edges.push({
+            kind: "calls",
+            from_symbol: from ?? undefined,
+            to: fn.text,
+            line: startLine(node),
+          });
         }
         break;
       }
