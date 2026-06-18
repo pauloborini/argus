@@ -47,6 +47,7 @@
     "commander": "^13.1.0",
     "ignore": "^7.0.5",
     "tree-sitter": "^0.22.1",
+    "tree-sitter-c-sharp": "^0.23.1",
     "tree-sitter-dart": "^1.0.0",
     "tree-sitter-go": "^0.23.4",
     "tree-sitter-java": "^0.23.5",

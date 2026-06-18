@@ -21,6 +21,8 @@ const EXTENSION_MAP: Record<string, SupportedLanguage> = {
   ".kt": "kotlin",
   ".kts": "kotlin",
   ".dart": "dart",
+  ".cs": "csharp",
+  ".csx": "csharp",
 };
 
 const COVERAGE_BY_LANGUAGE: Record<SupportedLanguage, CoverageLevel> = {
@@ -32,6 +34,7 @@ const COVERAGE_BY_LANGUAGE: Record<SupportedLanguage, CoverageLevel> = {
   rust: "full",
   kotlin: "full",
   dart: "full",
+  csharp: "full",
 };
 
 export function detectLanguageFromPath(relativePath: string): LanguageDetection {

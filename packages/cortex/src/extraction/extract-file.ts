@@ -5,6 +5,7 @@ import { extractDart } from "./extractors/dart.js";
 import { extractGo } from "./extractors/go.js";
 import { extractJava } from "./extractors/java.js";
 import { extractKotlin } from "./extractors/kotlin.js";
+import { extractCSharp } from "./extractors/csharp.js";
 import { extractPython } from "./extractors/python.js";
 import { extractRust } from "./extractors/rust.js";
 import { extractTypeScriptLike } from "./extractors/typescript.js";
@@ -219,6 +220,8 @@ function resolveImportsForLanguage(
       return resolveRustImports(rootPath, relativePath, imports);
     case "dart":
       return resolveDartImports(rootPath, relativePath, imports);
+    case "csharp":
+      return imports;
   }
 }
 
@@ -270,6 +273,8 @@ function extractBySupportedLanguage(
       return extractKotlin(rootNode);
     case "dart":
       return extractDart(rootNode);
+    case "csharp":
+      return extractCSharp(rootNode);
     default:
       return { symbols: [], imports: [], edges: [], parse_errors: [] };
   }
