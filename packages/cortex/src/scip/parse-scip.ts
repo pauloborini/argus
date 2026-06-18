@@ -19,9 +19,8 @@ interface ProtobufType {
 interface ProtobufNamespace {
   add(child: unknown): ProtobufNamespace;
 }
-interface ProtobufField {
-  // marker
-}
+// Marker opaco para instâncias de protobuf Field (sem superfície própria usada aqui).
+type ProtobufField = object;
 interface ProtobufModule {
   Type: new (name: string, options?: object) => ProtobufType & ProtobufNamespace;
   Field: new (name: string, id: number, type: string, rule?: string) => ProtobufField;
