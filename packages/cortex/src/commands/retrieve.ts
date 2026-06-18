@@ -1,9 +1,10 @@
-import { buildToolStub } from "../mcp/tools/stubs.js";
+import { buildToolResponse } from "../mcp/tools/response.js";
+import { serializePayload } from "../output.js";
 
 export function runRetrieve(handle: string): number {
   try {
-    const payload = buildToolStub("retrieve", process.cwd(), { handle });
-    console.log(JSON.stringify(payload, null, 2));
+    const payload = buildToolResponse("retrieve", process.cwd(), { handle });
+    console.log(serializePayload(payload));
     return payload.state === "falha" ? 1 : 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

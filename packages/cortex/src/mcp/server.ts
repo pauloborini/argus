@@ -5,10 +5,11 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "./tool-registry.js";
-import { buildToolStub } from "./tools/stubs.js";
+import { MCP_SERVER_NAME, MCP_TOOL_NAMES, TOOL_INPUT_JSON_SCHEMAS, TOOL_DESCRIPTIONS } from "./tool-registry.js";
+import { buildToolResponseAsync, buildToolResponseTsv } from "./tools/response.js";
 import { CORTEX_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
+import { isManifestStaleForAutoSync } from "../discovery/staleness.js";
 import { runSync } from "../commands/sync.js";
 
 export interface McpServerOptions {
@@ -63,114 +64,14 @@ const TOOL_INPUT_SCHEMAS = {
   retrieve: z.object({
     handle: z.string().regex(/^rh_[a-f0-9]{16}$/),
   }).passthrough(),
+  semantic_search: z.object({
+    query: z.string().min(1),
+    mode: z.enum(["dense", "hybrid"]).optional(),
+    scope: z.string().min(1).optional(),
+    kind: z.string().min(1).optional(),
+    limit: z.number().int().positive().max(100).optional(),
+  }).passthrough(),
 } as const;
-
-const TOOL_INPUT_JSON_SCHEMAS = {
-  search: {
-    type: "object" as const,
-    properties: {
-      query: { type: "string" },
-      scope: { type: "string" },
-      kind: { type: "string" },
-      limit: { type: "integer", minimum: 1, maximum: 100 },
-    },
-    required: ["query"],
-    additionalProperties: true,
-  },
-  explore: {
-    type: "object" as const,
-    properties: {
-      target: { type: "string" },
-      mode: { type: "string", enum: ["symbol", "file", "topic"] },
-      depth: { type: "integer", minimum: 0, maximum: 5 },
-      include_tests: { type: "boolean" },
-      budget: { type: "integer", minimum: 1, maximum: 100 },
-    },
-    required: ["target"],
-    additionalProperties: true,
-  },
-  trace: {
-    type: "object" as const,
-    properties: {
-      from: { type: "string" },
-      to: { type: "string" },
-      direction: { type: "string", enum: ["forward", "backward", "both"] },
-      max_hops: { type: "integer", minimum: 1, maximum: 6 },
-    },
-    required: ["from"],
-    additionalProperties: true,
-  },
-  impact: {
-    type: "object" as const,
-    properties: {
-      target: { type: "string" },
-      direction: { type: "string", enum: ["dependents", "dependencies", "both"] },
-      depth: { type: "integer", minimum: 1, maximum: 8 },
-      include_tests: { type: "boolean" },
-      summary_only: { type: "boolean" },
-    },
-    required: ["target"],
-    additionalProperties: true,
-  },
-  files: {
-    type: "object" as const,
-    properties: {
-      pattern: { type: "string" },
-      max_depth: { type: "integer", minimum: 0, maximum: 32 },
-    },
-    additionalProperties: true,
-  },
-  status: {
-    type: "object" as const,
-    properties: {
-      path: { type: "string" },
-    },
-    additionalProperties: true,
-  },
-  diff_impact: {
-    type: "object" as const,
-    properties: {
-      scope: { type: "string", enum: ["unstaged", "staged", "all", "compare"] },
-      base_ref: { type: "string" },
-    },
-    additionalProperties: true,
-  },
-  pack_context: {
-    type: "object" as const,
-    properties: {
-      sources: {
-        type: "array",
-        items: { type: "string" },
-        minItems: 1,
-      },
-      goal: { type: "string" },
-      token_budget: { type: "integer", minimum: 1, maximum: 8000 },
-      style: { type: "string", enum: ["brief", "balanced", "deep"] },
-    },
-    required: ["sources", "goal", "token_budget"],
-    additionalProperties: true,
-  },
-  retrieve: {
-    type: "object" as const,
-    properties: {
-      handle: { type: "string", pattern: "^rh_[a-f0-9]{16}$" },
-    },
-    required: ["handle"],
-    additionalProperties: false,
-  },
-} as const;
-
-const TOOL_DESCRIPTIONS: Record<(typeof MCP_TOOL_NAMES)[number], string> = {
-  search: "Localizar símbolos indexados via FTS local",
-  explore: "Entender como algo funciona com contexto estrutural composto",
-  trace: "Fluxo/execução provável entre pontos indexados",
-  impact: "Blast radius provável de símbolo ou arquivo com risco resumido",
-  diff_impact: "Impacto provável do diff Git atual com áreas e testes afetados",
-  files: "Estrutura indexada do workspace",
-  pack_context: "Empacotar contexto curto para o modelo com refs rastreáveis e handle opcional",
-  retrieve: "Recuperar explicitamente conteúdo original de um retrieve_handle local",
-  status: "Saúde, staleness e confiança do índice local",
-};
 
 export function createMcpServer(options: McpServerOptions = {}): Server {
   const autoSync = options.autoSync !== false;
@@ -198,7 +99,10 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         try {
           // Erro de sync nunca derruba o servidor: a query degrada para `parcial`
           // + staleness_hint pela própria leitura do índice.
-          await runSync({ cwd: rootCwd });
+          // `quiet`: o transporte stdio do MCP é dono do stdout; qualquer
+          // `console.log` do sync intercalaria texto não-JSON no stream JSON-RPC
+          // e derrubaria a sessão. Diagnose vai para stderr.
+          await runSync({ cwd: rootCwd, quiet: true });
           cleared = true;
         } catch {
           /* deixa o estado de staleness sinalizar; não trava a tool call */
@@ -210,6 +114,29 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
       // Sync falhou e não limpou a flag: pára para não entrar em loop infinito.
       if (!cleared) {
         break;
+      }
+    }
+
+    // Fallback Bug 9: com daemon down e sem hooks a dirty-flag nunca é
+    // alimentada, então o laço acima nunca dispara e o índice ficaria stale
+    // para sempre. Probe barato (memoizado, compartilha o walk que a tool já
+    // fará): se o working tree divergiu do manifest, sincroniza uma vez via
+    // walk. Sem laço — `runSync` atualiza o manifest e o próximo probe é fresh;
+    // se falhar, a tool reporta stale honesto pela leitura do índice.
+    if (!hasDirtyPaths(rootCwd) && isManifestStaleForAutoSync(rootCwd)) {
+      if (inFlight) {
+        await inFlight;
+      } else {
+        inFlight = (async () => {
+          try {
+            await runSync({ cwd: rootCwd, quiet: true });
+          } catch {
+            /* deixa o estado de staleness sinalizar; não trava a tool call */
+          } finally {
+            inFlight = null;
+          }
+        })();
+        await inFlight;
       }
     }
   }
@@ -235,11 +162,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(
-              { state: "falha", message: `Tool desconhecida: ${toolName}` },
-              null,
-              2,
-            ),
+            text: JSON.stringify({ state: "falha", message: `Tool desconhecida: ${toolName}` }),
           },
         ],
         isError: true,
@@ -256,11 +179,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(
-              { state: "falha", message: "Input inválido para a tool" },
-              null,
-              2,
-            ),
+            text: JSON.stringify({ state: "falha", message: "Input inválido para a tool" }),
           },
         ],
         isError: true,
@@ -271,13 +190,31 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     await autoSyncIfDirty();
 
     const pathArg = typeof args.path === "string" ? args.path : process.cwd();
-    const payload = buildToolStub(toolName as (typeof MCP_TOOL_NAMES)[number], pathArg, args);
+
+    if (args.response_format === "tsv") {
+      const { text, truncationNote, isError } = buildToolResponseTsv(
+        toolName as (typeof MCP_TOOL_NAMES)[number],
+        pathArg,
+        args,
+      );
+      const fullText = truncationNote ? `${text}\n# ${truncationNote}` : text;
+      return {
+        content: [{ type: "text" as const, text: fullText }],
+        isError,
+      };
+    }
+
+    const payload = await buildToolResponseAsync(
+      toolName as (typeof MCP_TOOL_NAMES)[number],
+      pathArg,
+      args,
+    );
 
     return {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(payload, null, 2),
+          text: JSON.stringify(payload),
         },
       ],
     };

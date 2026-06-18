@@ -52,6 +52,13 @@ export interface SyncOptions {
   cwd?: string;
   /** Timeout de aquisição do lock de workspace (ms). Default em `withSyncLock`. */
   lockTimeoutMs?: number;
+  /**
+   * Suprime a diagnose informativa do stdout. Obrigatório quando invocado
+   * programaticamente sob um transporte que possui o stdout (auto-sync do MCP
+   * stdio): um `console.log` intercalaria texto não-JSON no stream JSON-RPC.
+   * Quando `true`, a diagnose vai para stderr (logs do daemon) em vez do stdout.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -191,6 +198,11 @@ function resolveDelta(
 
 export async function runSync(options: SyncOptions = {}): Promise<number> {
   const cwd = options.cwd ?? process.cwd();
+  // Diagnose informativa: stdout no uso normal (CLI/daemon), stderr quando
+  // `quiet` (caminho MCP, que não pode contaminar o stdout do JSON-RPC).
+  const emitInfo = options.quiet
+    ? (message: string) => console.error(message)
+    : (message: string) => console.log(message);
   let rootPath: string;
   let respectGitignore: boolean;
   try {
@@ -253,10 +265,10 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
         const { index, summary } = await buildStructuralIndex(nextManifest, rootPath);
         persistFullStructuralIndex(rootPath, index);
 
-        console.log(
+        emitInfo(
           `Sync concluído (${viaLabel}): +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
         );
-        console.log(
+        emitInfo(
           `Extração estrutural (rebuild): ${summary.files_parsed} arquivos, ${summary.symbol_count} símbolos (${summary.duration_ms}ms).`,
         );
       } else if (delta.pending_files_count > 0) {
@@ -283,18 +295,18 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
           removedPaths,
         });
 
-        console.log(
+        emitInfo(
           `Sync concluído (${viaLabel}): +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,
         );
-        console.log(
+        emitInfo(
           `Extração estrutural (delta): ${summary.files_parsed} arquivos reprocessados, ${summary.symbol_count} símbolos (${summary.duration_ms}ms).`,
         );
       } else {
-        console.log(`Sync concluído (${viaLabel}): índice já estava atualizado (0 alterações).`);
+        emitInfo(`Sync concluído (${viaLabel}): índice já estava atualizado (0 alterações).`);
       }
 
       if (resolved.dirtyPathsConsumed > 0) {
-        console.log(`Dirty-flag consumida: ${resolved.dirtyPathsConsumed} path(s) pendente(s).`);
+        emitInfo(`Dirty-flag consumida: ${resolved.dirtyPathsConsumed} path(s) pendente(s).`);
       }
       // Limpa a dirty-flag SÓ quando o sync reconciliou o trabalho que ela
       // representa. O caminho `watch` processa apenas os paths explícitos do

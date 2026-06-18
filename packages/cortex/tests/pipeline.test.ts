@@ -45,6 +45,26 @@ describe("pipeline de extração", () => {
     expect(index.extraction_limitations?.[0]).toContain("não suportada");
   });
 
+  it("rebuild Kotlin produz conjunto equivalente de símbolos (S32)", async () => {
+    const root = setupRepo({
+      "App.kt": "class App {\n  fun run() {}\n}\n",
+    });
+
+    const discovery = discoverFiles(root);
+    const manifest = buildDiscoveryManifest(root, fingerprintDiscoveredFiles(discovery.files));
+    const first = await buildStructuralIndex(manifest, root);
+    const second = await buildStructuralIndex(manifest, root);
+
+    const symbolKeys = (index: typeof first.index) =>
+      index.files
+        .filter((file) => file.relative_path === "App.kt")
+        .flatMap((file) => file.symbols.map((symbol) => `${symbol.kind}:${symbol.name}`))
+        .sort();
+
+    expect(symbolKeys(second.index)).toEqual(symbolKeys(first.index));
+    expect(first.index.coverage_by_language.kotlin?.coverage_level).toBe("full");
+  });
+
   it("delta add/remove/modify atualiza índice incrementalmente", async () => {
     const root = setupRepo({
       "a.ts": "export function alpha() {}\n",

@@ -35,6 +35,16 @@ try {
     throw new Error(`Smoke version mismatch: ${version} != ${expected}`);
   }
 
+  for (const bin of ["cortex", "atlas-cortex"]) {
+    const binVersion = execFileSync(join(workDir, "node_modules", ".bin", bin), ["--version"], {
+      cwd: workDir,
+      encoding: "utf8",
+    }).trim();
+    if (binVersion !== expected) {
+      throw new Error(`Smoke bin ${bin} version mismatch: ${binVersion} != ${expected}`);
+    }
+  }
+
   writeFileSync(join(workDir, "sample.ts"), "export function sample() { return 1; }\n");
   const cli = join(workDir, "node_modules", "atlas-cortex", "dist", "cli.js");
   execFileSync(process.execPath, [cli, "init"], { cwd: workDir, stdio: "inherit" });
@@ -58,12 +68,12 @@ try {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    if (tools.tools.length !== 9 || !tools.tools.some((tool) => tool.name === "retrieve")) {
+    if (tools.tools.length !== 10 || !tools.tools.some((tool) => tool.name === "retrieve")) {
       throw new Error(`Smoke MCP recebeu surface inesperada: ${tools.tools.map((tool) => tool.name)}`);
     }
     const status = await client.callTool({ name: "status", arguments: {} });
     const statusText = status.content.find((item) => item.type === "text");
-    if (!statusText || !statusText.text.includes('"initialized": true')) {
+    if (!statusText || !/"initialized"\s*:\s*true/.test(statusText.text)) {
       throw new Error("Smoke MCP não conseguiu consultar status do workspace.");
     }
   } catch (error) {
