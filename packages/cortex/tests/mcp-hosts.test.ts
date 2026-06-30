@@ -22,15 +22,26 @@ describe("mcp-hosts adapters", () => {
   let repo: string;
   let savedPiDir: string | undefined;
   let savedXdg: string | undefined;
+  let savedAntigravityDir: string | undefined;
+  let savedClaudeConfigHome: string | undefined;
+  let savedCursorConfigHome: string | undefined;
+  let savedZcodeConfigHome: string | undefined;
 
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), "cortex-hosts-"));
     savedPiDir = process.env.PI_CODING_AGENT_DIR;
     savedXdg = process.env.XDG_CONFIG_HOME;
-    // Aponta os escopos globais de pi/opencode para dentro do tmp (sem tocar a
-    // máquina real).
+    savedAntigravityDir = process.env.ANTIGRAVITY_CONFIG_DIR;
+    savedClaudeConfigHome = process.env.CLAUDE_CONFIG_HOME;
+    savedCursorConfigHome = process.env.CURSOR_CONFIG_HOME;
+    savedZcodeConfigHome = process.env.ZCODE_CONFIG_HOME;
+    // Aponta os escopos globais para dentro do tmp (sem tocar a máquina real).
     process.env.PI_CODING_AGENT_DIR = join(repo, "home-pi", "agent");
     process.env.XDG_CONFIG_HOME = join(repo, "home-config");
+    process.env.ANTIGRAVITY_CONFIG_DIR = join(repo, "home-antigravity");
+    process.env.CLAUDE_CONFIG_HOME = join(repo, "home-claude");
+    process.env.CURSOR_CONFIG_HOME = join(repo, "home-cursor");
+    process.env.ZCODE_CONFIG_HOME = join(repo, "home-zcode");
   });
 
   afterEach(() => {
@@ -39,14 +50,18 @@ describe("mcp-hosts adapters", () => {
     }
     process.env.PI_CODING_AGENT_DIR = savedPiDir;
     process.env.XDG_CONFIG_HOME = savedXdg;
+    process.env.ANTIGRAVITY_CONFIG_DIR = savedAntigravityDir;
+    process.env.CLAUDE_CONFIG_HOME = savedClaudeConfigHome;
+    process.env.CURSOR_CONFIG_HOME = savedCursorConfigHome;
+    process.env.ZCODE_CONFIG_HOME = savedZcodeConfigHome;
   });
 
-  it("claude-code: registra forma mcpServers em .mcp.json e é idempotente", () => {
+  it("claude-code: escopo global (default) registra em settings.json e é idempotente", () => {
     const first = registerMcpForHosts(repo, ["claude-code"]);
     expect(first[0].ok).toBe(true);
     expect(first[0].changed).toBe(true);
 
-    const path = join(repo, ".mcp.json");
+    const path = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
     const config = readJson(path);
     const servers = config.mcpServers as JsonRecord;
     expect(servers[MCP_SERVER_KEY]).toBeDefined();
@@ -56,23 +71,39 @@ describe("mcp-hosts adapters", () => {
     expect(second[0].message).toContain("já registrado");
   });
 
-  it("claude-code: preserva outros servers do usuário (merge por chave)", () => {
-    const path = join(repo, ".mcp.json");
+  it("claude-code: escopo local (opt-in) registra em .mcp.json", () => {
+    const res = registerMcpForHosts(repo, ["claude-code"], "local");
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+    expect(existsSync(join(repo, ".mcp.json"))).toBe(true);
+  });
+
+  it("claude-code: preserva outros servers e outras chaves do settings.json (merge por chave)", () => {
+    const claudeDir = join(process.env.CLAUDE_CONFIG_HOME!);
+    mkdirSync(claudeDir, { recursive: true });
+    const path = join(claudeDir, "settings.json");
     writeFileSync(
       path,
-      JSON.stringify({ mcpServers: { outro: { command: "x", args: [] } } }),
+      JSON.stringify({
+        mcpServers: { outro: { command: "x", args: [] } },
+        permissions: { allow: [] },
+      }),
       "utf-8",
     );
 
     registerMcpForHosts(repo, ["claude-code"]);
-    const servers = readJson(path).mcpServers as JsonRecord;
+    const config = readJson(path);
+    const servers = config.mcpServers as JsonRecord;
     expect(servers.outro).toBeDefined();
     expect(servers[MCP_SERVER_KEY]).toBeDefined();
+    expect(config.permissions).toBeDefined();
 
     unregisterMcpForHosts(repo, ["claude-code"]);
-    const after = readJson(path).mcpServers as JsonRecord;
-    expect(after.outro).toBeDefined();
-    expect(after[MCP_SERVER_KEY]).toBeUndefined();
+    const after = readJson(path);
+    const serversAfter = after.mcpServers as JsonRecord;
+    expect(serversAfter.outro).toBeDefined();
+    expect(serversAfter[MCP_SERVER_KEY]).toBeUndefined();
+    expect(after.permissions).toBeDefined();
   });
 
   it("opencode: registra forma mcp/type:local global e preserva outros mcp", () => {
@@ -113,6 +144,70 @@ describe("mcp-hosts adapters", () => {
     expect(existsSync(join(repo, ".mcp.json"))).toBe(true);
   });
 
+  it("antigravity: registra forma mcpServers em ANTIGRAVITY_CONFIG_DIR/mcp_config.json", () => {
+    const res = registerMcpForHosts(repo, ["antigravity"], "global");
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    const path = join(process.env.ANTIGRAVITY_CONFIG_DIR!, "mcp_config.json");
+    expect(existsSync(path)).toBe(true);
+    const config = readJson(path);
+    const servers = config.mcpServers as JsonRecord;
+    expect(servers[MCP_SERVER_KEY]).toBeDefined();
+
+    // Idempotência
+    const res2 = registerMcpForHosts(repo, ["antigravity"], "global");
+    expect(res2[0].changed).toBe(false);
+  });
+
+  it("cursor: escopo global (default) registra em CURSOR_CONFIG_HOME/.cursor/mcp.json e é idempotente", () => {
+    const res = registerMcpForHosts(repo, ["cursor"]);
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    const path = join(process.env.CURSOR_CONFIG_HOME!, ".cursor", "mcp.json");
+    expect(existsSync(path)).toBe(true);
+    const servers = readJson(path).mcpServers as JsonRecord;
+    expect(servers[MCP_SERVER_KEY]).toBeDefined();
+
+    const again = registerMcpForHosts(repo, ["cursor"]);
+    expect(again[0].changed).toBe(false);
+    expect(again[0].message).toContain("já registrado");
+  });
+
+  it("cursor: escopo local (opt-in) registra em .cursor/mcp.json do repo", () => {
+    const res = registerMcpForHosts(repo, ["cursor"], "local");
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+    expect(existsSync(join(repo, ".cursor", "mcp.json"))).toBe(true);
+  });
+
+  it("effectiveScope: cursor com scope global é nativo (não rebaixa)", () => {
+    const result = effectiveScope("cursor", "global");
+    expect(result.scope).toBe("global");
+    expect(result.downgraded).toBe(false);
+  });
+
+  it("unregister sem scope limpa ambos escopos do cursor (global + local)", () => {
+    registerMcpForHosts(repo, ["cursor"], "global");
+    registerMcpForHosts(repo, ["cursor"], "local");
+
+    const globalPath = join(process.env.CURSOR_CONFIG_HOME!, ".cursor", "mcp.json");
+    const localPath = join(repo, ".cursor", "mcp.json");
+    expect(existsSync(globalPath)).toBe(true);
+    expect(existsSync(localPath)).toBe(true);
+
+    const results = unregisterMcpForHosts(repo, ["cursor"]);
+    const okResults = results.filter((r) => r.ok);
+    expect(okResults.length).toBe(2);
+
+    const globalConfig = readJson(globalPath);
+    expect((globalConfig.mcpServers as JsonRecord)[MCP_SERVER_KEY]).toBeUndefined();
+
+    const localConfig = readJson(localPath);
+    expect((localConfig.mcpServers as JsonRecord)[MCP_SERVER_KEY]).toBeUndefined();
+  });
+
   it("resolveDefaultHosts inclui sempre claude-code e cursor", () => {
     const hosts = resolveDefaultHosts(repo, "global");
     expect(hosts).toContain("claude-code");
@@ -122,7 +217,7 @@ describe("mcp-hosts adapters", () => {
   it("config ilegível não sobrescreve às cegas (erro reportado)", () => {
     const path = join(repo, ".mcp.json");
     writeFileSync(path, "{ json quebrado", "utf-8");
-    const res = registerMcpForHosts(repo, ["claude-code"]);
+    const res = registerMcpForHosts(repo, ["claude-code"], "local");
     expect(res[0].ok).toBe(false);
     expect(res[0].message).toContain("ilegível");
   });
@@ -131,14 +226,14 @@ describe("mcp-hosts adapters", () => {
     const path = join(repo, ".mcp.json");
     const broken = "{ json quebrado >>>>";
     writeFileSync(path, broken, "utf-8");
-    registerMcpForHosts(repo, ["claude-code"]);
+    registerMcpForHosts(repo, ["claude-code"], "local");
     expect(readFileSync(path, "utf-8")).toBe(broken);
   });
 
-  it("effectiveScope: claude-code com scope global rebaixa para local", () => {
+  it("effectiveScope: claude-code com scope global não rebaixa (global suportado)", () => {
     const result = effectiveScope("claude-code", "global");
-    expect(result.scope).toBe("local");
-    expect(result.downgraded).toBe(true);
+    expect(result.scope).toBe("global");
+    expect(result.downgraded).toBe(false);
   });
 
   it("effectiveScope: pi com scope global não rebaixa", () => {
@@ -147,11 +242,14 @@ describe("mcp-hosts adapters", () => {
     expect(result.downgraded).toBe(false);
   });
 
-  it("registerMcpForHosts: escopo rebaixado inclui aviso na mensagem", () => {
+  it("claude-code: escopo global escreve em CLAUDE_CONFIG_HOME/settings.json", () => {
     const res = registerMcpForHosts(repo, ["claude-code"], "global");
     expect(res[0].ok).toBe(true);
-    expect(res[0].message).toContain("escopo forçado");
-    expect(res[0].message).toContain("local");
+    expect(res[0].changed).toBe(true);
+    const path = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
+    expect(existsSync(path)).toBe(true);
+    const servers = (readJson(path).mcpServers ?? {}) as JsonRecord;
+    expect(servers[MCP_SERVER_KEY]).toBeDefined();
   });
 
   it("opencode: config com comentários JSONC é parseada corretamente", () => {
@@ -173,7 +271,7 @@ describe("mcp-hosts adapters", () => {
     expect(config.mcp[MCP_SERVER_KEY]).toBeDefined();
   });
 
-  it("colisão pi local + claude-code: unregister de um preserva entry do outro", () => {
+  it("colisão pi local + claude-code local: unregister de um preserva entry do outro", () => {
     // Ambos registram no mesmo .mcp.json (scope local)
     registerMcpForHosts(repo, ["claude-code"], "local");
     registerMcpForHosts(repo, ["pi"], "local");
@@ -213,5 +311,25 @@ describe("mcp-hosts adapters", () => {
 
     const localConfig = JSON.parse(readFileSync(localPath, "utf-8"));
     expect(localConfig.mcpServers[MCP_SERVER_KEY]).toBeUndefined();
+  });
+
+  it("unregister sem scope limpa ambos escopos do claude-code (global + local)", () => {
+    registerMcpForHosts(repo, ["claude-code"], "global");
+    registerMcpForHosts(repo, ["claude-code"], "local");
+
+    const globalPath = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
+    const localPath = join(repo, ".mcp.json");
+    expect(existsSync(globalPath)).toBe(true);
+    expect(existsSync(localPath)).toBe(true);
+
+    const results = unregisterMcpForHosts(repo, ["claude-code"]);
+    const okResults = results.filter((r) => r.ok);
+    expect(okResults.length).toBe(2);
+
+    const globalConfig = readJson(globalPath);
+    expect((globalConfig.mcpServers as JsonRecord)[MCP_SERVER_KEY]).toBeUndefined();
+
+    const localConfig = readJson(localPath);
+    expect((localConfig.mcpServers as JsonRecord)[MCP_SERVER_KEY]).toBeUndefined();
   });
 });
