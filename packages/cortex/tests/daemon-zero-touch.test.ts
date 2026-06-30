@@ -290,7 +290,7 @@ describe("S30 — daemon de auto-sync + instalação zero-toque", () => {
         JSON.stringify({ mcpServers: { outro: { command: "x", args: [] } } }, null, 2),
       );
 
-      const first = registerMcpForHosts(root, ["claude-code"]);
+      const first = registerMcpForHosts(root, ["claude-code"], "local");
       expect(first[0].ok).toBe(true);
       expect(first[0].changed).toBe(true);
 
@@ -299,15 +299,15 @@ describe("S30 — daemon de auto-sync + instalação zero-toque", () => {
       expect(config.mcpServers[MCP_SERVER_KEY]).toBeDefined();
 
       // Idempotente: segunda chamada não muda nada.
-      const second = registerMcpForHosts(root, ["claude-code"]);
+      const second = registerMcpForHosts(root, ["claude-code"], "local");
       expect(second[0].changed).toBe(false);
 
       // Cursor escreve em .cursor/mcp.json.
-      registerMcpForHosts(root, ["cursor"]);
+      registerMcpForHosts(root, ["cursor"], "local");
       expect(existsSync(join(root, ".cursor", "mcp.json"))).toBe(true);
 
       // Unregister remove só a chave do Cortex.
-      const un = unregisterMcpForHosts(root, ["claude-code"]);
+      const un = unregisterMcpForHosts(root, ["claude-code"], "local");
       expect(un[0].changed).toBe(true);
       const after = JSON.parse(readFileSync(join(root, ".mcp.json"), "utf-8"));
       expect(after.mcpServers.outro).toBeDefined();
@@ -324,7 +324,7 @@ describe("S30 — daemon de auto-sync + instalação zero-toque", () => {
       writeFileSync(join(root, "sample.ts"), "export const sample = 1;\n");
       writeFileSync(join(root, ".mcp.json"), "{ json inválido");
 
-      const code = await runInstall({ hosts: ["claude-code"], noDaemon: true });
+      const code = await runInstall({ hosts: ["claude-code"], scope: "local", noDaemon: true });
       expect(code).toBe(1);
     });
   });
