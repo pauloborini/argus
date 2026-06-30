@@ -1,12 +1,12 @@
 <!-- Language: **English** · [Português](COMMANDS.pt-BR.md) -->
 
-# Atlas Cortex — Command reference
+# Argus — Command reference
 
 The complete, no-prose list of commands. For *what it is* and *why*, read the
 **[README](README.md)**.
 
-All examples assume the `cortex` binary (from `npm install -g atlas-cortex`).
-Without a global install, prefix any command with `npx atlas-cortex …`.
+All examples assume the `argus` binary (from `npm install -g argus`).
+Without a global install, prefix any command with `npx argus …`.
 
 ## Conventions
 
@@ -29,7 +29,7 @@ Without a global install, prefix any command with `npx atlas-cortex …`.
 
 ## Lifecycle
 
-### `cortex install` ⭐ (entry-point command)
+### `argus install` ⭐ (entry-point command)
 Zero-touch wiring of a repository, in **one command**: prepares the workspace,
 builds the index, writes the agent rules (CLAUDE.md/AGENTS.md), registers the
 MCP server in detected hosts and registers the repo with the auto-sync daemon
@@ -40,15 +40,15 @@ idiom) and **auto-detects** Codex, OpenCode, Pi, Antigravity and ZCode when
 installed on this machine (binary on PATH or config directory present).
 
 ```bash
-cortex install                     # full wiring (auto-detects hosts)
-cortex install --no-daemon         # index + MCP only (no daemon/service)
-cortex install --no-mcp            # don't register MCP in hosts
-cortex install --hosts claude-code,codex  # restrict MCP hosts (CSV)
-cortex install --global            # register MCP globally (all projects)
-cortex install --local             # register MCP in this repo only
-cortex install --scope global      # same as --global
-cortex install --scope local       # same as --local
-cortex install --with-hooks        # add git hooks as a daemon-down fallback
+argus install                     # full wiring (auto-detects hosts)
+argus install --no-daemon         # index + MCP only (no daemon/service)
+argus install --no-mcp            # don't register MCP in hosts
+argus install --hosts claude-code,codex  # restrict MCP hosts (CSV)
+argus install --global            # register MCP globally (all projects)
+argus install --local             # register MCP in this repo only
+argus install --scope global      # same as --global
+argus install --scope local       # same as --local
+argus install --with-hooks        # add git hooks as a daemon-down fallback
 ```
 
 **Supported hosts and where each registers the MCP:**
@@ -61,7 +61,7 @@ cortex install --with-hooks        # add git hooks as a daemon-down fallback
 | `opencode` | JSON `mcp`/`type:local` | global | `~/.config/opencode/opencode.json` (`XDG_CONFIG_HOME`) or repo |
 | `pi` | JSON `mcpServers` | global | `~/.pi/agent/mcp.json` (`PI_CODING_AGENT_DIR`) or repo |
 | `antigravity` | JSON `mcpServers` | global | `~/.gemini/antigravity-ide/mcp_config.json` (`ANTIGRAVITY_CONFIG_DIR`) |
-| `zcode` | Plugin filesystem + JSON `mcpServers` | global | `~/.zcode/cli/plugins/cache/atlas-cortex/<version>/.zcode-plugin/plugin.json` (`ZCODE_CONFIG_HOME`) |
+| `zcode` | Plugin filesystem + JSON `mcpServers` | global | `~/.zcode/cli/plugins/cache/argus/<version>/.zcode-plugin/plugin.json` (`ZCODE_CONFIG_HOME`) |
 
 In global mode the MCP is registered with an **absolute path** (cwd-independent),
 valid across all projects. Existing config is always **merged** — other user
@@ -71,51 +71,51 @@ as "not detected" without a hard failure.
 
 After this you just code — the daemon keeps the index fresh on its own.
 
-### `cortex uninstall`
+### `argus uninstall`
 Reverts the repo wiring: removes the MCP registration from hosts (all scopes by
 default — global + local), the agent-rules block, git hooks and the daemon
 registration. When the **last workspace** is uninstalled, the auto-start user
-service (launchd/systemd) is also removed. `--purge` also removes `.cortex/`.
+service (launchd/systemd) is also removed. `--purge` also removes `.argus/`.
 
 Use `--scope` to limit cleanup to a single scope, `--local`/`--global` as
 shorthand, or `--hosts` to target specific hosts.
 
 ```bash
-cortex uninstall                     # full revert (all hosts, all scopes)
-cortex uninstall --global            # clear only the global MCP registration
-cortex uninstall --local             # clear only this repo's MCP registration
-cortex uninstall --scope global      # same as --global
-cortex uninstall --hosts codex       # clear specific hosts only (CSV)
-cortex uninstall --hosts opencode --scope global  # clear opencode global only
-cortex uninstall --purge             # also removes .cortex/
+argus uninstall                     # full revert (all hosts, all scopes)
+argus uninstall --global            # clear only the global MCP registration
+argus uninstall --local             # clear only this repo's MCP registration
+argus uninstall --scope global      # same as --global
+argus uninstall --hosts codex       # clear specific hosts only (CSV)
+argus uninstall --hosts opencode --scope global  # clear opencode global only
+argus uninstall --purge             # also removes .argus/
 ```
 
-### `cortex init`
-Low-level primitive. Prepares the workspace — creates `.cortex/` in the target
+### `argus init`
+Low-level primitive. Prepares the workspace — creates `.argus/` in the target
 repo (`workspace.json`, `file-manifest.json`). Idempotent. Prefer
-`cortex install` for full wiring.
+`argus install` for full wiring.
 
 ```bash
-cortex init
+argus init
 ```
 
-### `cortex index`
+### `argus index`
 Full rebuild of the file manifest and the SQLite + FTS structural index
-(`.cortex/index.db`). Run once after `init`, and again whenever you want a
+(`.argus/index.db`). Run once after `init`, and again whenever you want a
 clean rebuild.
 
 ```bash
-cortex index
+argus index
 ```
 
-### `cortex sync`
+### `argus sync`
 Incremental update — only the changed delta. Cheaper than `index`. Fails with
-`E_INDEX_MISSING` if no manifest exists yet (run `cortex index` first).
+`E_INDEX_MISSING` if no manifest exists yet (run `argus index` first).
 
 ```bash
-cortex sync
-cortex sync --since HEAD~1   # git-delta: skip the full filesystem walk
-cortex sync --full           # force a full walk (ignore git-delta/dirty-flag)
+argus sync
+argus sync --since HEAD~1   # git-delta: skip the full filesystem walk
+argus sync --full           # force a full walk (ignore git-delta/dirty-flag)
 ```
 
 | Flag | Meaning |
@@ -127,33 +127,33 @@ Output reports the path taken — `via full` · `via git-delta` · `via dirty-fl
 · `via watch` (explicit-paths delta from the daemon) — and, when a dirty-flag
 was consumed, the number of pending paths.
 
-### `cortex embed`
+### `argus embed`
 Generate semantic embeddings of the structural index — **optional and
 off-by-default**. Powers the `semantic_search` tool. Local bge-small model
 (downloads on first use, transformers.js cache), int8-quantized vectors stored
 in the same SQLite. **Not auto-synced**: re-run after meaningful changes (a full
-`cortex index` clears the vectors; an incremental `cortex sync` leaves them
+`argus index` clears the vectors; an incremental `argus sync` leaves them
 stale, signalled at search time).
 
 ```bash
-cortex embed
-cortex embed --batch 64   # inference batch size (default 32)
+argus embed
+argus embed --batch 64   # inference batch size (default 32)
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--batch <n>` | Symbols per inference batch. |
 
-### `cortex scip import`
+### `argus scip import`
 Import precise edges from a SCIP index file — **optional and off-by-default**.
 SCIP (Sourcegraph Code Intelligence Protocol) provides globally-stable symbol IDs
 with accurate go-to-def/find-refs. When imported, SCIP edges override heuristic
-tree-sitter edges for covered symbol pairs. Requires `cortex index` first; re-run
+tree-sitter edges for covered symbol pairs. Requires `argus index` first; re-run
 after reindex (reindex clears SCIP edges).
 
 ```bash
-cortex scip import                     # default: <workspace>/index.scip
-cortex scip import ./build/index.scip  # explicit path
+argus scip import                     # default: <workspace>/index.scip
+argus scip import ./build/index.scip  # explicit path
 ```
 
 | Argument | Meaning |
@@ -164,12 +164,12 @@ Output: count of imported edges, matched/missing files, covered symbols.
 SCIP requires a build step in CI (`scip-typescript`, `scip-python`, etc.) — gain
 is conditional on the repo emitting `index.scip`.
 
-### `cortex status`
+### `argus status`
 Health and staleness of the local index.
 
 ```bash
-cortex status
-cortex status --path src/billing
+argus status
+argus status --path src/billing
 ```
 
 | Flag | Meaning |
@@ -183,13 +183,13 @@ Key output: `staleness` (`fresh` · `stale` · `unknown`), `pending_files_count`
 
 ## Retrieval
 
-### `cortex search <query>`
+### `argus search <query>`
 Lexical + structural symbol search over the local FTS index.
 
 ```bash
-cortex search "calculateTotal"
-cortex search "calculate" --scope src/ --kind function --limit 5
-cortex search "runSync" --format tsv | cut -f1,2   # pipe-friendly TSV
+argus search "calculateTotal"
+argus search "calculate" --scope src/ --kind function --limit 5
+argus search "runSync" --format tsv | cut -f1,2   # pipe-friendly TSV
 ```
 
 | Flag | Meaning |
@@ -206,17 +206,17 @@ in one file and let you jump straight to them.
 TSV columns: `name`, `path`, `kind`, `line`, `score`. Truncates at 50 results
 (note goes to stderr); add `--limit` to narrow the set first.
 
-### `cortex semantic-search <query>`
+### `argus semantic-search <query>`
 Search by **meaning** via embeddings (local bge-small), fused with lexical via
 RRF. Use when `search` comes back empty or intent doesn't match literal names —
 e.g. *"OS file-watcher limit reached"* finds `watcherExhaustionHint` without the
-term in its name. Requires `cortex embed` first (off-by-default); with no
+term in its name. Requires `argus embed` first (off-by-default); with no
 vectors it degrades honestly (`W_EMBEDDINGS_UNAVAILABLE`) and falls back to
 lexical results.
 
 ```bash
-cortex semantic-search "where do we handle the OS file-watcher limit"
-cortex semantic-search "combine lexical and dense ranking" --mode dense --limit 5
+argus semantic-search "where do we handle the OS file-watcher limit"
+argus semantic-search "combine lexical and dense ranking" --mode dense --limit 5
 ```
 
 | Flag | Meaning |
@@ -230,13 +230,13 @@ Same candidate shape as `search`, with `match_reason` ∈ `semantic` · `lexical
 `hybrid`. `state` may be `stale` (`W_EMBEDDINGS_STALE`) when the index moved
 ahead of the last `embed` — results still served with the warning.
 
-### `cortex files`
+### `argus files`
 List the indexed structure of the workspace.
 
 ```bash
-cortex files
-cortex files --pattern src --max-depth 3
-cortex files --format tsv | awk -F'\t' '$3 > 10'   # files with >10 symbols
+argus files
+argus files --pattern src --max-depth 3
+argus files --format tsv | awk -F'\t' '$3 > 10'   # files with >10 symbols
 ```
 
 | Flag | Meaning |
@@ -250,15 +250,15 @@ Output: a `tree` of paths with `symbol_counts`.
 TSV columns: `path`, `language`, `symbol_count`. Truncates at 50 results
 (note goes to stderr).
 
-### `cortex explore <target>`
+### `argus explore <target>`
 Composite structural context for a symbol, file, or topic — central symbols,
 imports, relevant files, and line-ranged snippets in one shot. This is the
 go-to tool for "understand this area".
 
 ```bash
-cortex explore src/mcp/engine.ts --mode file
-cortex explore calculateTotal --mode symbol --depth 2
-cortex explore "billing" --mode topic --include-tests
+argus explore src/mcp/engine.ts --mode file
+argus explore calculateTotal --mode symbol --depth 2
+argus explore "billing" --mode topic --include-tests
 ```
 
 | Flag | Meaning |
@@ -268,12 +268,12 @@ cortex explore "billing" --mode topic --include-tests
 | `--include-tests` | Include test files when relevant. |
 | `--budget <n>` | Internal candidate budget. |
 
-### `cortex trace --from <target>`
+### `argus trace --from <target>`
 Likely flow between indexed points, with explicit uncertainty.
 
 ```bash
-cortex trace --from calculateTotal
-cortex trace --from calculateTotal --to renderInvoice --direction forward --max-hops 4
+argus trace --from calculateTotal
+argus trace --from calculateTotal --to renderInvoice --direction forward --max-hops 4
 ```
 
 | Flag | Meaning |
@@ -285,12 +285,12 @@ cortex trace --from calculateTotal --to renderInvoice --direction forward --max-
 
 Output: `paths`, `files`, `symbols`, `uncertainty_points`.
 
-### `cortex impact <target>`
+### `argus impact <target>`
 Likely blast radius of changing a symbol or file.
 
 ```bash
-cortex impact calculateTotal --direction dependents
-cortex impact src/billing.ts --depth 2 --include-tests --summary-only
+argus impact calculateTotal --direction dependents
+argus impact src/billing.ts --depth 2 --include-tests --summary-only
 ```
 
 | Flag | Meaning |
@@ -303,12 +303,12 @@ cortex impact src/billing.ts --depth 2 --include-tests --summary-only
 Output: `direct_affected`, `indirect_affected`, `files`, `tests`,
 `risk_summary`.
 
-### `cortex diff-impact`
+### `argus diff-impact`
 Likely impact of the current Git diff — changed symbols and affected tests.
 
 ```bash
-cortex diff-impact --scope all
-cortex diff-impact --scope compare --base-ref main
+argus diff-impact --scope all
+argus diff-impact --scope compare --base-ref main
 ```
 
 | Flag | Meaning |
@@ -323,12 +323,12 @@ Output: `changed_files`, `changed_symbols`, `affected_areas`,
 
 ## Context packing
 
-### `cortex pack-context`
+### `argus pack-context`
 Pack short, useful context for the model. May return a `retrieve_handle` when
 the budget forces truncation.
 
 ```bash
-cortex pack-context \
+argus pack-context \
   --sources utils.ts,src/billing.ts \
   --goal "understand the refactor" \
   --token-budget 400 \
@@ -342,25 +342,25 @@ cortex pack-context \
 | `--token-budget <n>` | **Required.** Approx. max pack size. |
 | `--style <style>` | `brief` · `balanced` · `deep`. |
 
-### `cortex retrieve <handle>`
+### `argus retrieve <handle>`
 Rehydrate the original content stored behind a `retrieve_handle`. Confined to
 the same workspace; handle format is `rh_<16 hex>`.
 
 ```bash
-cortex retrieve rh_0123456789abcdef
+argus retrieve rh_0123456789abcdef
 ```
 
 ---
 
 ## MCP server
 
-### `cortex serve --mcp`
+### `argus serve --mcp`
 Start the stdio MCP server. Exposes nine tools (`search`, `explore`, `trace`,
 `impact`, `diff_impact`, `files`, `pack_context`, `retrieve`, `status`).
 
 ```bash
-cortex serve --mcp
-cortex serve --mcp --no-auto-sync   # disable auto-sync before tool calls
+argus serve --mcp
+argus serve --mcp --no-auto-sync   # disable auto-sync before tool calls
 ```
 
 | Flag | Meaning |
@@ -380,27 +380,27 @@ Configure your agent/IDE (see [README → Use it as an MCP server](README.md#use
 
 The daemon watches the filesystem (FSEvents/inotify) and keeps the index fresh
 in real time — no manual command, editor-agnostic. A single user daemon watches
-**all** repos registered via `cortex install`. Bursts of saves or branch switches
+**all** repos registered via `argus install`. Bursts of saves or branch switches
 are coalesced into a single incremental sync (explicit-paths delta, never a full
 walk).
 
 ```bash
-cortex daemon status     # watched workspaces and each one's last sync
-cortex daemon start      # run in background (the service usually does this)
-cortex daemon stop
-cortex daemon restart
-cortex daemon reload     # reload the registry without restarting (after a new install)
+argus daemon status     # watched workspaces and each one's last sync
+argus daemon start      # run in background (the service usually does this)
+argus daemon stop
+argus daemon restart
+argus daemon reload     # reload the registry without restarting (after a new install)
 ```
 
-`cortex install` already installs and starts the user service (launchd on macOS,
+`argus install` already installs and starts the user service (launchd on macOS,
 systemd --user on Linux) with login auto-start. To manage the service directly:
 
 ```bash
-cortex daemon install-service
-cortex daemon uninstall-service
+argus daemon install-service
+argus daemon uninstall-service
 ```
 
-When the **last workspace** is uninstalled (`cortex uninstall`), the user service
+When the **last workspace** is uninstalled (`argus uninstall`), the user service
 is automatically removed — no manual cleanup needed.
 
 If the daemon is stopped the index does **not** go stale: the optional git hooks
@@ -414,35 +414,35 @@ Keep the index fresh without thinking about it: the daemon syncs on each event;
 as a fallback, git hooks mark what changed and the MCP server syncs lazily before
 answering. Nothing blocks your commit.
 
-### `cortex hook install` / `cortex hook uninstall`
+### `argus hook install` / `argus hook uninstall`
 Install (or remove) git hooks (`post-commit`, `post-merge`, `post-checkout`)
 that **only mark the index dirty** — they never run a sync, so commits never
 stall. The binary path is embedded in the script (works in GUI git clients and
-CI). Idempotent; pre-existing hooks are preserved (cortex writes a delimited
+CI). Idempotent; pre-existing hooks are preserved (argus writes a delimited
 block).
 
 ```bash
-cortex hook install
-cortex hook uninstall
+argus hook install
+argus hook uninstall
 ```
 
-### `cortex agent-rules install` / `cortex agent-rules uninstall`
-Write (or remove) a delimited Atlas Cortex block in `CLAUDE.md` and `AGENTS.md`,
-instructing agents to use the cortex tools and trust the auto-sync. Append-only
+### `argus agent-rules install` / `argus agent-rules uninstall`
+Write (or remove) a delimited Argus block in `CLAUDE.md` and `AGENTS.md`,
+instructing agents to use the argus tools and trust the auto-sync. Append-only
 and idempotent — your existing content is never overwritten.
 
 ```bash
-cortex agent-rules install
-cortex agent-rules uninstall
+argus agent-rules install
+argus agent-rules uninstall
 ```
 
-### `cortex mark-dirty`
+### `argus mark-dirty`
 Internal command invoked by the installed hooks. Marks the index dirty from a
 git event; if the git delta cannot be resolved, marks `force_full` so the next
 sync falls back to a full walk. You normally never call this by hand.
 
 ```bash
-cortex mark-dirty --since HEAD~1
+argus mark-dirty --since HEAD~1
 ```
 
 ---
@@ -453,7 +453,7 @@ Run from the monorepo root.
 
 | Command | Purpose |
 |---|---|
-| `npm run build` | Compile `packages/cortex`. |
+| `npm run build` | Compile `packages/argus`. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run test` | Unit tests (vitest). |
 | `npm run lint` | ESLint. |
@@ -472,9 +472,9 @@ Release with `SHA256SUMS`. The tag version must match root, runtime and plugin.
 
 | Symptom | Fix |
 |---|---|
-| Index stale | `cortex sync` |
-| Index missing/corrupted | delete `.cortex/index.db`, then `cortex index` |
-| Invalid workspace | keep code, delete `.cortex/`, then `cortex init` + `cortex index` |
-| Corrupted handle | re-pack with `cortex pack-context` (don't edit `.cortex/packed-handles`) |
+| Index stale | `argus sync` |
+| Index missing/corrupted | delete `.argus/index.db`, then `argus index` |
+| Invalid workspace | keep code, delete `.argus/`, then `argus init` + `argus index` |
+| Corrupted handle | re-pack with `argus pack-context` (don't edit `.argus/packed-handles`) |
 
-> Project files are never modified by recovery — only `.cortex/` is touched.
+> Project files are never modified by recovery — only `.argus/` is touched.

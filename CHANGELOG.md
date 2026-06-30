@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.0 - 2026-06-30
+
+- BREAKING: rename do produto de Atlas Cortex para Argus (binário, nome de pacote, diretório de estado `.cortex/`→`.argus/`, chave de MCP server, todos os comandos de instalação).
+
 ## 1.1.0 - 2026-06-30
 
 - novos adapters MCP: opencode, pi, antigravity, zcode (total de 7 hosts suportados)

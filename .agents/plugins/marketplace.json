@@ -1,14 +1,14 @@
 {
-  "name": "atlas-cortex",
+  "name": "argus",
   "interface": {
-    "displayName": "Atlas Cortex"
+    "displayName": "Argus"
   },
   "plugins": [
     {
-      "name": "atlas-cortex",
+      "name": "argus",
       "source": {
         "source": "local",
-        "path": "./plugins/atlas-cortex"
+        "path": "./plugins/argus"
       },
       "policy": {
         "installation": "AVAILABLE",

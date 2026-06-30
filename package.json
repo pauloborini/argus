@@ -1,17 +1,17 @@
 {
-  "name": "atlas-cortex",
-  "version": "1.1.0",
+  "name": "argus",
+  "version": "2.0.0",
   "private": true,
-  "description": "Atlas Cortex — motor local de code retrieval e context packing para agentes",
+  "description": "Argus — motor local de code retrieval e context packing para agentes",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=atlas-cortex",
-    "benchmark:mvp": "npm run benchmark:mvp --workspace=atlas-cortex",
-    "test": "npm run test --workspace=atlas-cortex",
-    "lint": "npm run lint --workspace=atlas-cortex",
-    "typecheck": "npm run typecheck --workspace=atlas-cortex",
+    "build": "npm run build --workspace=argus",
+    "benchmark:mvp": "npm run benchmark:mvp --workspace=argus",
+    "test": "npm run test --workspace=argus",
+    "lint": "npm run lint --workspace=argus",
+    "typecheck": "npm run typecheck --workspace=argus",
     "validate": "npm run typecheck && npm test && npm run lint && npm run build",
     "smoke:package": "node scripts/smoke-package.mjs",
     "homologate": "npm run build && node scripts/homologate.mjs",

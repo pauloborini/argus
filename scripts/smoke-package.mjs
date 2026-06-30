@@ -7,8 +7,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const packageDir = join(repoRoot, "packages", "cortex");
-const workDir = mkdtempSync(join(tmpdir(), "atlas-cortex-smoke-"));
+const packageDir = join(repoRoot, "packages", "argus");
+const workDir = mkdtempSync(join(tmpdir(), "argus-smoke-"));
 let tarball;
 
 try {
@@ -27,7 +27,7 @@ try {
 
   const version = execFileSync(
     process.execPath,
-    [join(workDir, "node_modules", "atlas-cortex", "dist", "cli.js"), "--version"],
+    [join(workDir, "node_modules", "argus", "dist", "cli.js"), "--version"],
     { cwd: workDir, encoding: "utf8" },
   ).trim();
   const expected = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).version;
@@ -35,7 +35,7 @@ try {
     throw new Error(`Smoke version mismatch: ${version} != ${expected}`);
   }
 
-  for (const bin of ["cortex", "atlas-cortex"]) {
+  for (const bin of ["argus"]) {
     const binVersion = execFileSync(join(workDir, "node_modules", ".bin", bin), ["--version"], {
       cwd: workDir,
       encoding: "utf8",
@@ -46,7 +46,7 @@ try {
   }
 
   writeFileSync(join(workDir, "sample.ts"), "export function sample() { return 1; }\n");
-  const cli = join(workDir, "node_modules", "atlas-cortex", "dist", "cli.js");
+  const cli = join(workDir, "node_modules", "argus", "dist", "cli.js");
   execFileSync(process.execPath, [cli, "init"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "index"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "search", "sample"], {
@@ -64,7 +64,7 @@ try {
   transport.stderr?.on("data", (chunk) => {
     mcpStderr += String(chunk);
   });
-  const client = new Client({ name: "atlas-cortex-package-smoke", version: expected });
+  const client = new Client({ name: "argus-package-smoke", version: expected });
   try {
     await client.connect(transport);
     const tools = await client.listTools();
@@ -84,7 +84,7 @@ try {
   } finally {
     await client.close();
   }
-  console.log(`Smoke do tarball aprovado: atlas-cortex@${version}`);
+  console.log(`Smoke do tarball aprovado: argus@${version}`);
 } finally {
   rmSync(workDir, { recursive: true, force: true });
   if (tarball) {

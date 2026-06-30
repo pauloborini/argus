@@ -1,6 +1,6 @@
 # Procedimento de Release (Patch / Minor / Major)
 
-Procedimento completo de ponta a ponta para publicar uma nova versao do `atlas-cortex` no npm, com tag Git, release no GitHub e CI verde.
+Procedimento completo de ponta a ponta para publicar uma nova versao do `argus` no npm, com tag Git, release no GitHub e CI verde.
 
 ---
 
@@ -9,7 +9,7 @@ Procedimento completo de ponta a ponta para publicar uma nova versao do `atlas-c
 - [ ] Node.js `>=20` instalado (CI de release usa Node 24)
 - [ ] npm `>=10` (release CI atualiza para `npm@latest`)
 - [ ] `gh` CLI autenticado (`gh auth status`)
-- [ ] Acesso de escrita ao repo GitHub `pauloborini/atlas-cortex`
+- [ ] Acesso de escrita ao repo GitHub `pauloborini/argus`
 - [ ] Secret `NPM_TOKEN` configurado no repo GitHub (token npm Automation, nao Publish)
 - [ ] Workflow `.github/workflows/release.yml` usa `registry-url: https://registry.npmjs.org`
 - [ ] Repo privado: publish **sem** `--provenance` (so adicionar quando o repo for publico)
@@ -64,7 +64,7 @@ gh run list --branch develop --limit 5 --json status,conclusion,displayTitle,hea
 Verifique a versao atual publicada:
 
 ```bash
-npm view atlas-cortex version dist-tags --json
+npm view argus version dist-tags --json
 ```
 
 Exemplo de saida:
@@ -98,30 +98,30 @@ Sao **6 arquivos + lockfile** que precisam ser atualizados com a nova versao:
 "version": "1.0.2"
 ```
 
-### 6.2 `packages/cortex/package.json` (pacote publicavel)
+### 6.2 `packages/argus/package.json` (pacote publicavel)
 
 ```json
 "version": "1.0.2"
 ```
 
-### 6.3 `packages/cortex/src/version.ts`
+### 6.3 `packages/argus/src/version.ts`
 
 ```typescript
-export const CORTEX_VERSION = "1.0.2";
+export const ARGUS_VERSION = "1.0.2";
 ```
 
-### 6.4 `plugins/atlas-cortex/.codex-plugin/plugin.json`
+### 6.4 `plugins/argus/.codex-plugin/plugin.json`
 
 ```json
 "version": "1.0.2"
 ```
 
-### 6.5 `plugins/atlas-cortex/.mcp.json`
+### 6.5 `plugins/argus/.mcp.json`
 
 Atualizar a referencia de versao no argumento `npx`:
 
 ```json
-"args": ["-y", "atlas-cortex@1.0.2", "serve", "--mcp"]
+"args": ["-y", "argus@1.0.2", "serve", "--mcp"]
 ```
 
 Atencao: o `release:check` **nao** valida este arquivo atualmente — confira manualmente.
@@ -150,15 +150,15 @@ npm install --package-lock-only
 ## 7. Varrer drift de versao residual
 
 ```bash
-rg -n '"version":|CORTEX_VERSION|atlas-cortex@[0-9]+\.[0-9]+\.[0-9]+' \
+rg -n '"version":|ARGUS_VERSION|argus@[0-9]+\.[0-9]+\.[0-9]+' \
   package.json packages plugins \
   README.md README.pt-BR.md \
   COMMANDS.md COMMANDS.pt-BR.md \
   CHANGELOG.md package-lock.json \
-  plugins/atlas-cortex/.mcp.json
+  plugins/argus/.mcp.json
 ```
 
-Regra: exemplos publicos em README e COMMANDS devem usar `atlas-cortex@latest`, exceto quando a doc ensina pinagem explicita.
+Regra: exemplos publicos em README e COMMANDS devem usar `argus@latest`, exceto quando a doc ensina pinagem explicita.
 
 ---
 
@@ -169,7 +169,7 @@ npm ci
 npm run validate          # typecheck + test + lint + build
 npm run smoke:package     # instala tarball em dir limpo, testa CLI + MCP
 npm run release:check     # verifica 7 fontes de versao identicas
-npm pack --workspace=atlas-cortex --dry-run --json
+npm pack --workspace=argus --dry-run --json
 ```
 
 Se `smoke:package` falhar localmente por `node-gyp` e path com espaco/parenteses:
@@ -196,16 +196,16 @@ Adicionar apenas os arquivos alterados do bump:
 git add \
   package.json \
   package-lock.json \
-  packages/cortex/package.json \
-  packages/cortex/src/version.ts \
-  plugins/atlas-cortex/.codex-plugin/plugin.json \
-  plugins/atlas-cortex/.mcp.json \
+  packages/argus/package.json \
+  packages/argus/src/version.ts \
+  plugins/argus/.codex-plugin/plugin.json \
+  plugins/argus/.mcp.json \
   CHANGELOG.md
 
 git commit -m "chore(release): bump para 1.0.2"
 ```
 
-Nao adicionar artefatos gerados: `dist/`, `dist-release/`, `node_modules/`, `.cortex/`.
+Nao adicionar artefatos gerados: `dist/`, `dist-release/`, `node_modules/`, `.argus/`.
 
 ---
 
@@ -227,12 +227,12 @@ gh pr create \
 - [ ] \`release:check\` passa
 - [ ] \`validate\` passa
 - [ ] \`smoke:package\` passa
-- [ ] \`npm pack --dry-run\` gera \`atlas-cortex-1.0.2.tgz\`
+- [ ] \`npm pack --dry-run\` gera \`argus-1.0.2.tgz\`
 - [ ] CHANGELOG atualizado
 - [ ] Lockfile sincronizado"
 ```
 
-Ou abra manualmente em `https://github.com/pauloborini/atlas-cortex/pull/new/release/v1.0.2` com base `main`.
+Ou abra manualmente em `https://github.com/pauloborini/argus/pull/new/release/v1.0.2` com base `main`.
 
 ---
 
@@ -317,7 +317,7 @@ A release CI executa nesta ordem:
 3. `npm run smoke:package` (tarball em dir limpo, CLI + MCP)
 4. `npm run release:check` (7 fontes de versao identicas + tag match)
 5. `npm pack` em `dist-release/` com `SHA256SUMS`
-6. **`npm publish --workspace=atlas-cortex --access public`**
+6. **`npm publish --workspace=argus --access public`**
 7. **`gh release create`** com assets e `--generate-notes`
 
 ---
@@ -325,9 +325,9 @@ A release CI executa nesta ordem:
 ## 15. Confirmar publicacao no npm
 
 ```bash
-npm view atlas-cortex version dist-tags --json
-npm view atlas-cortex@1.0.2 version dist.integrity --json
-npx -y atlas-cortex@1.0.2 --version
+npm view argus version dist-tags --json
+npm view argus@1.0.2 version dist.integrity --json
+npx -y argus@1.0.2 --version
 ```
 
 Deve retornar `1.0.2` nos tres comandos.
@@ -348,7 +348,7 @@ gh release view v1.0.2 --json tagName,isDraft,isPrerelease,assets,url
 
 Assets esperados:
 
-- `atlas-cortex-1.0.2.tgz` (tarball npm)
+- `argus-1.0.2.tgz` (tarball npm)
 - `SHA256SUMS` (checksums SHA-256)
 
 ---
@@ -386,18 +386,18 @@ git status --short
 ## 19. Checklist de aceite final
 
 - [ ] `package.json` (root) = `1.0.2`
-- [ ] `packages/cortex/package.json` = `1.0.2`
-- [ ] `packages/cortex/src/version.ts` (`CORTEX_VERSION`) = `"1.0.2"`
-- [ ] `plugins/atlas-cortex/.codex-plugin/plugin.json` = `1.0.2`
-- [ ] `plugins/atlas-cortex/.mcp.json` referencia `atlas-cortex@1.0.2`
-- [ ] `package-lock.json` root e `packages/cortex` = `1.0.2`
+- [ ] `packages/argus/package.json` = `1.0.2`
+- [ ] `packages/argus/src/version.ts` (`ARGUS_VERSION`) = `"1.0.2"`
+- [ ] `plugins/argus/.codex-plugin/plugin.json` = `1.0.2`
+- [ ] `plugins/argus/.mcp.json` referencia `argus@1.0.2`
+- [ ] `package-lock.json` root e `packages/argus` = `1.0.2`
 - [ ] `npm run release:check` passa
 - [ ] `npm run validate` passa
 - [ ] `smoke:package` passa
 - [ ] Tag `v1.0.2` existe e aponta para o commit do merge na `main`
-- [ ] npm registry tem `atlas-cortex@1.0.2`
+- [ ] npm registry tem `argus@1.0.2`
 - [ ] `latest` dist-tag aponta para `1.0.2`
-- [ ] `npx -y atlas-cortex@1.0.2 --version` retorna `1.0.2`
+- [ ] `npx -y argus@1.0.2 --version` retorna `1.0.2`
 - [ ] GitHub Release `v1.0.2` existe com tarball + `SHA256SUMS`
 - [ ] `develop` sincronizada com `main` (merge de volta feito)
 
@@ -415,7 +415,7 @@ git status --short
 
 **Sintoma:** Usuario instala versao velha ao seguir doc.
 
-**Solucao:** Substituir `atlas-cortex@X.Y.Z` por `atlas-cortex@latest` nos READMEs e COMMANDS, exceto onde a doc ensina pinagem.
+**Solucao:** Substituir `argus@X.Y.Z` por `argus@latest` nos READMEs e COMMANDS, exceto onde a doc ensina pinagem.
 
 ### Tag enviada antes do merge na main
 
@@ -435,7 +435,7 @@ git push origin v1.0.2
 
 **Sintoma:** Release CI falha no step `Publish npm` com `E401` ou `ENEEDAUTH`.
 
-**Solucao:** Regenerar token em `https://www.npmjs.com/settings/<user>/tokens` (tipo **Automation**, nao Publish). Atualizar o secret `NPM_TOKEN` em `https://github.com/pauloborini/atlas-cortex/settings/secrets/actions`.
+**Solucao:** Regenerar token em `https://www.npmjs.com/settings/<user>/tokens` (tipo **Automation**, nao Publish). Atualizar o secret `NPM_TOKEN` em `https://github.com/pauloborini/argus/settings/secrets/actions`.
 
 ### `--provenance` em repositorio privado
 
@@ -460,11 +460,11 @@ env TMPDIR=/tmp npm_config_devdir=/tmp/node-gyp-cache \
   npx -y -p node@24 -p npm@latest npm run smoke:package
 ```
 
-### `version.ts` / `CORTEX_VERSION` esquecido
+### `version.ts` / `ARGUS_VERSION` esquecido
 
 **Sintoma:** `release:check` detecta drift entre `version.ts` e `package.json`.
 
-**Solucao:** Atualizar `packages/cortex/src/version.ts` com a nova versao. O `release:check` valida este campo; o `smoke:package` tambem detecta (CLI retorna versao errada no `--version`).
+**Solucao:** Atualizar `packages/argus/src/version.ts` com a nova versao. O `release:check` valida este campo; o `smoke:package` tambem detecta (CLI retorna versao errada no `--version`).
 
 ---
 
