@@ -84,7 +84,12 @@ manual `sync`. Check `cortex daemon status` to see what's being watched, and
 
 ## Use it as an MCP server
 
-Point your agent or IDE at the stdio MCP server:
+The simplest path is to let `cortex install` wire your hosts — without `--hosts`
+it registers **Claude Code** and **Cursor** and auto-detects **Codex**,
+**OpenCode** and **Pi** when installed (`--global`/`--local` control the scope;
+see [COMMANDS](COMMANDS.md#cortex-install--entry-point-command)).
+
+To wire it by hand, point your agent or IDE at the stdio MCP server:
 
 ```json
 {

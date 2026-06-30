@@ -49,8 +49,12 @@ describe("tool-registry", () => {
   });
 
   it("cada stub declara state explícito parcial ou falha", () => {
+    // Dir sem workspace: todos os tools caem no stub `falha` com código `E_*`,
+    // que sobrevive ao concise (default). Sem isso o teste dependeria do cwd ter
+    // ou não índice e do formato vigente — frágil e order-dependent.
+    const dir = useEmptyDir();
     for (const tool of MCP_TOOL_NAMES) {
-      const payload = buildToolResponse(tool);
+      const payload = buildToolResponse(tool, dir);
       expect(["parcial", "falha"]).toContain(payload.state);
       expect(payload.message).toBeTruthy();
     }
