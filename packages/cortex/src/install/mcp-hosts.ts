@@ -1,13 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CORTEX_VERSION } from "../version.js";
 
 /** Chave do servidor Cortex nos configs MCP (idempotência por chave). */
 export const MCP_SERVER_KEY = "atlas-cortex";
 
-export type McpHostId = "claude-code" | "cursor" | "codex" | "opencode" | "pi";
+export type McpHostId = "claude-code" | "cursor" | "codex" | "opencode" | "pi" | "antigravity" | "zcode";
 
 export const SUPPORTED_HOSTS: McpHostId[] = [
   "claude-code",
@@ -15,6 +16,8 @@ export const SUPPORTED_HOSTS: McpHostId[] = [
   "codex",
   "opencode",
   "pi",
+  "antigravity",
+  "zcode",
 ];
 
 /** Escopo de registro: por-repo (`local`) ou para todos os projetos (`global`). */
@@ -288,6 +291,37 @@ function codexMcpExists(): boolean {
   }
 }
 
+interface CodexMcpTransport {
+  type?: string;
+  command?: string;
+  args?: string[];
+}
+
+interface CodexMcpServerConfig {
+  transport?: CodexMcpTransport;
+}
+
+function getCodexMcpConfig(): CodexMcpServerConfig | undefined {
+  try {
+    const raw = execFileSync("codex", ["mcp", "get", "--json", MCP_SERVER_KEY], {
+      encoding: "utf-8",
+      timeout: 10_000,
+    });
+    return JSON.parse(raw) as CodexMcpServerConfig;
+  } catch {
+    return undefined;
+  }
+}
+
+function sameCodexServerEntry(config: CodexMcpServerConfig | undefined, entry: McpServerEntry): boolean {
+  const transport = config?.transport;
+  return (
+    transport?.type === "stdio" &&
+    transport.command === entry.command &&
+    JSON.stringify(transport.args ?? []) === JSON.stringify(entry.args)
+  );
+}
+
 const codexAdapter: HostAdapter = {
   id: "codex",
   scopes: ["global"],
@@ -295,17 +329,26 @@ const codexAdapter: HostAdapter = {
     if (!hasBinary("codex")) {
       return { host: "codex", ok: true, changed: false, message: "codex: não detectado (CLI ausente no PATH)" };
     }
-    if (codexMcpExists()) {
+    const entry = buildServerEntry();
+    const existing = getCodexMcpConfig();
+    if (sameCodexServerEntry(existing, entry)) {
       return { host: "codex", ok: true, changed: false, message: "codex: já registrado" };
     }
-    const entry = buildServerEntry();
     try {
+      if (existing) {
+        execFileSync("codex", ["mcp", "remove", MCP_SERVER_KEY], { stdio: "ignore", timeout: 10_000 });
+      }
       execFileSync(
         "codex",
         ["mcp", "add", MCP_SERVER_KEY, "--", entry.command, ...entry.args],
         { stdio: "ignore", timeout: 10_000 },
       );
-      return { host: "codex", ok: true, changed: true, message: "codex: registrado via 'codex mcp add'" };
+      return {
+        host: "codex",
+        ok: true,
+        changed: true,
+        message: existing ? "codex: atualizado via 'codex mcp remove/add'" : "codex: registrado via 'codex mcp add'",
+      };
     } catch (err) {
       return errorResult("codex", err);
     }
@@ -350,6 +393,124 @@ function piConfigPath(repoRoot: string, scope: McpScope): string {
 }
 
 // ---------------------------------------------------------------------------
+// Adapter ZCode: plugin em ~/.zcode/cli/plugins/cache/atlas-cortex/.
+// ZCode NÃO lê `.mcp.json` de projeto — só carrega MCP servers de plugins
+// (plugin.json → mcpServers). O cwd usa `${ZCODE_PROJECT_DIR}` para o cortex
+// achar `.cortex/` no workspace atual. Plugin global: uma vez instalado, todos
+// os projetos com `.cortex/` ganham o MCP automaticamente.
+//
+// ZCODE_CONFIG_HOME sobrescreve ~/.zcode (escape para Windows ou custom path).
+// ---------------------------------------------------------------------------
+
+function zcodeHome(): string {
+  return process.env.ZCODE_CONFIG_HOME ?? join(homedir(), ".zcode");
+}
+
+function zcodePluginDir(): string {
+  return join(zcodeHome(), "cli", "plugins", "cache", "atlas-cortex");
+}
+
+function zcodePluginJsonPath(): string {
+  return join(zcodePluginDir(), CORTEX_VERSION, ".zcode-plugin", "plugin.json");
+}
+
+function zcodeSeedPath(): string {
+  return join(zcodePluginDir(), CORTEX_VERSION, ".zcode-plugin-seed.json");
+}
+
+function buildZcodePluginConfig() {
+  const entry = buildServerEntry();
+  return {
+    name: "atlas-cortex",
+    version: CORTEX_VERSION,
+    description: "Cortex CLI – indexação estrutural e busca semântica local para codebases",
+    author: { name: "Paulo Borini" },
+    mcpServers: {
+      [MCP_SERVER_KEY]: {
+        command: entry.command,
+        args: entry.args,
+        cwd: "${ZCODE_PROJECT_DIR}",
+      },
+    },
+  };
+}
+
+const zcodeAdapter: HostAdapter = {
+  id: "zcode",
+  scopes: ["global"],
+  register(_repoRoot, _scope) {
+    const pluginPath = zcodePluginJsonPath();
+    const entry = buildServerEntry();
+
+    if (existsSync(pluginPath)) {
+      try {
+        const existing = JSON.parse(readFileSync(pluginPath, "utf-8"));
+        const existingServer = existing?.mcpServers?.[MCP_SERVER_KEY];
+        if (
+          existingServer &&
+          existingServer.command === entry.command &&
+          JSON.stringify(existingServer.args) === JSON.stringify(entry.args)
+        ) {
+          return {
+            host: "zcode",
+            ok: true,
+            changed: false,
+            message: "zcode: plugin já registrado",
+          };
+        }
+      } catch {
+        // plugin.json ilegível: sobrescreve
+      }
+    }
+
+    try {
+      writeJson(pluginPath, buildZcodePluginConfig());
+      writeJson(zcodeSeedPath(), {
+        hash: "",
+        marketplace: "user",
+        plugin: "atlas-cortex",
+        pluginVersion: CORTEX_VERSION,
+        source: "filesystem",
+        version: 1,
+      });
+      return {
+        host: "zcode",
+        ok: true,
+        changed: true,
+        message: `zcode: plugin registrado em ${zcodePluginDir()}`,
+      };
+    } catch (err) {
+      return errorResult("zcode", err);
+    }
+  },
+  unregister(_repoRoot, _scope) {
+    const dir = zcodePluginDir();
+    if (!existsSync(dir)) {
+      return {
+        host: "zcode",
+        ok: true,
+        changed: false,
+        message: "zcode: plugin não encontrado",
+      };
+    }
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return {
+        host: "zcode",
+        ok: true,
+        changed: true,
+        message: "zcode: plugin removido",
+      };
+    } catch (err) {
+      return errorResult("zcode", err);
+    }
+  },
+  isPresent() {
+    return existsSync(zcodeHome());
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -363,18 +524,27 @@ function errorResult(id: McpHostId, err: unknown): HostRegistrationResult {
 }
 
 const ADAPTERS: Record<McpHostId, HostAdapter> = {
-  // Claude Code: config MCP de projeto na raiz do repo. O host sobe o servidor
-  // com cwd = raiz do projeto, então o `cortex serve` acha o `.cortex/` local.
+  // Claude Code: global → ~/.claude/settings.json (visível em todos os projetos);
+  // local → .mcp.json na raiz do repo (legado/opt-in). Default = global.
+  // CLAUDE_CONFIG_HOME sobrescreve ~/.claude (usado em testes para não tocar a máquina real).
   "claude-code": makeMcpServersAdapter({
     id: "claude-code",
-    scopes: ["local"],
-    configPath: (root) => join(root, ".mcp.json"),
+    scopes: ["global", "local"],
+    configPath: (root, scope) =>
+      scope === "global"
+        ? join(process.env.CLAUDE_CONFIG_HOME ?? join(homedir(), ".claude"), "settings.json")
+        : join(root, ".mcp.json"),
   }),
-  // Cursor: config MCP de projeto em `.cursor/mcp.json`.
+  // Cursor: global → ~/.cursor/mcp.json (visível em todos os projetos);
+  // local → .cursor/mcp.json na raiz do repo (legado/opt-in). Default = global.
+  // CURSOR_CONFIG_HOME sobrescreve ~ (usado em testes para não tocar a máquina real).
   cursor: makeMcpServersAdapter({
     id: "cursor",
-    scopes: ["local"],
-    configPath: (root) => join(root, ".cursor", "mcp.json"),
+    scopes: ["global", "local"],
+    configPath: (root, scope) =>
+      scope === "global"
+        ? join(process.env.CURSOR_CONFIG_HOME ?? homedir(), ".cursor", "mcp.json")
+        : join(root, ".cursor", "mcp.json"),
   }),
   codex: codexAdapter,
   opencode: opencodeAdapter,
@@ -385,6 +555,37 @@ const ADAPTERS: Record<McpHostId, HostAdapter> = {
     configPath: piConfigPath,
     detectBinary: "pi",
   }),
+  antigravity: {
+    id: "antigravity",
+    scopes: ["global"],
+    register(repoRoot, scope) {
+      const antigravityBaseAdapter = makeMcpServersAdapter({
+        id: "antigravity",
+        scopes: ["global"],
+        configPath: () => {
+          const base = process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide");
+          return join(base, "mcp_config.json");
+        },
+      });
+      return antigravityBaseAdapter.register(repoRoot, scope);
+    },
+    unregister(repoRoot, scope) {
+      const antigravityBaseAdapter = makeMcpServersAdapter({
+        id: "antigravity",
+        scopes: ["global"],
+        configPath: () => {
+          const base = process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide");
+          return join(base, "mcp_config.json");
+        },
+      });
+      return antigravityBaseAdapter.unregister(repoRoot, scope);
+    },
+    isPresent() {
+      const base = process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide");
+      return existsSync(base);
+    },
+  },
+  zcode: zcodeAdapter,
 };
 
 /** Escopo efetivo de um host: o solicitado se suportado, senão o default dele. */
@@ -403,7 +604,7 @@ export function effectiveScope(host: McpHostId, requested?: McpScope): { scope: 
  */
 export function resolveDefaultHosts(repoRoot: string, requested?: McpScope): McpHostId[] {
   const always: McpHostId[] = ["claude-code", "cursor"];
-  const detected = (["codex", "opencode", "pi"] as McpHostId[]).filter((id) =>
+  const detected = (["codex", "opencode", "pi", "antigravity", "zcode"] as McpHostId[]).filter((id) =>
     ADAPTERS[id].isPresent(repoRoot, effectiveScope(id, requested).scope),
   );
   return [...always, ...detected];
@@ -436,13 +637,24 @@ export function registerMcpForHosts(
 function resolveConfigPath(id: McpHostId, repoRoot: string, scope: McpScope): string | undefined {
   switch (id) {
     case "claude-code":
-      return join(repoRoot, ".mcp.json");
+      return scope === "global"
+        ? join(process.env.CLAUDE_CONFIG_HOME ?? join(homedir(), ".claude"), "settings.json")
+        : join(repoRoot, ".mcp.json");
     case "cursor":
-      return join(repoRoot, ".cursor", "mcp.json");
+      return scope === "global"
+        ? join(process.env.CURSOR_CONFIG_HOME ?? homedir(), ".cursor", "mcp.json")
+        : join(repoRoot, ".cursor", "mcp.json");
     case "opencode":
       return opencodeConfigPath(repoRoot, scope);
     case "pi":
       return piConfigPath(repoRoot, scope);
+    case "antigravity":
+      return join(
+        process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide"),
+        "mcp_config.json",
+      );
+    case "zcode":
+      return zcodePluginJsonPath();
     case "codex":
       return undefined; // delega ao CLI, sem arquivo direto
   }

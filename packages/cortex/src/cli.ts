@@ -56,7 +56,7 @@ function parseHosts(value?: string): McpHostId[] | undefined {
 /**
  * Resolve o escopo de registro do MCP a partir das flags: `--global`/`-g`,
  * `--local` ou `--scope <global|local>`. Nenhuma → `undefined` (cada host usa
- * seu default: global para codex/opencode/pi, local para claude-code/cursor).
+ * seu default: global para claude-code/cursor/codex/opencode/pi).
  */
 function parseScope(opts: { scope?: string; global?: boolean; local?: boolean }): McpScope | undefined {
   if (opts.global) {
