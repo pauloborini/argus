@@ -332,4 +332,142 @@ describe("mcp-hosts adapters", () => {
     const localConfig = readJson(localPath);
     expect((localConfig.mcpServers as JsonRecord)[MCP_SERVER_KEY]).toBeUndefined();
   });
+
+  // -------------------------------------------------------------------------
+  // ZCode adapter
+  // -------------------------------------------------------------------------
+
+  it("zcode: registra plugin, habilita no config.json e é idempotente", () => {
+    const zcodeHome = process.env.ZCODE_CONFIG_HOME!;
+
+    const res = registerMcpForHosts(repo, ["zcode"]);
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    // plugin.json criado
+    const pluginJsonPath = join(
+      zcodeHome,
+      "cli",
+      "plugins",
+      "cache",
+      "atlas-cortex",
+      "1.1.0",
+      ".zcode-plugin",
+      "plugin.json",
+    );
+    expect(existsSync(pluginJsonPath)).toBe(true);
+    const plugin = readJson(pluginJsonPath);
+    expect(plugin.name).toBe("atlas-cortex");
+    expect(plugin.mcpServers).toBeDefined();
+    const server = (plugin.mcpServers as JsonRecord)[MCP_SERVER_KEY] as JsonRecord;
+    expect(server).toBeDefined();
+    expect(server.transport).toBe("stdio");
+
+    // seed.json criado
+    const seedPath = join(zcodeHome, "cli", "plugins", "cache", "atlas-cortex", "1.1.0", ".zcode-plugin-seed.json");
+    expect(existsSync(seedPath)).toBe(true);
+    const seed = readJson(seedPath);
+    expect(seed.marketplace).toBe("user");
+    expect(seed.plugin).toBe("atlas-cortex");
+
+    // config.json habilitado
+    const configPath = join(zcodeHome, "cli", "config.json");
+    expect(existsSync(configPath)).toBe(true);
+    const config = readJson(configPath);
+    const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
+    expect(enabled).toBeDefined();
+    expect(enabled["atlas-cortex@user"]).toBe(true);
+
+    // Idempotência
+    const res2 = registerMcpForHosts(repo, ["zcode"]);
+    expect(res2[0].ok).toBe(true);
+    expect(res2[0].changed).toBe(false);
+    expect(res2[0].message).toContain("já registrado");
+  });
+
+  it("zcode: unregister remove plugin e limpa config.json", () => {
+    const zcodeHome = process.env.ZCODE_CONFIG_HOME!;
+
+    registerMcpForHosts(repo, ["zcode"]);
+
+    const configPath = join(zcodeHome, "cli", "config.json");
+    const pluginDir = join(zcodeHome, "cli", "plugins", "cache", "atlas-cortex");
+
+    expect(existsSync(configPath)).toBe(true);
+    expect(existsSync(pluginDir)).toBe(true);
+
+    const results = unregisterMcpForHosts(repo, ["zcode"]);
+    const changed = results.filter((r) => r.changed);
+    expect(changed.length).toBeGreaterThanOrEqual(1);
+
+    // Plugin dir removido
+    expect(existsSync(pluginDir)).toBe(false);
+
+    // config.json limpo (atlas-cortex@user removido)
+    const config = readJson(configPath);
+    const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
+    expect(enabled?.["atlas-cortex@user"]).toBeUndefined();
+  });
+
+  it("zcode: unregister sem plugin ainda limpa enabledPlugins do config.json", () => {
+    const zcodeHome = process.env.ZCODE_CONFIG_HOME!;
+
+    // Simula config.json com o plugin habilitado, mas sem os arquivos
+    const configPath = join(zcodeHome, "cli", "config.json");
+    mkdirSync(join(zcodeHome, "cli"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        plugins: {
+          enabledPlugins: {
+            "atlas-cortex@user": true,
+            "outro@marketplace": true,
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const results = unregisterMcpForHosts(repo, ["zcode"]);
+    const changed = results.filter((r) => r.changed);
+    expect(changed.length).toBe(1);
+    expect(changed[0].message).toContain("removido do config.json");
+
+    // Outro plugin preservado
+    const config = readJson(configPath);
+    const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
+    expect(enabled?.["atlas-cortex@user"]).toBeUndefined();
+    expect(enabled?.["outro@marketplace"]).toBe(true);
+  });
+
+  it("zcode: register com config.json pré-existente preserva outras chaves", () => {
+    const zcodeHome = process.env.ZCODE_CONFIG_HOME!;
+
+    // Config pré-existente com outros plugins e chaves
+    const configPath = join(zcodeHome, "cli", "config.json");
+    mkdirSync(join(zcodeHome, "cli"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        plugins: {
+          enabledPlugins: {
+            "outro@marketplace": true,
+          },
+        },
+        skills: {
+          "/path/to/skill": { enable: false },
+        },
+      }),
+      "utf-8",
+    );
+
+    registerMcpForHosts(repo, ["zcode"]);
+
+    const config = readJson(configPath);
+    const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
+    expect(enabled?.["atlas-cortex@user"]).toBe(true);
+    expect(enabled?.["outro@marketplace"]).toBe(true);
+    // skills preservadas
+    expect((config as JsonRecord).skills).toBeDefined();
+  });
 });

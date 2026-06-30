@@ -429,10 +429,67 @@ function buildZcodePluginConfig() {
       [MCP_SERVER_KEY]: {
         command: entry.command,
         args: entry.args,
+        transport: "stdio",
         cwd: "${ZCODE_PROJECT_DIR}",
       },
     },
   };
+}
+
+/** Caminho do config.json do ZCode CLI (~/.zcode/cli/config.json). */
+function zcodeCliConfigPath(): string {
+  return join(zcodeHome(), "cli", "config.json");
+}
+
+/** Chave do plugin no enabledPlugins: "atlas-cortex@user". */
+const ZCODE_PLUGIN_ENABLE_KEY = "atlas-cortex@user";
+
+interface ZCodeCliConfig {
+  plugins?: {
+    enabledPlugins?: Record<string, boolean>;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/** Habilita o plugin atlas-cortex no config.json do ZCode (idempotente). */
+function enableZcodePlugin(): { changed: boolean; error?: string } {
+  const configPath = zcodeCliConfigPath();
+  try {
+    const config = readJson<ZCodeCliConfig>(configPath);
+    const plugins = config.plugins ?? {};
+    const enabled = plugins.enabledPlugins ?? {};
+    if (enabled[ZCODE_PLUGIN_ENABLE_KEY]) {
+      return { changed: false };
+    }
+    enabled[ZCODE_PLUGIN_ENABLE_KEY] = true;
+    plugins.enabledPlugins = enabled;
+    config.plugins = plugins;
+    writeJson(configPath, config);
+    return { changed: true };
+  } catch (err) {
+    return { changed: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Remove o plugin atlas-cortex do enabledPlugins do ZCode (idempotente). */
+function disableZcodePlugin(): { changed: boolean; error?: string } {
+  const configPath = zcodeCliConfigPath();
+  if (!existsSync(configPath)) {
+    return { changed: false };
+  }
+  try {
+    const config = readJson<ZCodeCliConfig>(configPath);
+    const enabled = config.plugins?.enabledPlugins;
+    if (!enabled || !(ZCODE_PLUGIN_ENABLE_KEY in enabled)) {
+      return { changed: false };
+    }
+    delete enabled[ZCODE_PLUGIN_ENABLE_KEY];
+    writeJson(configPath, config);
+    return { changed: true };
+  } catch (err) {
+    return { changed: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 const zcodeAdapter: HostAdapter = {
@@ -451,11 +508,14 @@ const zcodeAdapter: HostAdapter = {
           existingServer.command === entry.command &&
           JSON.stringify(existingServer.args) === JSON.stringify(entry.args)
         ) {
+          // Plugin já instalado — garante que está habilitado no config.json
+          const enabled = enableZcodePlugin();
+          const extra = enabled.changed ? " (habilitado no config.json)" : "";
           return {
             host: "zcode",
             ok: true,
-            changed: false,
-            message: "zcode: plugin já registrado",
+            changed: enabled.changed,
+            message: `zcode: plugin já registrado${extra}`,
           };
         }
       } catch {
@@ -473,11 +533,18 @@ const zcodeAdapter: HostAdapter = {
         source: "filesystem",
         version: 1,
       });
+      const enabled = enableZcodePlugin();
+      const parts: string[] = [`zcode: plugin registrado em ${zcodePluginDir()}`];
+      if (!enabled.error && enabled.changed) {
+        parts.push("habilitado no config.json");
+      } else if (enabled.error) {
+        parts.push(`(config.json: ${enabled.error})`);
+      }
       return {
         host: "zcode",
         ok: true,
         changed: true,
-        message: `zcode: plugin registrado em ${zcodePluginDir()}`,
+        message: parts.join(", "),
       };
     } catch (err) {
       return errorResult("zcode", err);
@@ -485,7 +552,28 @@ const zcodeAdapter: HostAdapter = {
   },
   unregister(_repoRoot, _scope) {
     const dir = zcodePluginDir();
-    if (!existsSync(dir)) {
+    const parts: string[] = [];
+    let changed = false;
+
+    // 1. Remove o plugin do config.json (sempre tenta, mesmo sem dir)
+    const disabled = disableZcodePlugin();
+    if (disabled.changed) {
+      changed = true;
+      parts.push("removido do config.json");
+    }
+
+    // 2. Remove os arquivos do plugin
+    if (existsSync(dir)) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+        changed = true;
+        parts.push("plugin removido");
+      } catch (err) {
+        return errorResult("zcode", err);
+      }
+    }
+
+    if (parts.length === 0) {
       return {
         host: "zcode",
         ok: true,
@@ -493,17 +581,12 @@ const zcodeAdapter: HostAdapter = {
         message: "zcode: plugin não encontrado",
       };
     }
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      return {
-        host: "zcode",
-        ok: true,
-        changed: true,
-        message: "zcode: plugin removido",
-      };
-    } catch (err) {
-      return errorResult("zcode", err);
-    }
+    return {
+      host: "zcode",
+      ok: true,
+      changed,
+      message: `zcode: ${parts.join(", ")}`,
+    };
   },
   isPresent() {
     return existsSync(zcodeHome());
