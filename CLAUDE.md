@@ -1,8 +1,8 @@
-<!-- >>> atlas-cortex >>> -->
-## Atlas Cortex
+<!-- >>> argus >>> -->
+## Argus
 
-Este repositório tem um índice local Atlas Cortex (`.cortex/`). Antes de varrer
-o código com grep/leitura repetida, use as tools do cortex — elas respondem
+Este repositório tem um índice local Argus (`.argus/`). Antes de varrer
+o código com grep/leitura repetida, use as tools do argus — elas respondem
 perguntas estruturais a partir do índice:
 
 - `search` — achar símbolo por nome.
@@ -14,6 +14,6 @@ perguntas estruturais a partir do índice:
 
 O índice é mantido fresco automaticamente: hooks git marcam mudanças e o
 servidor MCP roda sync incremental antes de responder. Não é preciso rodar
-`cortex sync` manualmente no fluxo normal. Se um resultado vier com
-`state: parcial` e `staleness_hint`, rode `cortex sync` e repita.
-<!-- <<< atlas-cortex <<< -->
+`argus sync` manualmente no fluxo normal. Se um resultado vier com
+`state: parcial` e `staleness_hint`, rode `argus sync` e repita.
+<!-- <<< argus <<< -->

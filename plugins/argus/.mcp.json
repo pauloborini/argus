@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "argus": {
+      "command": "npx",
+      "args": ["-y", "argus@2.0.0", "serve", "--mcp"]
+    }
+  }
+}

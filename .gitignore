@@ -11,5 +11,5 @@ codegraph
 node_modules/
 dist/
 dist-release/
-.cortex/
+.argus/
 *.tsbuildinfo

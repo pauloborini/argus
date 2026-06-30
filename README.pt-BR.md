@@ -1,10 +1,10 @@
 <!-- Idioma: [English](README.md) · **Português** -->
 
-# Atlas Cortex
+# Argus
 
 **Code retrieval e context packing local para agentes de código.**
 
-O Atlas Cortex indexa um repositório uma vez e responde às perguntas
+O Argus indexa um repositório uma vez e responde às perguntas
 estruturais de um agente — *onde está este símbolo, o que o chama, o que quebra
 se eu mudar, me dê só o contexto relevante* — sem o agente ler e reler
 arquivos. Roda inteiramente na sua máquina, não tem UI e fala duas interfaces:
@@ -18,17 +18,17 @@ um **CLI** e um **servidor MCP**.
 ## Por que existe
 
 Agentes queimam tokens e tool calls redescobrindo o código: `grep`, abre
-arquivo, `grep` de novo, abre mais três. O Atlas Cortex colapsa isso em
+arquivo, `grep` de novo, abre mais três. O Argus colapsa isso em
 respostas únicas e estruturadas apoiadas num índice local.
 
 No benchmark interno (6 tarefas reais de engenharia, **scriptado — sem agente
 vivo**, tokens por heurística offline documentada):
 
-| Métrica (baseline → Atlas) | Resultado |
+| Métrica (baseline → Argus) | Resultado |
 |---|---|
 | Tokens aprox. | **−92,7%** |
 | Tool calls | **−11,8%** |
-| Ground-truth respondido (arm Atlas) | **6/6** |
+| Ground-truth respondido (arm Argus) | **6/6** |
 
 O ganho de tokens vem quase todo do **índice entregar menos conteúdo** (ranges +
 handles em vez de arquivos inteiros), não de formato — isolado, o ganho só-de-formato
@@ -51,12 +51,12 @@ recuperado nunca sai do workspace.
 ## Instalação
 
 ```bash
-# Instalação global — dá o binário `cortex`
-npm install -g atlas-cortex
-cortex --version
+# Instalação global — dá o binário `argus`
+npm install -g argus
+argus --version
 
 # Ou rode sem instalar
-npx atlas-cortex init
+npx argus init
 ```
 
 ---
@@ -67,16 +67,16 @@ Um comando fia o repo de ponta a ponta — depois é só codar.
 
 ```bash
 # Fia o repo: workspace + índice + MCP nos seus hosts + daemon de auto-sync
-cortex install
+argus install
 
 # Fazer perguntas
-cortex search "calculateTotal"            # achar um símbolo rápido
-cortex explore src/billing.ts --mode file # contexto estruturado de um arquivo
+argus search "calculateTotal"            # achar um símbolo rápido
+argus explore src/billing.ts --mode file # contexto estruturado de um arquivo
 ```
 
 Após o `install`, o daemon de auto-sync mantém o índice fresco a cada save — sem
-`sync` manual. Veja `cortex daemon status` para o que está sendo observado e
-`cortex status` para staleness. **Todo o resto — `trace`, `impact`,
+`sync` manual. Veja `argus daemon status` para o que está sendo observado e
+`argus status` para staleness. **Todo o resto — `trace`, `impact`,
 `diff-impact`, `pack-context`, `retrieve`, mais os controles de `daemon` — está
 no [COMMANDS.pt-BR.md](COMMANDS.pt-BR.md) com flags e exemplos completos.**
 
@@ -84,21 +84,21 @@ no [COMMANDS.pt-BR.md](COMMANDS.pt-BR.md) com flags e exemplos completos.**
 
 ## Usar como servidor MCP
 
-O jeito mais simples é deixar o `cortex install` fiar os hosts por você — sem
+O jeito mais simples é deixar o `argus install` fiar os hosts por você — sem
 `--hosts`, ele registra **Claude Code** e **Cursor** e auto-detecta **Codex**,
 **OpenCode**, **Pi**, **Antigravity** e **ZCode** quando instalados
-(`--global`/`--local`/`--scope` controlam o escopo; `cortex uninstall` reverte
+(`--global`/`--local`/`--scope` controlam o escopo; `argus uninstall` reverte
 tudo inclusive registro no daemon e servico auto-start — veja
-[COMMANDS](COMMANDS.pt-BR.md#cortex-install--comando-de-entrada)).
+[COMMANDS](COMMANDS.pt-BR.md#argus-install--comando-de-entrada)).
 
 Para fiar à mão, aponte seu agente ou IDE para o servidor MCP stdio:
 
 ```json
 {
   "mcpServers": {
-    "atlas-cortex": {
+    "argus": {
       "command": "npx",
-      "args": ["-y", "atlas-cortex@latest", "serve", "--mcp"]
+      "args": ["-y", "argus@latest", "serve", "--mcp"]
     }
   }
 }
@@ -113,11 +113,11 @@ O servidor expõe dez tools: `search`, `explore`, `trace`, `impact`,
 ## Manter o índice fresco (opcional)
 
 Você pode deixar o índice se manter fresco sozinho, para o agente nunca
-consultar estado velho e você nunca rodar `cortex sync` na mão:
+consultar estado velho e você nunca rodar `argus sync` na mão:
 
 ```bash
-cortex hook install         # hooks git marcam o que mudou (sem travar commit)
-cortex agent-rules install  # instrui agentes a usar o cortex (CLAUDE.md + AGENTS.md)
+argus hook install         # hooks git marcam o que mudou (sem travar commit)
+argus agent-rules install  # instrui agentes a usar o argus (CLAUDE.md + AGENTS.md)
 ```
 
 Os hooks git só *marcam* o índice como sujo; o servidor MCP roda um sync
@@ -137,7 +137,7 @@ sempre sabe o quanto confiar num resultado:
   código), `falha` (não dá para responder).
 - **`confidence`** — `high` / `medium` / `low`.
 - **`limitations`** e **`staleness_hint`** — presentes quando algo pode estar
-  fora, dizendo o que fazer (ex.: rodar `cortex sync`).
+  fora, dizendo o que fazer (ex.: rodar `argus sync`).
 
 Duas ideias que valem conhecer:
 
@@ -166,10 +166,10 @@ namespaces, classes, structs, records, interfaces, enums e membros top-level
 
 ## Limitações conhecidas
 
-- Chamadas sem import resolvido degradam para correspondência global por nome (mitigável via importação SCIP opcional — `cortex scip import`).
+- Chamadas sem import resolvido degradam para correspondência global por nome (mitigável via importação SCIP opcional — `argus scip import`).
 - Resolução dinâmica/reflexiva não é tratada como causalidade comprovada.
 - `search` rankeia lexical e estruturalmente (sempre fresco). Busca semântica
-  por **embeddings é opcional e off-by-default**: rode `cortex embed` e use a tool
+  por **embeddings é opcional e off-by-default**: rode `argus embed` e use a tool
   `semantic_search` (denso bge-small + fusão híbrida RRF). Os vetores não são
   auto-sincronizados — podem ficar stale e a tool sinaliza honestamente.
 

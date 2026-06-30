@@ -22,7 +22,7 @@ Gerar uma nova versao publicada em npm, com tag Git, release GitHub, tarball ver
 ```bash
 rtk git status --short --branch
 rtk git log --oneline -5
-rtk npm view atlas-cortex version dist-tags --json
+rtk npm view argus version dist-tags --json
 ```
 
 2. Escolher a versao nova.
@@ -36,9 +36,9 @@ rtk npm view atlas-cortex version dist-tags --json
 Arquivos obrigatorios:
 
 - `package.json`
-- `packages/cortex/package.json`
-- `packages/cortex/src/version.ts`
-- `plugins/atlas-cortex/.codex-plugin/plugin.json`
+- `packages/argus/package.json`
+- `packages/argus/src/version.ts`
+- `plugins/argus/.codex-plugin/plugin.json`
 - `CHANGELOG.md`
 - `package-lock.json`
 
@@ -51,20 +51,20 @@ rtk npm install --package-lock-only
 4. Procurar drift de versao.
 
 ```bash
-rtk rg -n '"version":|CORTEX_VERSION|atlas-cortex@[0-9]+\.[0-9]+\.[0-9]+' package.json packages plugins README.md README.pt-BR.md COMMANDS.md COMMANDS.pt-BR.md CHANGELOG.md package-lock.json
+rtk rg -n '"version":|ARGUS_VERSION|argus@[0-9]+\.[0-9]+\.[0-9]+' package.json packages plugins README.md README.pt-BR.md COMMANDS.md COMMANDS.pt-BR.md CHANGELOG.md package-lock.json
 rtk npm run release:check
 ```
 
-Regra: exemplos publicos devem usar `atlas-cortex@latest`, exceto quando a doc estiver ensinando pin explicito.
+Regra: exemplos publicos devem usar `argus@latest`, exceto quando a doc estiver ensinando pin explicito.
 
-Nota: `release:check` valida todos os pontos de versao (root, runtime, plugin, `version.ts`/`CORTEX_VERSION`, e as tres entradas do lockfile). A checagem de tag so dispara quando `GITHUB_REF_TYPE=tag`; em push/PR de branch (`GITHUB_REF_TYPE=branch`) o script roda sem exigir match de tag, entao a CI passa normalmente.
+Nota: `release:check` valida todos os pontos de versao (root, runtime, plugin, `version.ts`/`ARGUS_VERSION`, e as tres entradas do lockfile). A checagem de tag so dispara quando `GITHUB_REF_TYPE=tag`; em push/PR de branch (`GITHUB_REF_TYPE=branch`) o script roda sem exigir match de tag, entao a CI passa normalmente.
 
 5. Validar codigo e pacote.
 
 ```bash
 rtk npm run validate
 rtk npm run smoke:package
-rtk npm pack --workspace=atlas-cortex --dry-run --json
+rtk npm pack --workspace=argus --dry-run --json
 ```
 
 Se `smoke:package` falhar localmente por `node-gyp` e path com espaco/parênteses, repetir com cache fora do path problemático:
@@ -91,7 +91,7 @@ Release por tag deve cobrir:
 - validate
 - smoke package
 - release check
-- `npm publish --workspace=atlas-cortex --access public`
+- `npm publish --workspace=argus --access public`
 - `--provenance` somente se o repositorio GitHub for publico (hoje o repo e privado, entao o publish roda sem provenance; ao tornar publico, adicionar `--provenance` ao comando de publish).
 - GitHub release com assets `dist-release/*`
 
@@ -100,11 +100,11 @@ Release por tag deve cobrir:
 ```bash
 rtk git status --short
 rtk git diff --stat
-rtk git add package.json package-lock.json packages/cortex/package.json packages/cortex/src/version.ts plugins/atlas-cortex/.codex-plugin/plugin.json CHANGELOG.md README.md README.pt-BR.md COMMANDS.md COMMANDS.pt-BR.md .github/workflows/ci.yml .github/workflows/release.yml docs/RELEASE_BUMP.md .gitignore
+rtk git add package.json package-lock.json packages/argus/package.json packages/argus/src/version.ts plugins/argus/.codex-plugin/plugin.json CHANGELOG.md README.md README.pt-BR.md COMMANDS.md COMMANDS.pt-BR.md .github/workflows/ci.yml .github/workflows/release.yml docs/RELEASE_BUMP.md .gitignore
 rtk git commit -m "chore(release): bump para X.Y.Z"
 ```
 
-Ajustar lista de arquivos ao diff real. Nao adicionar artefatos gerados como `dist/`, `dist-release/`, `node_modules/` ou `.cortex/`.
+Ajustar lista de arquivos ao diff real. Nao adicionar artefatos gerados como `dist/`, `dist-release/`, `node_modules/` ou `.argus/`.
 
 8. Criar e enviar tag.
 
@@ -126,10 +126,10 @@ rtk gh run view <run-id> --log-failed
 10. Confirmar publicacao.
 
 ```bash
-rtk npm view atlas-cortex version dist-tags --json
-rtk npm view atlas-cortex@X.Y.Z version dist.integrity --json
-rtk npx -y atlas-cortex@X.Y.Z --version
-rtk npx -y atlas-cortex@X.Y.Z init --help
+rtk npm view argus version dist-tags --json
+rtk npm view argus@X.Y.Z version dist.integrity --json
+rtk npx -y argus@X.Y.Z --version
+rtk npx -y argus@X.Y.Z init --help
 ```
 
 11. Confirmar GitHub release.
@@ -140,29 +140,29 @@ rtk gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,assets,url
 
 ## Checklist de aceite
 
-- `package-lock.json` mostra a versao nova no root e em `packages/cortex`.
+- `package-lock.json` mostra a versao nova no root e em `packages/argus`.
 - `npm run release:check` passa.
 - `npm run validate` passa.
 - `smoke:package` passa em ambiente compativel.
-- `npm pack --dry-run` gera `atlas-cortex-X.Y.Z.tgz`.
+- `npm pack --dry-run` gera `argus-X.Y.Z.tgz`.
 - Tag `vX.Y.Z` aponta para o commit do bump.
-- npm registry tem `atlas-cortex@X.Y.Z`.
+- npm registry tem `argus@X.Y.Z`.
 - `latest` aponta para `X.Y.Z`, exceto release pre-release intencional.
-- `npx -y atlas-cortex@X.Y.Z --version` retorna `X.Y.Z`.
+- `npx -y argus@X.Y.Z --version` retorna `X.Y.Z`.
 - GitHub release existe e contem tarball + `SHA256SUMS`.
 
 ## Falhas comuns
 
 - Lockfile esquecido: `package-lock.json` fica em versao antiga e gera drift.
-- README com `atlas-cortex@1.0.0`: usuario instala versao velha.
+- README com `argus@1.0.0`: usuario instala versao velha.
 - `dist-release/` stale: tarball antigo aparece como untracked ou asset errado.
 - Tag enviada antes do commit certo: release roda com conteudo antigo.
 - `NPM_TOKEN` ausente/expirado: tag existe, mas npm nao publica.
 - `--provenance` em repositorio privado: npm retorna `E422` porque provenance GitHub Actions so aceita source repo publico.
-- Bin npm sem alias homonimo: `npx atlas-cortex` falha com `could not determine executable to run`.
+- Bin npm sem alias homonimo: `npx argus` falha com `could not determine executable to run`.
 - `node-gyp` falha localmente por path com espaco/parênteses: validar com cache em `/tmp`.
 - `release:check` falhando na CI com "Tag main não corresponde": versao antiga do script comparava `GITHUB_REF_NAME` (nome da branch) com a tag. Corrigido para so checar quando `GITHUB_REF_TYPE=tag`.
-- `version.ts`/`CORTEX_VERSION` esquecido no bump: agora `release:check` pega o drift; antes so o `smoke:package` detectava.
+- `version.ts`/`ARGUS_VERSION` esquecido no bump: agora `release:check` pega o drift; antes so o `smoke:package` detectava.
 
 ## Regra para IA
 

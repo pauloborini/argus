@@ -13,8 +13,8 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const cli = join(root, "packages", "cortex", "dist", "cli.js");
-const configured = process.env.CORTEX_HOMOLOGATION_REPOS?.split(":").filter(Boolean);
+const cli = join(root, "packages", "argus", "dist", "cli.js");
+const configured = process.env.ARGUS_HOMOLOGATION_REPOS?.split(":").filter(Boolean);
 const candidates = configured ?? [
   resolve(root, "../atlas-workflow"),
   resolve(root, "../paytrainer-app"),
@@ -24,13 +24,13 @@ const targets = candidates.filter(existsSync);
 
 if (targets.length < 2) {
   throw new Error(
-    "Homologação exige pelo menos 2 repos. Defina CORTEX_HOMOLOGATION_REPOS com paths separados por `:`.",
+    "Homologação exige pelo menos 2 repos. Defina ARGUS_HOMOLOGATION_REPOS com paths separados por `:`.",
   );
 }
 
 const ignored = new Set([
   ".git",
-  ".cortex",
+  ".argus",
   ".dart_tool",
   ".idea",
   ".next",
@@ -113,7 +113,7 @@ function probeRetrieval(cwd) {
 }
 
 for (const source of targets) {
-  const temp = mkdtempSync(join(tmpdir(), "atlas-cortex-homologation-"));
+  const temp = mkdtempSync(join(tmpdir(), "argus-homologation-"));
   const target = join(temp, basename(source));
   try {
     cpSync(source, target, {
@@ -157,7 +157,7 @@ mkdirSync(evidenceDir, { recursive: true });
 const payload = {
   generated_at: new Date().toISOString(),
   runtime_version: JSON.parse(
-    readFileSync(join(root, "packages", "cortex", "package.json"), "utf8"),
+    readFileSync(join(root, "packages", "argus", "package.json"), "utf8"),
   ).version,
   repositories: results,
   verdict: (() => {

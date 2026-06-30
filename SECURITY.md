@@ -6,7 +6,7 @@ repositório. Não abra issue pública com exploit, conteúdo indexado ou segred
 ## Modelo
 
 - processamento e persistência são locais
-- `.cortex/` pertence ao workspace indexado
+- `.argus/` pertence ao workspace indexado
 - `retrieve_handle` só aceita IDs opacos no formato `rh_<16 hex>`
 - nenhuma tool executa código do workspace
 - paths retornados e lidos devem permanecer confinados ao workspace
