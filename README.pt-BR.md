@@ -84,7 +84,12 @@ no [COMMANDS.pt-BR.md](COMMANDS.pt-BR.md) com flags e exemplos completos.**
 
 ## Usar como servidor MCP
 
-Aponte seu agente ou IDE para o servidor MCP stdio:
+O jeito mais simples é deixar o `cortex install` fiar os hosts por você — sem
+`--hosts`, ele registra **Claude Code** e **Cursor** e auto-detecta **Codex**,
+**OpenCode** e **Pi** quando instalados (`--global`/`--local` controlam o escopo;
+veja [COMMANDS](COMMANDS.pt-BR.md#cortex-install--comando-de-entrada)).
+
+Para fiar à mão, aponte seu agente ou IDE para o servidor MCP stdio:
 
 ```json
 {

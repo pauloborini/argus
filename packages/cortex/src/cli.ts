@@ -30,7 +30,7 @@ import {
   runDaemonInstallService,
   runDaemonUninstallService,
 } from "./commands/daemon.js";
-import { SUPPORTED_HOSTS, type McpHostId } from "./install/mcp-hosts.js";
+import { SUPPORTED_HOSTS, type McpHostId, type McpScope } from "./install/mcp-hosts.js";
 import { CORTEX_VERSION } from "./version.js";
 import { setPrettyOutput } from "./output.js";
 import { setDefaultResponseFormat } from "./mcp/tools/response.js";
@@ -51,6 +51,27 @@ function parseHosts(value?: string): McpHostId[] | undefined {
     );
   }
   return ids as McpHostId[];
+}
+
+/**
+ * Resolve o escopo de registro do MCP a partir das flags: `--global`/`-g`,
+ * `--local` ou `--scope <global|local>`. Nenhuma → `undefined` (cada host usa
+ * seu default: global para claude-code/cursor/codex/opencode/pi).
+ */
+function parseScope(opts: { scope?: string; global?: boolean; local?: boolean }): McpScope | undefined {
+  if (opts.global) {
+    return "global";
+  }
+  if (opts.local) {
+    return "local";
+  }
+  if (opts.scope) {
+    if (opts.scope !== "global" && opts.scope !== "local") {
+      throw new Error(`Escopo inválido: ${opts.scope}. Use 'global' ou 'local'.`);
+    }
+    return opts.scope;
+  }
+  return undefined;
 }
 
 const program = new Command();
@@ -107,13 +128,19 @@ program
 program
   .command("install")
   .description("Fiação zero-toque do repo: workspace + índice + MCP + daemon (um comando)")
-  .option("--hosts <lista>", "Hosts MCP a registrar (CSV); default: todos suportados")
+  .option("--hosts <lista>", "Hosts MCP a registrar (CSV); default: detectados (claude-code/cursor sempre)")
+  .option("--scope <escopo>", "Escopo do registro MCP: global | local")
+  .option("-g, --global", "Registra MCP global (todos os projetos) — default p/ codex/opencode/pi")
+  .option("--local", "Registra MCP só neste repo")
   .option("--no-daemon", "Não registrar/subir o daemon (apenas índice + MCP)")
   .option("--no-mcp", "Não registrar MCP nos hosts")
   .option("--with-hooks", "Instalar hooks git como fallback de daemon down")
   .action(
     async (opts: {
       hosts?: string;
+      scope?: string;
+      global?: boolean;
+      local?: boolean;
       daemon?: boolean;
       mcp?: boolean;
       withHooks?: boolean;
@@ -121,6 +148,7 @@ program
       finish(
         await runInstall({
           hosts: parseHosts(opts.hosts),
+          scope: parseScope(opts),
           noDaemon: opts.daemon === false,
           noMcp: opts.mcp === false,
           withHooks: opts.withHooks === true,
@@ -133,9 +161,18 @@ program
   .command("uninstall")
   .description("Reverter a fiação do repo (MCP, agent-rules, hooks, daemon)")
   .option("--hosts <lista>", "Hosts MCP a limpar (CSV); default: todos suportados")
+  .option("--scope <escopo>", "Escopo do registro MCP a limpar: global | local")
+  .option("-g, --global", "Limpa o registro MCP global")
+  .option("--local", "Limpa o registro MCP só deste repo")
   .option("--purge", "Remover também o diretório .cortex/ (índice local)")
-  .action((opts: { hosts?: string; purge?: boolean }) => {
-    finish(runUninstall({ hosts: parseHosts(opts.hosts), purge: opts.purge === true }));
+  .action((opts: { hosts?: string; scope?: string; global?: boolean; local?: boolean; purge?: boolean }) => {
+    finish(
+      runUninstall({
+        hosts: parseHosts(opts.hosts),
+        scope: parseScope(opts),
+        purge: opts.purge === true,
+      }),
+    );
   });
 
 program

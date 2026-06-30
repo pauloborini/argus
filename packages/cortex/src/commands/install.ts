@@ -7,8 +7,10 @@ import { runHookInstall, runHookUninstall } from "./hooks.js";
 import {
   registerMcpForHosts,
   unregisterMcpForHosts,
+  resolveDefaultHosts,
   SUPPORTED_HOSTS,
   type McpHostId,
+  type McpScope,
 } from "../install/mcp-hosts.js";
 import {
   listWorkspaceRoots,
@@ -32,6 +34,8 @@ async function waitForDaemon(timeoutMs = 2_000): Promise<boolean> {
 
 export interface InstallOptions {
   hosts?: McpHostId[];
+  /** Escopo de registro do MCP (global = todos os projetos; local = repo). */
+  scope?: McpScope;
   /** Pula o serviço/daemon (apenas fia índice + MCP). */
   noDaemon?: boolean;
   /** Pula o registro de MCP nos hosts. */
@@ -71,10 +75,11 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   runAgentRulesInstall(cwd);
   summary.push("agent-rules escritas (CLAUDE.md/AGENTS.md)");
 
-  // 4. Registro de MCP nos hosts
+  // 4. Registro de MCP nos hosts. Sem `--hosts`, auto-detecta os instalados
+  // (claude-code/cursor sempre; codex/opencode/pi só quando presentes).
   if (!options.noMcp) {
-    const hosts = options.hosts ?? SUPPORTED_HOSTS;
-    const results = registerMcpForHosts(root, hosts);
+    const hosts = options.hosts ?? resolveDefaultHosts(root, options.scope);
+    const results = registerMcpForHosts(root, hosts, options.scope);
     for (const r of results) {
       console.log(`  MCP ${r.message}`);
     }
@@ -142,6 +147,8 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
 
 export interface UninstallOptions {
   hosts?: McpHostId[];
+  /** Escopo de registro a limpar (global = todos os projetos; local = repo). */
+  scope?: McpScope;
   /** Remove também o diretório `.cortex/` (índice local). */
   purge?: boolean;
 }
@@ -150,10 +157,12 @@ export interface UninstallOptions {
 export function runUninstall(options: UninstallOptions = {}): number {
   const cwd = process.cwd();
   const root = resolve(cwd);
+  // Sem `--hosts`, tenta todos os suportados (no-op quando não registrado), pra
+  // não deixar resíduo em nenhum host.
   const hosts = options.hosts ?? SUPPORTED_HOSTS;
 
   unregisterWorkspace(root);
-  for (const r of unregisterMcpForHosts(root, hosts)) {
+  for (const r of unregisterMcpForHosts(root, hosts, options.scope)) {
     console.log(`  MCP ${r.message}`);
   }
   runAgentRulesUninstall(cwd);

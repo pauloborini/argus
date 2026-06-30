@@ -28,11 +28,18 @@ export async function runIndex(options: IndexOptions = {}): Promise<number> {
   }
 
   try {
+    console.log("Inventariando arquivos...");
     const discovery = discoverFiles(rootPath, { respect_gitignore: respectGitignore });
+    console.log(`  ${discovery.files.length} arquivos encontrados.`);
+
+    console.log("Calculando fingerprints...");
     const fingerprints = fingerprintDiscoveredFiles(discovery.files);
     const manifest = buildDiscoveryManifest(rootPath, fingerprints);
+
+    console.log(`Extraindo estrutura (${manifest.file_count} arquivos)...`);
     const { index, summary } = await buildStructuralIndex(manifest, rootPath);
 
+    console.log("Salvando índice...");
     writeManifestAtomic(getManifestPath(rootPath), manifest);
     persistFullStructuralIndex(rootPath, index);
 
