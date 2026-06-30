@@ -32,6 +32,8 @@ jobs:
       # Provenance npm exige repositório-fonte público. Ao tornar o repo público,
       # acrescentar --provenance ao comando (id-token: write deve estar habilitado).
       - name: Publish npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --workspace=atlas-cortex --access public
       - name: Publish GitHub release
         env:
