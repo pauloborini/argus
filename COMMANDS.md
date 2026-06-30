@@ -36,16 +36,18 @@ MCP server in detected hosts and registers the repo with the auto-sync daemon
 (with an auto-start user service). Idempotent.
 
 Without `--hosts`, it wires **Claude Code** and **Cursor** always (project
-idiom) and **auto-detects** Codex, OpenCode and Pi when installed on this machine.
+idiom) and **auto-detects** Codex, OpenCode, Pi, Antigravity and ZCode when
+installed on this machine (binary on PATH or config directory present).
 
 ```bash
 cortex install                     # full wiring (auto-detects hosts)
 cortex install --no-daemon         # index + MCP only (no daemon/service)
 cortex install --no-mcp            # don't register MCP in hosts
 cortex install --hosts claude-code,codex  # restrict MCP hosts (CSV)
-cortex install --global            # global MCP for codex/opencode/pi (their default)
-cortex install --local             # MCP for this repo only
+cortex install --global            # register MCP globally (all projects)
+cortex install --local             # register MCP in this repo only
 cortex install --scope global      # same as --global
+cortex install --scope local       # same as --local
 cortex install --with-hooks        # add git hooks as a daemon-down fallback
 ```
 
@@ -58,6 +60,8 @@ cortex install --with-hooks        # add git hooks as a daemon-down fallback
 | `codex` | CLI `codex mcp add/remove` | global | `~/.codex/config.toml` (managed by Codex) |
 | `opencode` | JSON `mcp`/`type:local` | global | `~/.config/opencode/opencode.json` (`XDG_CONFIG_HOME`) or repo |
 | `pi` | JSON `mcpServers` | global | `~/.pi/agent/mcp.json` (`PI_CODING_AGENT_DIR`) or repo |
+| `antigravity` | JSON `mcpServers` | global | `~/.gemini/antigravity-ide/mcp_config.json` (`ANTIGRAVITY_CONFIG_DIR`) |
+| `zcode` | Plugin filesystem + JSON `mcpServers` | global | `~/.zcode/cli/plugins/cache/atlas-cortex/<version>/.zcode-plugin/plugin.json` (`ZCODE_CONFIG_HOME`) |
 
 In global mode the MCP is registered with an **absolute path** (cwd-independent),
 valid across all projects. Existing config is always **merged** — other user
@@ -68,14 +72,22 @@ as "not detected" without a hard failure.
 After this you just code — the daemon keeps the index fresh on its own.
 
 ### `cortex uninstall`
-Reverts the repo wiring: removes the MCP registration from hosts, the agent-rules
-block, git hooks and the daemon registration. `--purge` also removes `.cortex/`.
+Reverts the repo wiring: removes the MCP registration from hosts (all scopes by
+default — global + local), the agent-rules block, git hooks and the daemon
+registration. When the **last workspace** is uninstalled, the auto-start user
+service (launchd/systemd) is also removed. `--purge` also removes `.cortex/`.
+
+Use `--scope` to limit cleanup to a single scope, `--local`/`--global` as
+shorthand, or `--hosts` to target specific hosts.
 
 ```bash
-cortex uninstall
-cortex uninstall --global          # also clears the global MCP registration
-cortex uninstall --hosts codex     # clear specific hosts only (CSV)
-cortex uninstall --purge
+cortex uninstall                     # full revert (all hosts, all scopes)
+cortex uninstall --global            # clear only the global MCP registration
+cortex uninstall --local             # clear only this repo's MCP registration
+cortex uninstall --scope global      # same as --global
+cortex uninstall --hosts codex       # clear specific hosts only (CSV)
+cortex uninstall --hosts opencode --scope global  # clear opencode global only
+cortex uninstall --purge             # also removes .cortex/
 ```
 
 ### `cortex init`
@@ -387,6 +399,9 @@ systemd --user on Linux) with login auto-start. To manage the service directly:
 cortex daemon install-service
 cortex daemon uninstall-service
 ```
+
+When the **last workspace** is uninstalled (`cortex uninstall`), the user service
+is automatically removed — no manual cleanup needed.
 
 If the daemon is stopped the index does **not** go stale: the optional git hooks
 and the MCP server's lazy auto-sync remain as a safety net.

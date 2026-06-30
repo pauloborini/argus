@@ -86,8 +86,10 @@ manual `sync`. Check `cortex daemon status` to see what's being watched, and
 
 The simplest path is to let `cortex install` wire your hosts — without `--hosts`
 it registers **Claude Code** and **Cursor** and auto-detects **Codex**,
-**OpenCode** and **Pi** when installed (`--global`/`--local` control the scope;
-see [COMMANDS](COMMANDS.md#cortex-install--entry-point-command)).
+**OpenCode**, **Pi**, **Antigravity** and **ZCode** when installed
+(`--global`/`--local`/`--scope` control the scope; `cortex uninstall` reverts
+everything including daemon registration and auto-start service — see
+[COMMANDS](COMMANDS.md#cortex-install--entry-point-command)).
 
 To wire it by hand, point your agent or IDE at the stdio MCP server:
 
