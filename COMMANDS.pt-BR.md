@@ -459,7 +459,7 @@ Rode a partir da raiz do monorepo.
 | `npm run test` | Testes unitários (vitest). |
 | `npm run lint` | ESLint. |
 | `npm run validate` | typecheck + test + lint + build. |
-| `npm run benchmark:mvp` | Benchmark interno → `.atlas/benchmark/latest/`. |
+| `npm run benchmark:mvp` | Benchmark interno → `.argus/benchmark/latest/`. |
 | `npm run smoke:package` | Instala e exercita o tarball num diretório limpo. |
 | `npm run homologate` | Valida repos externos locais (sonda de retrieval real). |
 | `npm run release:check` | Verifica consistência de versão root/runtime/plugin. |

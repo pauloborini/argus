@@ -458,7 +458,7 @@ Run from the monorepo root.
 | `npm run test` | Unit tests (vitest). |
 | `npm run lint` | ESLint. |
 | `npm run validate` | typecheck + test + lint + build. |
-| `npm run benchmark:mvp` | Internal benchmark → `.atlas/benchmark/latest/`. |
+| `npm run benchmark:mvp` | Internal benchmark → `.argus/benchmark/latest/`. |
 | `npm run smoke:package` | Install & exercise the tarball in a clean dir. |
 | `npm run homologate` | Validate external local repos (real retrieval probe). |
 | `npm run release:check` | Assert version consistency across root/runtime/plugin. |

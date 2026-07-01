@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { daemonLogPath } from "../workspace/user-paths.js";
 
-const LAUNCHD_LABEL = "com.atlascortex.daemon";
+const LAUNCHD_LABEL = "com.argus.daemon";
 const SYSTEMD_UNIT = "argus.service";
 
 export interface ServiceResult {

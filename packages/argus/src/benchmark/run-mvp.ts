@@ -16,11 +16,11 @@ import { getManifestPath, initWorkspace } from "../workspace/workspace.js";
 // são "limite superior interno scriptado" (ver writeSummary §Metodologia).
 // ===========================================================================
 
-type BenchmarkArm = "baseline" | "formato-so" | "atlas";
+type BenchmarkArm = "baseline" | "formato-so" | "argus";
 type TaskKind = "cirurgica" | "varredura";
 type ToolName = "status" | "files" | "search" | "explore" | "trace" | "impact" | "diff_impact" | "pack_context";
 
-const ARMS: BenchmarkArm[] = ["baseline", "formato-so", "atlas"];
+const ARMS: BenchmarkArm[] = ["baseline", "formato-so", "argus"];
 
 interface StepResult {
   title: string;
@@ -77,16 +77,16 @@ interface BenchmarkSummary {
   gains: {
     /** baseline → formato-so: ganho de pura serialização. */
     format_token_pct: number;
-    /** formato-so → atlas: ganho incremental do índice estruturado. */
+    /** formato-so → argus: ganho incremental do índice estruturado. */
     index_token_pct: number;
-    /** baseline → atlas: headline honesto (qualificado). */
+    /** baseline → argus: headline honesto (qualificado). */
     headline_token_pct: number;
     headline_tool_call_pct: number;
   };
   by_kind: Record<TaskKind, {
     baseline_tokens: number;
     formato_so_tokens: number;
-    atlas_tokens: number;
+    argus_tokens: number;
     headline_token_pct: number;
     index_token_pct: number;
   }>;
@@ -106,7 +106,7 @@ interface TaskContext {
   };
 }
 
-interface AtlasStep {
+interface ArgusStep {
   title: string;
   tool: ToolName;
   args?: Record<string, unknown>;
@@ -124,7 +124,7 @@ interface TaskSpec {
   /** Arquivos que o agente abre por inteiro para confirmar a resposta. */
   baselineFiles: string[];
   /** Chamadas reais de tool no arm com índice (já em `concise`). */
-  atlasSteps: AtlasStep[];
+  argusSteps: ArgusStep[];
   /**
    * Hook para o follow-up de agente vivo (loop real com/sem tools). Não
    * implementado nesta fase — ver writeSummary §Metodologia.
@@ -199,7 +199,7 @@ function resolveWorkspaceRoot(start: string): string {
   let current = resolve(start);
   while (true) {
     const packageJsonPath = join(current, "package.json");
-    const backlogPath = join(current, ".atlas/backlog/BACKLOG_MESTRE_argus.md");
+    const backlogPath = join(current, ".argus/backlog/BACKLOG_MESTRE_argus.md");
     if (existsSync(packageJsonPath) && existsSync(backlogPath)) {
       try {
         const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as { name?: string };
@@ -313,8 +313,8 @@ function buildArmResult(
   const startedAt = Date.now();
 
   let steps: StepResult[];
-  if (arm === "atlas") {
-    steps = spec.atlasSteps.map((step) => runToolStep(root, step.title, step.tool, step.args));
+  if (arm === "argus") {
+    steps = spec.argusSteps.map((step) => runToolStep(root, step.title, step.tool, step.args));
   } else {
     const raw: StepResult[] = [
       runShellStep(root, "rg localizar", spec.baselineGrep),
@@ -357,7 +357,7 @@ const TASKS: TaskSpec[] = [
     baselineGrep:
       "rg -n \"codegraph_impact|handleImpact|getImpactRadius\" src/mcp/tools.ts src/bin/codegraph.ts src/graph/traversal.ts src/index.ts",
     baselineFiles: ["src/mcp/tools.ts", "src/graph/traversal.ts"],
-    atlasSteps: [
+    argusSteps: [
       { title: "search getImpactRadius", tool: "search", args: { query: "getImpactRadius", limit: 3 } },
       { title: "explore tools.ts", tool: "explore", args: { target: "src/mcp/tools.ts", mode: "file", depth: 2 } },
       { title: "impact tools.ts", tool: "impact", args: { target: "src/mcp/tools.ts", direction: "dependencies", depth: 2, summary_only: true } },
@@ -375,7 +375,7 @@ const TASKS: TaskSpec[] = [
     baselineGrep:
       "rg -n \"impactCommand|_impactImpl|safeLocalImpact|cross-impact|crossImpact\" gitnexus/src/cli/tool.ts gitnexus/src/mcp/local/local-backend.ts gitnexus/src/core/group/cross-impact.ts",
     baselineFiles: ["gitnexus/src/mcp/local/local-backend.ts", "gitnexus/src/core/group/cross-impact.ts"],
-    atlasSteps: [
+    argusSteps: [
       { title: "search _impactImpl", tool: "search", args: { query: "_impactImpl", limit: 5 } },
       { title: "files cross-impact", tool: "files", args: { pattern: "cross-impact", max_depth: 6 } },
     ],
@@ -389,7 +389,7 @@ const TASKS: TaskSpec[] = [
     baselineGrep:
       "rg -n \"watchDisabledReason|FileWatcher|pending sync|auto-sync|catch-up sync\" src/sync/index.ts src/mcp/engine.ts src/mcp/tools.ts src/index.ts",
     baselineFiles: ["src/sync/index.ts", "src/mcp/engine.ts"],
-    atlasSteps: [
+    argusSteps: [
       { title: "files sync", tool: "files", args: { pattern: "src/sync", max_depth: 3 } },
       { title: "explore engine.ts", tool: "explore", args: { target: "src/mcp/engine.ts", mode: "file", depth: 2 } },
       { title: "search watchDisabledReason", tool: "search", args: { query: "watchDisabledReason", limit: 5 } },
@@ -407,7 +407,7 @@ const TASKS: TaskSpec[] = [
     baselineGrep:
       "rg -n \"CCR|compress_with_store|CompressionStore\" crates/headroom-core/src/ccr/mod.rs crates/headroom-core/src/transforms/pipeline/mod.rs",
     baselineFiles: ["crates/headroom-core/src/ccr/mod.rs", "crates/headroom-core/src/transforms/pipeline/mod.rs"],
-    atlasSteps: [
+    argusSteps: [
       { title: "search CompressionStore", tool: "search", args: { query: "CompressionStore", limit: 5 } },
       { title: "explore ccr mod", tool: "explore", args: { target: "crates/headroom-core/src/ccr/mod.rs", mode: "file", depth: 2 } },
       {
@@ -430,7 +430,7 @@ const TASKS: TaskSpec[] = [
     repo: (ctx) => ({ label: "CodeGraph (diff)", path: ctx.codegraphDiffRoot }),
     baselineGrep: "git diff --name-only && rg -n \"watch|sync|policy\" __tests__ src --glob '*.test.ts' || true",
     baselineFiles: ["src/sync/watch-policy.ts"],
-    atlasSteps: [
+    argusSteps: [
       { title: "diff_impact unstaged", tool: "diff_impact", args: { scope: "unstaged" } },
       {
         title: "pack changed file",
@@ -457,7 +457,7 @@ const TASKS: TaskSpec[] = [
       "understand-anything-plugin/packages/dashboard/src/App.tsx",
       "understand-anything-plugin/src/onboard-builder.ts",
     ],
-    atlasSteps: [
+    argusSteps: [
       { title: "files dashboard", tool: "files", args: { pattern: "packages/dashboard/src", max_depth: 6 } },
       { title: "search buildOnboardingGuide", tool: "search", args: { query: "buildOnboardingGuide", limit: 3 } },
     ],
@@ -474,7 +474,7 @@ export function computeTotals(tasks: BenchmarkTaskResult[]): Record<BenchmarkArm
   const totals: Record<BenchmarkArm, ArmTotals> = {
     baseline: emptyTotals(),
     "formato-so": emptyTotals(),
-    atlas: emptyTotals(),
+    argus: emptyTotals(),
   };
   for (const task of tasks) {
     const bucket = totals[task.arm];
@@ -496,9 +496,9 @@ export function computeSummary(tasks: BenchmarkTaskResult[], outputDir: string):
 
   const gains = {
     format_token_pct: pct(totals.baseline.tokens, totals["formato-so"].tokens),
-    index_token_pct: pct(totals["formato-so"].tokens, totals.atlas.tokens),
-    headline_token_pct: pct(totals.baseline.tokens, totals.atlas.tokens),
-    headline_tool_call_pct: pct(totals.baseline.tool_calls, totals.atlas.tool_calls),
+    index_token_pct: pct(totals["formato-so"].tokens, totals.argus.tokens),
+    headline_token_pct: pct(totals.baseline.tokens, totals.argus.tokens),
+    headline_tool_call_pct: pct(totals.baseline.tool_calls, totals.argus.tool_calls),
   };
 
   const byKind = {} as BenchmarkSummary["by_kind"];
@@ -507,27 +507,27 @@ export function computeSummary(tasks: BenchmarkTaskResult[], outputDir: string):
       tasks.filter((t) => t.kind === kind && t.arm === arm).reduce((s, t) => s + t.tokens, 0);
     const baseTok = sel("baseline");
     const fmtTok = sel("formato-so");
-    const atlasTok = sel("atlas");
+    const argusTok = sel("argus");
     byKind[kind] = {
       baseline_tokens: baseTok,
       formato_so_tokens: fmtTok,
-      atlas_tokens: atlasTok,
-      headline_token_pct: pct(baseTok, atlasTok),
-      index_token_pct: pct(fmtTok, atlasTok),
+      argus_tokens: argusTok,
+      headline_token_pct: pct(baseTok, argusTok),
+      index_token_pct: pct(fmtTok, argusTok),
     };
   }
 
   // Gate honesto: o índice precisa surfar o ground-truth em TODA task e o
   // headline de tokens precisa ser positivo. Sem barras de utilidade fabricadas.
-  const atlasCorrect = totals.atlas.correct_count === totals.atlas.task_count;
-  const pass = atlasCorrect && gains.headline_token_pct > 0;
+  const argusCorrect = totals.argus.correct_count === totals.argus.task_count;
+  const pass = argusCorrect && gains.headline_token_pct > 0;
 
   return {
     generated_at: nowIso(),
     output_dir: outputDir,
     methodology: {
       token_counter: "Heurística subword offline (approxTokens) — APROXIMAÇÃO, não o tokenizer do modelo alvo.",
-      arms: "baseline (file reads crus) → formato-so (mesma info, serialização compacta) → atlas (tools reais concise).",
+      arms: "baseline (file reads crus) → formato-so (mesma info, serialização compacta) → argus (tools reais concise).",
       utility: "Checagem objetiva contra ground-truth (mustCite + símbolo nas saídas REAIS); uncertainty medido.",
       live_agent: "NÃO implementado — números são scriptados. Hook runLiveAgent reservado para follow-up.",
       label: "LIMITE SUPERIOR INTERNO SCRIPTADO (sem agente vivo; tokens por heurística aproximada).",
@@ -575,7 +575,7 @@ function writeSummary(outputDir: string, summary: BenchmarkSummary): void {
     `| ${t.id} | ${t.arm} | ${t.tool_calls} | ${t.tokens} | ${t.correct ? "✓" : "✗"} | ${t.uncertainty_disclosed ? "✓" : "—"} |`;
 
   const content = [
-    "# Benchmark interno — Atlas Argus (item 21, honesto)",
+    "# Benchmark interno — Argus (item 21, honesto)",
     "",
     `Gerado em: ${summary.generated_at}`,
     "",
@@ -583,13 +583,13 @@ function writeSummary(outputDir: string, summary: BenchmarkSummary): void {
     "",
     "## Headline (qualificado)",
     "",
-    `- Tokens baseline → atlas: ${fmtPct(summary.gains.headline_token_pct)} (headline honesto)`,
-    `- Tool calls baseline → atlas: ${fmtPct(summary.gains.headline_tool_call_pct)}`,
+    `- Tokens baseline → argus: ${fmtPct(summary.gains.headline_token_pct)} (headline honesto)`,
+    `- Tool calls baseline → argus: ${fmtPct(summary.gains.headline_tool_call_pct)}`,
     "",
     "### Decomposição formato vs índice",
     "",
     `- Ganho de **formato** (baseline → formato-só): ${fmtPct(summary.gains.format_token_pct)}`,
-    `- Ganho de **índice** (formato-só → atlas): ${fmtPct(summary.gains.index_token_pct)}`,
+    `- Ganho de **índice** (formato-só → argus): ${fmtPct(summary.gains.index_token_pct)}`,
     "",
     "## Totais por arm",
     "",
@@ -602,11 +602,11 @@ function writeSummary(outputDir: string, summary: BenchmarkSummary): void {
     "",
     "## Perfil cirúrgica × varredura (tokens)",
     "",
-    "| Kind | Baseline | Formato-só | Atlas | Headline | Ganho índice |",
+    "| Kind | Baseline | Formato-só | Argus | Headline | Ganho índice |",
     "|---|---|---|---|---|---|",
     ...(["cirurgica", "varredura"] as TaskKind[]).map(
       (k) =>
-        `| ${k} | ${summary.by_kind[k].baseline_tokens} | ${summary.by_kind[k].formato_so_tokens} | ${summary.by_kind[k].atlas_tokens} | ${fmtPct(summary.by_kind[k].headline_token_pct)} | ${fmtPct(summary.by_kind[k].index_token_pct)} |`,
+        `| ${k} | ${summary.by_kind[k].baseline_tokens} | ${summary.by_kind[k].formato_so_tokens} | ${summary.by_kind[k].argus_tokens} | ${fmtPct(summary.by_kind[k].headline_token_pct)} | ${fmtPct(summary.by_kind[k].index_token_pct)} |`,
     ),
     "",
     "## Por task",
@@ -664,7 +664,7 @@ export async function runMvpBenchmark(workspaceRoot: string, outputDir: string):
 async function main(): Promise<void> {
   const argRoot = process.argv[2];
   const workspaceRoot = argRoot ? resolve(process.cwd(), argRoot) : resolveWorkspaceRoot(process.cwd());
-  const outputDir = resolve(workspaceRoot, ".atlas/benchmark/latest");
+  const outputDir = resolve(workspaceRoot, ".argus/benchmark/latest");
   const summary = await runMvpBenchmark(workspaceRoot, outputDir);
   console.log(JSON.stringify(summary, null, 2));
   process.exit(summary.pass ? 0 : 1);
