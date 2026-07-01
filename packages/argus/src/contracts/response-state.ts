@@ -1,5 +1,5 @@
 /**
- * Estados operacionais alinhados a `.atlas/contracts/ESTADOS_RESPOSTA.md`
+ * Estados operacionais alinhados a `.argus/contracts/ESTADOS_RESPOSTA.md`
  */
 export type ResponseState =
   | "sucesso"

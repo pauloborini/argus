@@ -16,7 +16,7 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const cli = join(root, "packages", "argus", "dist", "cli.js");
 const configured = process.env.ARGUS_HOMOLOGATION_REPOS?.split(":").filter(Boolean);
 const candidates = configured ?? [
-  resolve(root, "../atlas-workflow"),
+  resolve(root, "../talos"),
   resolve(root, "../paytrainer-app"),
   join(root, ".app-vault", "archive", "headroom"),
 ];
@@ -152,7 +152,7 @@ for (const source of targets) {
   }
 }
 
-const evidenceDir = join(root, ".atlas", "homologation");
+const evidenceDir = join(root, ".argus", "homologation");
 mkdirSync(evidenceDir, { recursive: true });
 const payload = {
   generated_at: new Date().toISOString(),

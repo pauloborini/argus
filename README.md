@@ -35,7 +35,7 @@ handles instead of whole files), not formatting — isolated, the format-only ga
 **~0%**. It pays off most on **surgical lookups** (−97.8%) and less on **broad
 sweeps** (−55.7%), where an agent reads many files regardless. This is an **internal
 scripted upper bound** until a live-agent run lands; full method and per-task numbers
-in [`.atlas/benchmark/latest/SUMMARY.md`](.atlas/benchmark/latest/SUMMARY.md).
+in [`.argus/benchmark/latest/SUMMARY.md`](.argus/benchmark/latest/SUMMARY.md).
 
 It is **local-first**: nothing is indexed or sent to a remote service, and
 recovered context never leaves the workspace.
@@ -192,7 +192,7 @@ Build, benchmark, smoke, homologation and release scripts are documented in
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute.
 - [SECURITY.md](SECURITY.md) — reporting vulnerabilities.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
-- `.atlas/contracts/` — frozen MCP/CLI surface and response-state contracts.
+- `.argus/contracts/` — frozen MCP/CLI surface and response-state contracts.
 
 ---
 

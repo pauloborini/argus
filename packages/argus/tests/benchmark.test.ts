@@ -11,7 +11,7 @@ import {
   evaluateAnswer,
 } from "../src/benchmark/run-mvp.js";
 
-type Arm = "baseline" | "formato-so" | "atlas";
+type Arm = "baseline" | "formato-so" | "argus";
 
 function task(id: string, arm: Arm, kind: "cirurgica" | "varredura", tokens: number, toolCalls: number, correct: boolean) {
   return {
@@ -27,7 +27,7 @@ function task(id: string, arm: Arm, kind: "cirurgica" | "varredura", tokens: num
     correct,
     cited_expected: correct ? 2 : 1,
     expected_total: 2,
-    uncertainty_disclosed: arm === "atlas",
+    uncertainty_disclosed: arm === "argus",
     steps: [],
   };
 }
@@ -79,15 +79,15 @@ describe("computeTotals / computeSummary (3 arms)", () => {
     const tasks = [
       task("BT-01", "baseline", "cirurgica", 1000, 3, true),
       task("BT-01", "formato-so", "cirurgica", 800, 3, true),
-      task("BT-01", "atlas", "cirurgica", 200, 2, true),
+      task("BT-01", "argus", "cirurgica", 200, 2, true),
       task("BT-02", "baseline", "varredura", 1000, 2, true),
       task("BT-02", "formato-so", "varredura", 900, 2, true),
-      task("BT-02", "atlas", "varredura", 600, 2, true),
+      task("BT-02", "argus", "varredura", 600, 2, true),
     ];
     const totals = computeTotals(tasks);
     expect(totals.baseline.tokens).toBe(2000);
     expect(totals["formato-so"].tokens).toBe(1700);
-    expect(totals.atlas.tokens).toBe(800);
+    expect(totals.argus.tokens).toBe(800);
 
     const summary = computeSummary(tasks, "/tmp/out");
     expect(summary.gains.format_token_pct).toBeCloseTo(15, 1); // 2000→1700
@@ -95,14 +95,14 @@ describe("computeTotals / computeSummary (3 arms)", () => {
     expect(summary.gains.headline_token_pct).toBeCloseTo(60, 1); // 2000→800
     expect(summary.by_kind.cirurgica.headline_token_pct).toBeCloseTo(80, 1); // 1000→200
     expect(summary.by_kind.varredura.headline_token_pct).toBeCloseTo(40, 1); // 1000→600
-    expect(summary.pass).toBe(true); // todas corretas no atlas + headline positivo
+    expect(summary.pass).toBe(true); // todas corretas no argus + headline positivo
   });
 
-  it("falha o gate quando o atlas não surfa o ground-truth", () => {
+  it("falha o gate quando o argus não surfa o ground-truth", () => {
     const tasks = [
       task("BT-01", "baseline", "cirurgica", 1000, 3, true),
       task("BT-01", "formato-so", "cirurgica", 800, 3, true),
-      task("BT-01", "atlas", "cirurgica", 200, 2, false),
+      task("BT-01", "argus", "cirurgica", 200, 2, false),
     ];
     expect(computeSummary(tasks, "/tmp/out").pass).toBe(false);
   });

@@ -35,7 +35,7 @@ handles em vez de arquivos inteiros), não de formato — isolado, o ganho só-d
 é **~0%**. Compensa mais em **lookup cirúrgico** (−97,8%) e menos em **varredura
 ampla** (−55,7%), onde o agente leria muitos arquivos de qualquer jeito. É um
 **limite superior interno scriptado** até rodar com agente vivo; metodologia e
-números por task em [`.atlas/benchmark/latest/SUMMARY.md`](.atlas/benchmark/latest/SUMMARY.md).
+números por task em [`.argus/benchmark/latest/SUMMARY.md`](.argus/benchmark/latest/SUMMARY.md).
 
 É **local-first**: nada é indexado ou enviado para serviço remoto, e o contexto
 recuperado nunca sai do workspace.
@@ -193,7 +193,7 @@ Scripts de build, benchmark, smoke, homologação e release estão documentados 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — como contribuir.
 - [SECURITY.md](SECURITY.md) — reporte de vulnerabilidades.
 - [CHANGELOG.md](CHANGELOG.md) — histórico de releases.
-- `.atlas/contracts/` — surface MCP/CLI congelada e contratos de estado.
+- `.argus/contracts/` — surface MCP/CLI congelada e contratos de estado.
 
 ---
 
