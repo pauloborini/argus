@@ -12,3 +12,8 @@ dist/
 dist-release/
 .argus/
 *.tsbuildinfo
+
+#Atlas Ecosystem
+.talos
+.athena
+.argus
