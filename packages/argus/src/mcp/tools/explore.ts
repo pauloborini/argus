@@ -3,7 +3,11 @@ import { stubResponse } from "../../contracts/response-state.js";
 import type { StructuralIndex, ExtractedSymbol, FileStructuralEntry } from "../../extraction/types.js";
 import { closeIndexDb, openIndexDb, searchFtsInternal } from "../../storage/sqlite-index-store.js";
 import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { existsSync } from "node:fs";
 import { VaultEngine } from "../../memory/vault-engine.js";
+import { getMemoryDbPath } from "../../memory/paths.js";
+import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
+import { queryMemoryGraphForExplore } from "../../memory/memory-graph-query.js";
 import { WORKSPACE_MISSING, uniqueByKey, fileMatchesTests } from "./common.js";
 import type { ToolResponsePayload, ExploreArgs, IndexEnvelope, ExploreSnippetRef, ExploreRef } from "./common.js";
 import { readSymbolSignature } from "./pack.js";
@@ -162,16 +166,79 @@ function findMemoryRefs(
   target: string,
   mode: ExploreArgs["mode"],
   entryPath?: string,
-): Array<{ path: string; title: string; score: number; reason: string }> {
+): Array<{
+  path: string;
+  title: string;
+  score: number;
+  reason: string;
+  mechanism?: string;
+  confidence?: string;
+  evidence?: string;
+  source_note_id?: string;
+}> {
+  const graphRefs: Array<{
+    path: string;
+    title: string;
+    score: number;
+    reason: string;
+    mechanism?: string;
+    confidence?: string;
+    evidence?: string;
+    source_note_id?: string;
+  }> = [];
+
+  if (existsSync(getMemoryDbPath(cwd))) {
+    try {
+      const db = openMemoryDb(cwd, { readonly: true });
+      try {
+        const refs = queryMemoryGraphForExplore(db, mode ?? "topic", target, entryPath, 5);
+        for (const ref of refs) {
+          graphRefs.push({
+            path: ref.path,
+            title: ref.title,
+            score: ref.score,
+            reason: ref.reason,
+            mechanism: ref.mechanism,
+            confidence: ref.confidence,
+            evidence: ref.evidence,
+            source_note_id: ref.source_note_id,
+          });
+        }
+      } finally {
+        closeMemoryDb(db);
+      }
+    } catch {
+      // degrade to FTS
+    }
+  }
+
+  if (graphRefs.length > 0) {
+    return graphRefs;
+  }
+
   try {
     const query = mode === "file" && entryPath ? `${entryPath} ${target}` : target;
     const result = VaultEngine.search(query, { limit: 5, includeSnippets: true }, cwd);
-    const chunks = (result.chunks as Array<{ path: string; title: string; score: number }> | undefined) ?? [];
+    const chunks =
+      (result.chunks as Array<{
+        path: string;
+        title: string;
+        score: number;
+        mechanism?: string;
+        confidence?: string;
+        stale_reason?: string;
+        contradiction_reason?: string;
+        note_id?: string;
+      }> | undefined) ?? [];
     return chunks.map((chunk) => ({
       path: chunk.path,
       title: chunk.title,
       score: chunk.score,
       reason: mode === "file" ? "path_or_tag_overlap" : mode === "symbol" ? "symbol_mention" : "topic_match",
+      mechanism: chunk.mechanism ?? "fts-only",
+      confidence: chunk.confidence,
+      evidence: chunk.stale_reason ?? chunk.contradiction_reason,
+      source_note_id: chunk.note_id,
     }));
   } catch {
     return [];

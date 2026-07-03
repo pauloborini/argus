@@ -61,7 +61,29 @@ CREATE TABLE IF NOT EXISTS note_embeddings_meta (
   vault_hash TEXT
 );
 
+CREATE TABLE IF NOT EXISTS memory_entities (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('note', 'tag', 'path', 'symbol')),
+  canonical_key TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  UNIQUE (kind, canonical_key)
+);
+
+CREATE TABLE IF NOT EXISTS memory_relations (
+  id TEXT PRIMARY KEY,
+  source_note_id TEXT NOT NULL,
+  target_entity_id TEXT NOT NULL,
+  mechanism TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_entity_id) REFERENCES memory_entities(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path);
 CREATE INDEX IF NOT EXISTS idx_notes_type ON notes(type);
+CREATE INDEX IF NOT EXISTS idx_memory_entities_kind_key ON memory_entities(kind, canonical_key);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_note_id);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_entity_id);
 `;
 }

@@ -140,6 +140,44 @@ export function isMemorySchemaV2(db: Database): boolean {
   return readSchemaVersion(db) === MEMORY_SQLITE_SCHEMA_VERSION;
 }
 
+function tableExists(db: Database, name: string): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(name) as { name: string } | undefined;
+  return Boolean(row?.name);
+}
+
+/** Tabelas locais do grafo S04 — idempotente em abertura write. */
+export function migrateMemoryDbGraphTables(db: Database): void {
+  if (tableExists(db, "memory_entities") && tableExists(db, "memory_relations")) {
+    return;
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_entities (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('note', 'tag', 'path', 'symbol')),
+      canonical_key TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      UNIQUE (kind, canonical_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_relations (
+      id TEXT PRIMARY KEY,
+      source_note_id TEXT NOT NULL,
+      target_entity_id TEXT NOT NULL,
+      mechanism TEXT NOT NULL,
+      confidence TEXT NOT NULL,
+      evidence TEXT NOT NULL,
+      FOREIGN KEY (source_note_id) REFERENCES notes(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_entity_id) REFERENCES memory_entities(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_entities_kind_key ON memory_entities(kind, canonical_key);
+    CREATE INDEX IF NOT EXISTS idx_memory_relations_source ON memory_relations(source_note_id);
+    CREATE INDEX IF NOT EXISTS idx_memory_relations_target ON memory_relations(target_entity_id);
+  `);
+}
+
 export const MEMORY_V2_NOTE_INSERT_COLUMNS = [
   "id",
   "path",

@@ -8,11 +8,24 @@ import { denseTopK, type EmbeddingRow } from "../embeddings/vector-search.js";
 import { reciprocalRankFusion } from "../embeddings/rrf.js";
 import type { ToolResponsePayload } from "../mcp/tools/common.js";
 import { defaultMemoryConfig, loadMemoryConfig, writeMemoryConfig } from "./config.js";
+import { CodeIndexReader } from "./code-index-reader.js";
+import { rebuildMemoryGraph } from "./memory-graph-store.js";
 import { parseMarkdown } from "./markdown-parser.js";
 import { getMemoryDbPath, getVaultDir, VAULT_SUBDIRS, type VaultSubdir } from "./paths.js";
 import { closeMemoryDb, openMemoryDb, type Database } from "./storage/sqlite-db.js";
 import { MEMORY_SQLITE_SCHEMA_VERSION } from "./storage/sqlite-schema.js";
 import { isMemorySchemaV2, memoryV2NoteInsertSql } from "./storage/sqlite-v2-migrate.js";
+import {
+  buildV2ReadSqlFilter,
+  defaultMemoryReadFilter,
+  deriveReadState,
+  MEMORY_NOTE_V2_SELECT,
+  normalizeMemoryChunk,
+  type MemoryMatchMechanism,
+  type MemoryNoteV2Row,
+  type MemoryReadFilter,
+  type MemoryRetrievalChunk,
+} from "./memory-retrieval.js";
 import { defaultDirectCaptureV2, isLegacyV1Note, normalizeV2Metadata } from "./v2-metadata.js";
 
 const VALID_TYPES = new Set(["inbox", "decision", "meeting", "entity", "project", "reference"]);
@@ -24,14 +37,8 @@ export interface RememberOptions {
   file?: string;
 }
 
-export interface MemorySearchResult {
-  note_id: string;
-  path: string;
-  title: string;
-  type: string;
-  score: number;
-  snippet: string;
-  content?: string;
+export interface MemorySearchResult extends Omit<MemoryRetrievalChunk, "mechanism"> {
+  mechanism?: MemoryMatchMechanism;
 }
 
 export interface MemoryStatus {
@@ -102,28 +109,35 @@ function escapeFts(query: string): string {
   return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(" OR ") || `"${query.replace(/"/g, '""')}"`;
 }
 
-function ftsRows(db: Database, query: string, limit: number): MemorySearchResult[] {
+function ftsRows(
+  db: Database,
+  query: string,
+  limit: number,
+  filter: MemoryReadFilter = defaultMemoryReadFilter(),
+): MemorySearchResult[] {
+  const { clause, params } = buildV2ReadSqlFilter(filter);
   const rows = db
     .prepare(
-      `SELECT n.id AS note_id, n.path, n.title, n.type, n.content,
+      `SELECT ${MEMORY_NOTE_V2_SELECT},
               snippet(notes_fts, 3, '', '', ' … ', 20) AS snippet,
               bm25(notes_fts) AS rank
        FROM notes_fts
        JOIN notes n ON n.id = notes_fts.note_id
        WHERE notes_fts MATCH ?
+         AND ${clause}
        ORDER BY rank
        LIMIT ?`,
     )
-    .all(escapeFts(query), limit) as Array<MemorySearchResult & { rank: number; content: string }>;
-  return rows.map((row, index) => ({
-    note_id: row.note_id,
-    path: row.path,
-    title: row.title,
-    type: row.type,
-    score: Number((1 / (index + 1)).toFixed(4)),
-    snippet: row.snippet || row.content.slice(0, 240),
-    content: row.content,
-  }));
+    .all(escapeFts(query), ...params, limit) as Array<MemoryNoteV2Row & { rank: number; snippet: string }>;
+  return rows.map((row, index) =>
+    normalizeMemoryChunk(
+      row,
+      1 / (index + 1),
+      "fts-only",
+      row.snippet || row.content.slice(0, 240),
+      true,
+    ),
+  );
 }
 
 function readAllNoteEmbeddings(db: Database): EmbeddingRow[] {
@@ -134,15 +148,20 @@ function readAllNoteEmbeddings(db: Database): EmbeddingRow[] {
   return rows.map((row) => ({ symbol_id: Number.parseInt(row.note_id.slice(0, 12), 16), bytes: blobToInt8(row.vector) }));
 }
 
-function readNotesByPseudoIds(db: Database, pseudoIds: number[]): Map<number, MemorySearchResult> {
+function readNotesByPseudoIds(
+  db: Database,
+  pseudoIds: number[],
+  filter: MemoryReadFilter = defaultMemoryReadFilter(),
+): Map<number, MemoryNoteV2Row> {
+  const { clause, params } = buildV2ReadSqlFilter(filter);
   const notes = db
-    .prepare("SELECT id AS note_id, path, title, type, content FROM notes")
-    .all() as Array<MemorySearchResult & { content: string }>;
-  const map = new Map<number, MemorySearchResult>();
+    .prepare(`SELECT ${MEMORY_NOTE_V2_SELECT} FROM notes n WHERE ${clause}`)
+    .all(...params) as MemoryNoteV2Row[];
+  const map = new Map<number, MemoryNoteV2Row>();
   for (const note of notes) {
     const pseudo = Number.parseInt(note.note_id.slice(0, 12), 16);
     if (pseudoIds.includes(pseudo)) {
-      map.set(pseudo, { ...note, score: 0, snippet: note.content.slice(0, 240), content: note.content });
+      map.set(pseudo, note);
     }
   }
   return map;
@@ -151,14 +170,22 @@ function readNotesByPseudoIds(db: Database, pseudoIds: number[]): Map<number, Me
 function buildMemoryResultsByPseudoIds(
   db: Database,
   ordered: number[],
+  mechanism: MemoryMatchMechanism,
   scoreById?: Map<number, number>,
+  filter: MemoryReadFilter = defaultMemoryReadFilter(),
 ): MemorySearchResult[] {
-  const notes = readNotesByPseudoIds(db, ordered);
+  const notes = readNotesByPseudoIds(db, ordered, filter);
   return ordered
     .map((id, index) => {
       const note = notes.get(id);
       return note
-        ? { ...note, score: Number((scoreById?.get(id) ?? 1 / (index + 1)).toFixed(4)) }
+        ? normalizeMemoryChunk(
+            note,
+            scoreById?.get(id) ?? 1 / (index + 1),
+            mechanism,
+            note.content.slice(0, 240),
+            true,
+          )
         : null;
     })
     .filter((item): item is MemorySearchResult => item !== null);
@@ -169,8 +196,9 @@ async function hybridRows(
   query: string,
   limit: number,
   embedderOverride?: Embedder,
+  filter: MemoryReadFilter = defaultMemoryReadFilter(),
 ): Promise<{ chunks: MemorySearchResult[]; mechanism: "hybrid-rrf" | "fts-only" }> {
-  const lexical = ftsRows(db, query, Math.max(limit, 50));
+  const lexical = ftsRows(db, query, Math.max(limit, 50), filter);
   const rows = readAllNoteEmbeddings(db);
   if (rows.length === 0) {
     return { chunks: lexical.slice(0, limit), mechanism: "fts-only" };
@@ -186,7 +214,9 @@ async function hybridRows(
     chunks: buildMemoryResultsByPseudoIds(
       db,
       fused.map((item) => item.id),
+      "hybrid-rrf",
       new Map(fused.map((item) => [item.id, item.score])),
+      filter,
     ),
   };
 }
@@ -264,11 +294,13 @@ export class VaultEngine {
     const files = walkMarkdown(vaultDir);
     const db = openMemoryDb(cwd);
     const syncWarnings: string[] = [];
+    const codeIndex = CodeIndexReader.open(cwd);
     try {
       const tx = db.transaction(() => {
-        db.exec("DELETE FROM notes_fts; DELETE FROM note_embeddings; DELETE FROM notes;");
+        db.exec("DELETE FROM notes_fts; DELETE FROM note_embeddings; DELETE FROM memory_relations; DELETE FROM memory_entities; DELETE FROM notes;");
         const insertNote = db.prepare(memoryV2NoteInsertSql());
         const insertFts = db.prepare("INSERT INTO notes_fts (note_id, path, title, content) VALUES (?, ?, ?, ?)");
+        const graphNotes: Array<{ id: string; path: string; title: string; parsed: ReturnType<typeof parseMarkdown> }> = [];
         for (const file of files) {
           const raw = readFileSync(file, "utf-8");
           const rel = relative(vaultDir, file);
@@ -308,7 +340,9 @@ export class VaultEngine {
             v2.migrated_from_v1,
           );
           insertFts.run(id, rel, parsed.title, body);
+          graphNotes.push({ id, path: rel, title: parsed.title, parsed });
         }
+        syncWarnings.push(...rebuildMemoryGraph(db, cwd, graphNotes, codeIndex));
         db.prepare(
           `INSERT INTO memory_meta (id, schema_version, last_sync_at, notes_count, vault_hash)
            VALUES (1, ?, ?, ?, ?)
@@ -323,6 +357,7 @@ export class VaultEngine {
         : stubResponse("sucesso", "Cofre sincronizado.");
       return { notes_count: files.length, ...envelope };
     } finally {
+      codeIndex.close();
       closeMemoryDb(db);
     }
   }
@@ -398,10 +433,22 @@ export class VaultEngine {
       if (options.includeSnippets === false) {
         chunks = chunks.map((chunk) => ({ ...chunk, snippet: "" }));
       }
+      const readState = deriveReadState(chunks);
+      const limitations: string[] = ["Busca sem embeddings; fallback FTS."];
+      if (chunks.some((chunk) => chunk.stale_reason)) {
+        limitations.push("Resultados incluem fatos com stale_reason.");
+      }
+      if (chunks.some((chunk) => chunk.contradiction_reason)) {
+        limitations.push("Resultados incluem fatos com contradiction_reason.");
+      }
       return {
         mechanism,
         chunks,
-        ...stubResponse("sucesso", chunks.length ? "Busca de memória concluída." : "Nenhuma nota encontrada."),
+        ...stubResponse(
+          "parcial",
+          chunks.length ? "Busca de memória concluída (FTS)." : "Nenhuma nota encontrada.",
+          { limitations },
+        ),
       };
     } finally {
       closeMemoryDb(db);
@@ -448,10 +495,23 @@ export class VaultEngine {
       if (options.includeSnippets === false) {
         chunks = chunks.map((chunk) => ({ ...chunk, snippet: "" }));
       }
+      const readState = deriveReadState(chunks);
+      const limitations: string[] = [];
+      if (chunks.some((chunk) => chunk.stale_reason)) {
+        limitations.push("Resultados incluem fatos com stale_reason.");
+      }
+      if (chunks.some((chunk) => chunk.contradiction_reason)) {
+        limitations.push("Resultados incluem fatos com contradiction_reason.");
+      }
+      const responseState = result.mechanism === "fts-only" ? "parcial" : readState;
       return {
         mechanism: result.mechanism,
         chunks,
-        ...stubResponse("sucesso", chunks.length ? "Busca de memória concluída." : "Nenhuma nota encontrada."),
+        ...stubResponse(
+          responseState,
+          chunks.length ? "Busca de memória concluída." : "Nenhuma nota encontrada.",
+          limitations.length ? { limitations } : undefined,
+        ),
       };
     } catch (err) {
       const fallback = VaultEngine.search(query, options, cwd);
