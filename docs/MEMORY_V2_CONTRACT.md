@@ -1,10 +1,12 @@
-# Contrato técnico — memória v2 (S02)
+# Contrato técnico — memória v2 (S02 + persistência S03)
 
-Documento canônico do contrato de dados da memória v2 do Argus. **Não implementa** migração, write path nem leitura por escopo — apenas fixa nomes, regras e casos negativos para S03–S05.
+Documento canônico do contrato de dados da memória v2 do Argus. Fixa nomes, regras e casos negativos; a **persistência** no SQLite local foi implementada em S03.
 
-**Referências:** PRD S02 §3 D1–D6; schema runtime v1 em `packages/argus/src/memory/storage/sqlite-schema.ts`; tipos em `packages/argus/src/memory/v2-contract.ts`; draft de persistência em `packages/argus/src/memory/v2-persistence-draft.ts`.
+**Referências:** PRD S02 §3 D1–D6; PRD S03 write path; tipos em `packages/argus/src/memory/v2-contract.ts`; colunas em `packages/argus/src/memory/v2-persistence-draft.ts`; migração em `packages/argus/src/memory/storage/sqlite-v2-migrate.ts`; schema em `packages/argus/src/memory/storage/sqlite-schema.ts`.
 
-**Runtime atual:** `MEMORY_SQLITE_SCHEMA_VERSION = "1.0.0"` — tabelas `notes`, `notes_fts`, `note_embeddings` permanecem inalteradas nesta sprint.
+**Runtime atual (S03):** `MEMORY_SQLITE_SCHEMA_VERSION = "2.0.0"`. A tabela `notes` persiste os campos v2 (`scope`, `source`, `confidence`, temporalidade, supersedência, sinais e `migrated_from_v1`). `openMemoryDb` em modo **write** aplica migração forward-only e idempotente de bancos `1.0.0`. `notes_fts` e `note_embeddings` permanecem operacionais; campos v2 não entram no ranking FTS nesta sprint.
+
+**Diagnóstico:** `VaultEngine.status` expõe `schema_version` e `schema_v2_ready`. Abertura **readonly** de banco v1 não dispara migração — `schema_v2_ready` fica `false` até a primeira abertura em write (`sync`, `remember`, etc.).
 
 ---
 
@@ -19,7 +21,7 @@ Documento canônico do contrato de dados da memória v2 do Argus. **Não impleme
 | `org` | **reservado** | Reconhecido no vocabulário; **rejeitado para gravação** |
 
 - Todo fato v2 pertence a **exatamente um** escopo ativo.
-- Default planejado na migração S03 para notas v1: `project` (explícito, não silencioso).
+- Default na migração S03 para notas v1: `project` (explícito via `sqlite-v2-migrate.ts`).
 - Escopo desconhecido ou `org` → erro acionável na gravação; nenhum dado salvo.
 
 ### Caso negativo — escopo não autorizado
@@ -127,9 +129,9 @@ Dois fatos ativos em `project` contradizem-se → leitura sinaliza `contradictio
 
 ## 9. Mapa campo → módulo
 
-| Campo PRD §5 | Wire TS / SQL draft |
-|--------------|---------------------|
-| Escopo | `scope` — `v2-contract.ts`, `v2-persistence-draft.ts` |
+| Campo PRD §5 | Wire TS / SQLite |
+|--------------|------------------|
+| Escopo | `scope` — `v2-contract.ts`, coluna `notes.scope` |
 | Fonte | `source` |
 | Confiança | `confidence` |
 | Observação | `observed_at` |

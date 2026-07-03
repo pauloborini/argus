@@ -4,6 +4,7 @@ import type { Database } from "../../storage/sqlite-db.js";
 import { loadBetterSqlite3 } from "../../storage/sqlite-db.js";
 import { getMemoryDbPath } from "../paths.js";
 import { MEMORY_SQLITE_SCHEMA_VERSION, memorySchemaSql } from "./sqlite-schema.js";
+import { migrateMemoryDbToV2 } from "./sqlite-v2-migrate.js";
 
 export type { Database };
 
@@ -28,6 +29,7 @@ export function openMemoryDb(cwd: string = process.cwd(), options: { readonly?: 
        VALUES (1, ?, 0)
        ON CONFLICT(id) DO NOTHING`,
     ).run(MEMORY_SQLITE_SCHEMA_VERSION);
+    migrateMemoryDbToV2(db);
   }
   return db;
 }

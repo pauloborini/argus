@@ -1,6 +1,5 @@
 /**
- * Draft de persistência memória v2 — contrato puro, NÃO executado por openMemoryDb.
- * Migração real e bump de MEMORY_SQLITE_SCHEMA_VERSION ficam em S03.
+ * Contrato de persistência memória v2 — colunas aplicadas por `openMemoryDb` (S03).
  */
 
 import type { MemoryV2Confidence, MemoryV2Source, MemoryV2ActiveScope } from "./v2-contract.js";
@@ -35,12 +34,9 @@ export const MEMORY_V2_NOTE_EXTENSION_FIELD_NAMES = [
 ] as const satisfies readonly (keyof MemoryV2NoteExtension)[];
 
 /**
- * SQL draft — não aplicado em runtime (schema v1 permanece 1.0.0).
- * S03 executará migração a partir deste contrato.
+ * SQL de referência para extensão v2 — runtime usa `sqlite-v2-migrate.ts`.
  */
 export const MEMORY_V2_NOTES_EXTENSION_SQL_DRAFT = `
--- DRAFT ONLY — not executed by openMemoryDb in S02
--- Planned ALTER for notes (S03):
 -- ALTER TABLE notes ADD COLUMN scope TEXT NOT NULL DEFAULT 'project';
 -- ALTER TABLE notes ADD COLUMN source TEXT NOT NULL DEFAULT 'v1_migration';
 -- ALTER TABLE notes ADD COLUMN confidence TEXT NOT NULL DEFAULT 'presumed';

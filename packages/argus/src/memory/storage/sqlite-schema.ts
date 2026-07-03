@@ -1,4 +1,4 @@
-export const MEMORY_SQLITE_SCHEMA_VERSION = "1.0.0";
+export const MEMORY_SQLITE_SCHEMA_VERSION = "2.0.0";
 
 export function memorySchemaSql(): string {
   return `
@@ -22,7 +22,18 @@ CREATE TABLE IF NOT EXISTS notes (
   created_at TEXT,
   updated_at TEXT,
   content TEXT NOT NULL,
-  content_hash TEXT NOT NULL
+  content_hash TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'project',
+  source TEXT NOT NULL DEFAULT 'v1_migration',
+  confidence TEXT NOT NULL DEFAULT 'presumed',
+  observed_at TEXT,
+  valid_from TEXT,
+  valid_until TEXT,
+  superseded_by TEXT,
+  supersedes TEXT,
+  stale_reason TEXT,
+  contradiction_reason TEXT,
+  migrated_from_v1 TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
@@ -54,4 +65,3 @@ CREATE INDEX IF NOT EXISTS idx_notes_path ON notes(path);
 CREATE INDEX IF NOT EXISTS idx_notes_type ON notes(type);
 `;
 }
-

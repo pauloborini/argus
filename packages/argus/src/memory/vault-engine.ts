@@ -11,6 +11,9 @@ import { defaultMemoryConfig, loadMemoryConfig, writeMemoryConfig } from "./conf
 import { parseMarkdown } from "./markdown-parser.js";
 import { getMemoryDbPath, getVaultDir, VAULT_SUBDIRS, type VaultSubdir } from "./paths.js";
 import { closeMemoryDb, openMemoryDb, type Database } from "./storage/sqlite-db.js";
+import { MEMORY_SQLITE_SCHEMA_VERSION } from "./storage/sqlite-schema.js";
+import { isMemorySchemaV2, memoryV2NoteInsertSql } from "./storage/sqlite-v2-migrate.js";
+import { defaultDirectCaptureV2, isLegacyV1Note, normalizeV2Metadata } from "./v2-metadata.js";
 
 const VALID_TYPES = new Set(["inbox", "decision", "meeting", "entity", "project", "reference"]);
 
@@ -37,6 +40,8 @@ export interface MemoryStatus {
   notes_count: number;
   last_sync_at: string | null;
   embeddings_ready: boolean;
+  schema_version?: string | null;
+  schema_v2_ready?: boolean;
   error?: string;
 }
 
@@ -226,12 +231,17 @@ export class VaultEngine {
     const noteDir = join(getVaultDir(cwd), targetType as VaultSubdir);
     mkdirSync(noteDir, { recursive: true });
     const notePath = join(noteDir, fileName);
+    const v2Defaults = defaultDirectCaptureV2(now);
     const finalContent = [
       "---",
       `title: ${JSON.stringify(title)}`,
       `type: ${targetType}`,
       `tags: ${yamlList(tags)}`,
       `links: ${yamlList(links)}`,
+      `scope: ${v2Defaults.scope}`,
+      `source: ${v2Defaults.source}`,
+      `confidence: ${v2Defaults.confidence}`,
+      `observed_at: ${v2Defaults.observed_at}`,
       `created_at: ${now}`,
       `updated_at: ${now}`,
       "---",
@@ -253,13 +263,11 @@ export class VaultEngine {
     const vaultDir = getVaultDir(cwd);
     const files = walkMarkdown(vaultDir);
     const db = openMemoryDb(cwd);
+    const syncWarnings: string[] = [];
     try {
       const tx = db.transaction(() => {
         db.exec("DELETE FROM notes_fts; DELETE FROM note_embeddings; DELETE FROM notes;");
-        const insertNote = db.prepare(
-          `INSERT INTO notes (id, path, title, type, tags_json, links_json, created_at, updated_at, content, content_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        );
+        const insertNote = db.prepare(memoryV2NoteInsertSql());
         const insertFts = db.prepare("INSERT INTO notes_fts (note_id, path, title, content) VALUES (?, ?, ?, ?)");
         for (const file of files) {
           const raw = readFileSync(file, "utf-8");
@@ -267,6 +275,15 @@ export class VaultEngine {
           const parsed = parseMarkdown(raw, basename(file, extname(file)));
           const body = parsed.body.trim();
           const id = hashText(`${rel}\n${raw}`).slice(0, 16);
+          const observedAt = parsed.observed_at ?? parsed.updated_at ?? parsed.created_at ?? new Date().toISOString();
+          const v2 = normalizeV2Metadata(parsed, {
+            notePath: rel,
+            observedAt,
+            isLegacyV1Note: isLegacyV1Note(parsed),
+          });
+          if (v2.warnings.length) {
+            syncWarnings.push(...v2.warnings.map((warning) => `${rel}: ${warning}`));
+          }
           insertNote.run(
             id,
             rel,
@@ -278,18 +295,33 @@ export class VaultEngine {
             parsed.updated_at ?? null,
             body,
             hashText(body),
+            v2.scope,
+            v2.source,
+            v2.confidence,
+            v2.observed_at,
+            v2.valid_from,
+            v2.valid_until,
+            v2.superseded_by,
+            v2.supersedes,
+            v2.stale_reason,
+            v2.contradiction_reason,
+            v2.migrated_from_v1,
           );
           insertFts.run(id, rel, parsed.title, body);
         }
         db.prepare(
           `INSERT INTO memory_meta (id, schema_version, last_sync_at, notes_count, vault_hash)
-           VALUES (1, '1.0.0', ?, ?, ?)
-           ON CONFLICT(id) DO UPDATE SET last_sync_at = excluded.last_sync_at,
+           VALUES (1, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET schema_version = excluded.schema_version,
+             last_sync_at = excluded.last_sync_at,
              notes_count = excluded.notes_count, vault_hash = excluded.vault_hash`,
-        ).run(new Date().toISOString(), files.length, computeVaultHash(vaultDir, files));
+        ).run(MEMORY_SQLITE_SCHEMA_VERSION, new Date().toISOString(), files.length, computeVaultHash(vaultDir, files));
       });
       tx();
-      return { notes_count: files.length, ...stubResponse("sucesso", "Cofre sincronizado.") };
+      const envelope = syncWarnings.length
+        ? stubResponse("parcial", "Cofre sincronizado com ajustes de metadados v2.", { limitations: syncWarnings })
+        : stubResponse("sucesso", "Cofre sincronizado.");
+      return { notes_count: files.length, ...envelope };
     } finally {
       closeMemoryDb(db);
     }
@@ -436,13 +468,23 @@ export class VaultEngine {
 
   static status(cwd: string = process.cwd()): MemoryStatus {
     if (!existsSync(getMemoryDbPath(cwd))) {
-      return { initialized: false, staleness: "unknown", notes_count: 0, last_sync_at: null, embeddings_ready: false };
+      return {
+        initialized: false,
+        staleness: "unknown",
+        notes_count: 0,
+        last_sync_at: null,
+        embeddings_ready: false,
+        schema_version: null,
+        schema_v2_ready: false,
+      };
     }
     try {
       const db = openMemoryDb(cwd, { readonly: true });
       try {
-        const meta = db.prepare("SELECT last_sync_at, notes_count, vault_hash FROM memory_meta WHERE id = 1").get() as
-          | { last_sync_at: string | null; notes_count: number; vault_hash: string | null }
+        const meta = db
+          .prepare("SELECT schema_version, last_sync_at, notes_count, vault_hash FROM memory_meta WHERE id = 1")
+          .get() as
+          | { schema_version: string; last_sync_at: string | null; notes_count: number; vault_hash: string | null }
           | undefined;
         const emb = db.prepare("SELECT note_count, vault_hash FROM note_embeddings_meta WHERE id = 1").get() as
           | { note_count: number; vault_hash: string | null }
@@ -451,12 +493,16 @@ export class VaultEngine {
         const files = walkMarkdown(vaultDir);
         const currentVaultHash = computeVaultHash(vaultDir, files);
         const staleness = meta?.vault_hash && meta.vault_hash === currentVaultHash ? "fresh" : "stale";
+        const schemaVersion = meta?.schema_version ?? null;
+        const schemaV2Ready = schemaVersion === MEMORY_SQLITE_SCHEMA_VERSION && isMemorySchemaV2(db);
         return {
           initialized: true,
           staleness: meta?.last_sync_at ? staleness : "unknown",
           notes_count: meta?.notes_count ?? 0,
           last_sync_at: meta?.last_sync_at ?? null,
           embeddings_ready: Boolean(emb && emb.note_count === (meta?.notes_count ?? -1) && emb.vault_hash === meta?.vault_hash),
+          schema_version: schemaVersion,
+          schema_v2_ready: schemaV2Ready,
         };
       } finally {
         closeMemoryDb(db);
@@ -468,6 +514,8 @@ export class VaultEngine {
         notes_count: 0,
         last_sync_at: null,
         embeddings_ready: false,
+        schema_version: null,
+        schema_v2_ready: false,
         error: err instanceof Error ? err.message : String(err),
       };
     }
