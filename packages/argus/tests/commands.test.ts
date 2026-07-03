@@ -44,7 +44,19 @@ describe("commands lifecycle", () => {
 
   it("serve --mcp falha sem workspace com exit 1", async () => {
     useEmptyDir();
-    await expect(runServeMcp()).resolves.toBe(1);
+    const savedXdg = process.env.XDG_CONFIG_HOME;
+    const isolatedRegistry = mkdtempSync(join(tmpdir(), "argus-empty-registry-"));
+    process.env.XDG_CONFIG_HOME = isolatedRegistry;
+    try {
+      await expect(runServeMcp()).resolves.toBe(1);
+    } finally {
+      if (savedXdg !== undefined) {
+        process.env.XDG_CONFIG_HOME = savedXdg;
+      } else {
+        delete process.env.XDG_CONFIG_HOME;
+      }
+      rmSync(isolatedRegistry, { recursive: true, force: true });
+    }
   });
 
   it("status retorna 1 sem workspace", () => {

@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ARGUS_VERSION } from "../version.js";
+import { ARGUS_WORKSPACE_ROOT_ENV } from "../workspace/resolve-serve-root.js";
 
 /** Chave do servidor Argus nos configs MCP (idempotência por chave). */
 export const MCP_SERVER_KEY = "argus";
@@ -26,6 +27,10 @@ export type McpScope = "local" | "global";
 interface McpServerEntry {
   command: string;
   args: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  /** Pi: mantém o processo stdio vivo entre tool calls (auto-conexão). */
+  lifecycle?: "keep-alive";
 }
 
 interface McpConfig {
@@ -79,19 +84,34 @@ function resolveCliEntry(): string {
 
 /**
  * Entrada base do servidor Argus: node absoluto + cli.js absoluto + `serve
- * --mcp`. Caminhos absolutos evitam depender do `argus` estar no PATH do host
- * e funcionam igual em registro global (sem cwd do projeto).
+ * --mcp`. Caminhos absolutos evitam depender do `argus` estar no PATH do host.
+ *
+ * Escopo local: fixa `ARGUS_WORKSPACE_ROOT` no env (path absoluto do repo) para
+ * hosts que não propagam cwd. Escopo global: o `serve` descobre o workspace via
+ * env do host (`WORKSPACE_FOLDER_PATHS`, etc.) ou registry do daemon.
  */
-function buildServerEntry(): McpServerEntry {
-  return {
+function buildServerEntry(scope?: McpScope, repoRoot?: string, host?: McpHostId): McpServerEntry {
+  const entry: McpServerEntry = {
     command: process.execPath,
     args: [resolveCliEntry(), "serve", "--mcp"],
   };
+  if (scope === "local" && repoRoot) {
+    entry.env = { [ARGUS_WORKSPACE_ROOT_ENV]: resolve(repoRoot) };
+  }
+  if (host === "pi") {
+    entry.lifecycle = "keep-alive";
+  }
+  return entry;
 }
 
 function sameServerEntry(a: McpServerEntry | undefined, b: McpServerEntry): boolean {
   return (
-    !!a && a.command === b.command && JSON.stringify(a.args) === JSON.stringify(b.args)
+    !!a &&
+    a.command === b.command &&
+    JSON.stringify(a.args) === JSON.stringify(b.args) &&
+    JSON.stringify(a.env ?? {}) === JSON.stringify(b.env ?? {}) &&
+    (a.cwd ?? "") === (b.cwd ?? "") &&
+    (a.lifecycle ?? "") === (b.lifecycle ?? "")
   );
 }
 
@@ -172,7 +192,7 @@ function makeMcpServersAdapter(spec: McpServersAdapterSpec): HostAdapter {
     scopes: spec.scopes,
     register(repoRoot, scope) {
       const path = spec.configPath(repoRoot, scope);
-      const entry = buildServerEntry();
+      const entry = buildServerEntry(scope, repoRoot, spec.id);
       try {
         const config = readJson<McpConfig>(path);
         const servers = config.mcpServers ?? {};
@@ -223,8 +243,8 @@ function opencodeConfigPath(repoRoot: string, scope: McpScope): string {
     : join(repoRoot, "opencode.json");
 }
 
-function buildOpencodeEntry(): OpencodeServerEntry {
-  const entry = buildServerEntry();
+function buildOpencodeEntry(scope?: McpScope, repoRoot?: string): OpencodeServerEntry {
+  const entry = buildServerEntry(scope, repoRoot);
   return { type: "local", command: [entry.command, ...entry.args], enabled: true };
 }
 
@@ -240,7 +260,7 @@ const opencodeAdapter: HostAdapter = {
   scopes: ["global", "local"],
   register(repoRoot, scope) {
     const path = opencodeConfigPath(repoRoot, scope);
-    const entry = buildOpencodeEntry();
+    const entry = buildOpencodeEntry(scope, repoRoot);
     try {
       const config = readJson<OpencodeConfig>(path);
       const servers = config.mcp ?? {};
@@ -329,7 +349,7 @@ const codexAdapter: HostAdapter = {
     if (!hasBinary("codex")) {
       return { host: "codex", ok: true, changed: false, message: "codex: não detectado (CLI ausente no PATH)" };
     }
-    const entry = buildServerEntry();
+    const entry = buildServerEntry("global");
     const existing = getCodexMcpConfig();
     if (sameCodexServerEntry(existing, entry)) {
       return { host: "codex", ok: true, changed: false, message: "codex: já registrado" };
@@ -375,6 +395,7 @@ const codexAdapter: HostAdapter = {
 // ---------------------------------------------------------------------------
 // Pi: JSON `mcpServers` global em ~/.pi/agent/mcp.json (honra
 // PI_CODING_AGENT_DIR) ou `.mcp.json` no repo (local).
+// `lifecycle: keep-alive` mantém o processo stdio entre tool calls (auto-conexão).
 // INVARIANTE: scope local resolve para `.mcp.json` — mesmo path de claude-code.
 // A chave é idêntica (`argus`); unregister deduplicado por path evita
 // remover entry que outro adapter ainda espera. Se Pi mudar de forma, separar.
@@ -419,7 +440,7 @@ function zcodeSeedPath(): string {
 }
 
 function buildZcodePluginConfig() {
-  const entry = buildServerEntry();
+  const entry = buildServerEntry("global");
   return {
     name: "argus",
     version: ARGUS_VERSION,
@@ -431,6 +452,9 @@ function buildZcodePluginConfig() {
         args: entry.args,
         transport: "stdio",
         cwd: "${ZCODE_PROJECT_DIR}",
+        env: {
+          [ARGUS_WORKSPACE_ROOT_ENV]: "${ZCODE_PROJECT_DIR}",
+        },
       },
     },
   };
@@ -497,17 +521,13 @@ const zcodeAdapter: HostAdapter = {
   scopes: ["global"],
   register(_repoRoot, _scope) {
     const pluginPath = zcodePluginJsonPath();
-    const entry = buildServerEntry();
+    const zcodeServer = buildZcodePluginConfig().mcpServers[MCP_SERVER_KEY];
 
     if (existsSync(pluginPath)) {
       try {
         const existing = JSON.parse(readFileSync(pluginPath, "utf-8"));
         const existingServer = existing?.mcpServers?.[MCP_SERVER_KEY];
-        if (
-          existingServer &&
-          existingServer.command === entry.command &&
-          JSON.stringify(existingServer.args) === JSON.stringify(entry.args)
-        ) {
+        if (existingServer && sameServerEntry(existingServer, zcodeServer)) {
           // Plugin já instalado — garante que está habilitado no config.json
           const enabled = enableZcodePlugin();
           const extra = enabled.changed ? " (habilitado no config.json)" : "";
@@ -607,23 +627,23 @@ function errorResult(id: McpHostId, err: unknown): HostRegistrationResult {
 }
 
 const ADAPTERS: Record<McpHostId, HostAdapter> = {
-  // Claude Code: global → ~/.claude/settings.json (visível em todos os projetos);
-  // local → .mcp.json na raiz do repo (legado/opt-in). Default = global.
+  // Claude Code: local → .mcp.json na raiz do repo; global → ~/.claude/settings.json.
+  // Default = local (env ARGUS_WORKSPACE_ROOT com path absoluto do repo).
   // CLAUDE_CONFIG_HOME sobrescreve ~/.claude (usado em testes para não tocar a máquina real).
   "claude-code": makeMcpServersAdapter({
     id: "claude-code",
-    scopes: ["global", "local"],
+    scopes: ["local", "global"],
     configPath: (root, scope) =>
       scope === "global"
         ? join(process.env.CLAUDE_CONFIG_HOME ?? join(homedir(), ".claude"), "settings.json")
         : join(root, ".mcp.json"),
   }),
-  // Cursor: global → ~/.cursor/mcp.json (visível em todos os projetos);
-  // local → .cursor/mcp.json na raiz do repo (legado/opt-in). Default = global.
+  // Cursor: local → .cursor/mcp.json no repo; global → ~/.cursor/mcp.json.
+  // Default = local (env ARGUS_WORKSPACE_ROOT com path absoluto do repo).
   // CURSOR_CONFIG_HOME sobrescreve ~ (usado em testes para não tocar a máquina real).
   cursor: makeMcpServersAdapter({
     id: "cursor",
-    scopes: ["global", "local"],
+    scopes: ["local", "global"],
     configPath: (root, scope) =>
       scope === "global"
         ? join(process.env.CURSOR_CONFIG_HOME ?? homedir(), ".cursor", "mcp.json")
