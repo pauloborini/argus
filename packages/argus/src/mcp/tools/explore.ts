@@ -3,6 +3,7 @@ import { stubResponse } from "../../contracts/response-state.js";
 import type { StructuralIndex, ExtractedSymbol, FileStructuralEntry } from "../../extraction/types.js";
 import { closeIndexDb, openIndexDb, searchFtsInternal } from "../../storage/sqlite-index-store.js";
 import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { VaultEngine } from "../../memory/vault-engine.js";
 import { WORKSPACE_MISSING, uniqueByKey, fileMatchesTests } from "./common.js";
 import type { ToolResponsePayload, ExploreArgs, IndexEnvelope, ExploreSnippetRef, ExploreRef } from "./common.js";
 import { readSymbolSignature } from "./pack.js";
@@ -154,6 +155,27 @@ function buildExploreSummary(
   calleesCount: number,
 ): string {
   return `${targetLabel} em ${entry.relative_path}: ${centralSymbols.length} símbolo(s) centrais, ${importsCount} import(s), ${callersCount} caller(s) inferido(s) e ${calleesCount} callee(s) inferido(s).`;
+}
+
+function findMemoryRefs(
+  cwd: string,
+  target: string,
+  mode: ExploreArgs["mode"],
+  entryPath?: string,
+): Array<{ path: string; title: string; score: number; reason: string }> {
+  try {
+    const query = mode === "file" && entryPath ? `${entryPath} ${target}` : target;
+    const result = VaultEngine.search(query, { limit: 5, includeSnippets: true }, cwd);
+    const chunks = (result.chunks as Array<{ path: string; title: string; score: number }> | undefined) ?? [];
+    return chunks.map((chunk) => ({
+      path: chunk.path,
+      title: chunk.title,
+      score: chunk.score,
+      reason: mode === "file" ? "path_or_tag_overlap" : mode === "symbol" ? "symbol_mention" : "topic_match",
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export function buildExploreResponse(
@@ -321,6 +343,7 @@ export function buildExploreResponse(
   ];
 
   const targetLabel = targetSymbol ? `Símbolo ${targetSymbol.name}` : `Arquivo ${entry.relative_path}`;
+  const memoryRefs = findMemoryRefs(cwd, target, mode, entry.relative_path);
 
   return {
     summary: buildExploreSummary(
@@ -348,6 +371,7 @@ export function buildExploreResponse(
     callers,
     callees,
     snippets,
+    memory_refs: memoryRefs,
     suggested_next_action: targetSymbol
       ? "Use `trace` para fluxo ou `impact` para blast radius do símbolo."
       : "Refine para um símbolo com `search` se precisar entendimento mais específico dentro do arquivo.",

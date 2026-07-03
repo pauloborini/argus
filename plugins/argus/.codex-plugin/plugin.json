@@ -1,7 +1,7 @@
 {
   "name": "argus",
-  "version": "1.2.0",
-  "description": "Local code retrieval and context packing for coding agents",
+  "version": "2.0.0",
+  "description": "Local code and memory retrieval with context packing for coding agents",
   "author": {
     "name": "Paulo Borini",
     "url": "https://github.com/pauloborini"
@@ -12,11 +12,11 @@
   "keywords": ["mcp", "code-retrieval", "context-packing", "coding-agents"],
   "interface": {
     "displayName": "Argus",
-    "shortDescription": "Retrieval e contexto local para agentes.",
-    "longDescription": "Indexa código localmente e expõe busca, exploração, trace, impacto, diff, packing e retrieve por MCP.",
+    "shortDescription": "Retrieval, memória e contexto local para agentes.",
+    "longDescription": "Indexa código e memória localmente e expõe busca, exploração, trace, impacto, diff, packing, retrieve, remember e recall por MCP.",
     "developerName": "Paulo Borini",
     "category": "Productivity",
-    "capabilities": ["Local retrieval", "Impact analysis", "Context packing"],
+    "capabilities": ["Local retrieval", "Local memory", "Impact analysis", "Context packing"],
     "websiteURL": "https://github.com/pauloborini/argus",
     "defaultPrompt": [
       "Explore esta área do código com Argus.",

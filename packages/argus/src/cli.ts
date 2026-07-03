@@ -14,6 +14,16 @@ import { runEmbed } from "./commands/embed-cmd.js";
 import { runScipImport } from "./commands/scip-import.js";
 import { runStatus } from "./commands/status.js";
 import { runSync } from "./commands/sync.js";
+import {
+  runMemoryDream,
+  runMemoryEmbed,
+  runMemoryInit,
+  runMemoryRebuild,
+  runMemoryRemember,
+  runMemorySearch,
+  runMemorySync,
+  runMemoryDoctor,
+} from "./commands/memory.js";
 import { runTrace } from "./commands/trace.js";
 import { runServeMcp } from "./commands/serve.js";
 import { runMarkDirty } from "./commands/mark-dirty.js";
@@ -135,6 +145,7 @@ program
   .option("--no-daemon", "Não registrar/subir o daemon (apenas índice + MCP)")
   .option("--no-mcp", "Não registrar MCP nos hosts")
   .option("--with-hooks", "Instalar hooks git como fallback de daemon down")
+  .option("--no-memory", "Não inicializar/sincronizar o cofre de memória")
   .action(
     async (opts: {
       hosts?: string;
@@ -144,6 +155,7 @@ program
       daemon?: boolean;
       mcp?: boolean;
       withHooks?: boolean;
+      memory?: boolean;
     }) => {
       finish(
         await runInstall({
@@ -152,6 +164,7 @@ program
           noDaemon: opts.daemon === false,
           noMcp: opts.mcp === false,
           withHooks: opts.withHooks === true,
+          noMemory: opts.memory === false,
         }),
       );
     },
@@ -242,17 +255,75 @@ program
   .description("Busca semântica (embeddings) com fusão híbrida; requer argus embed")
   .argument("<query>", "Query em linguagem natural")
   .option("--mode <mode>", "dense | hybrid (default hybrid)")
+  .option("--domain <domain>", "code | memory | all (default code)")
   .option("--scope <path>", "Restringir candidatos por path")
   .option("--kind <kind>", "Restringir por tipo de símbolo")
   .option("--limit <n>", "Máximo de candidatos", (value) => Number(value))
   .action(
     async (
       query: string,
-      opts: { mode?: "dense" | "hybrid"; scope?: string; kind?: string; limit?: number },
+      opts: { mode?: "dense" | "hybrid"; domain?: "code" | "memory" | "all"; scope?: string; kind?: string; limit?: number },
     ) => {
       finish(await runSemanticSearch(query, opts));
     },
   );
+
+const memory = program.command("memory").description("Cofre de conhecimento local");
+memory
+  .command("init")
+  .description("Inicializar .argus/memory")
+  .action(() => {
+    finish(runMemoryInit());
+  });
+memory
+  .command("remember [text]")
+  .description("Capturar nota, decisão ou insight no cofre")
+  .option("--stdin", "Ler conteúdo de stdin")
+  .option("--file <path>", "Importar arquivo markdown")
+  .option("--type <type>", "inbox | decision | meeting | entity | project | reference")
+  .option("--tag <tag...>", "Tags")
+  .option("--link <link...>", "Links wiki/path")
+  .action(async (text: string | undefined, opts: { stdin?: boolean; file?: string; type?: string; tag?: string[]; link?: string[] }) => {
+    finish(await runMemoryRemember(text, opts));
+  });
+memory
+  .command("sync")
+  .description("Sincronizar markdown do vault para memory.db")
+  .action(() => {
+    finish(runMemorySync());
+  });
+memory
+  .command("embed")
+  .description("Gerar embeddings int8 do cofre")
+  .action(async () => {
+    finish(await runMemoryEmbed());
+  });
+memory
+  .command("search")
+  .description("Buscar no cofre de memória")
+  .argument("<query>", "Query textual")
+  .option("--limit <n>", "Máximo de resultados", (value) => Number(value))
+  .action((query: string, opts: { limit?: number }) => {
+    finish(runMemorySearch(query, opts));
+  });
+memory
+  .command("dream")
+  .description("Ciclo de consolidação do cofre")
+  .action(async () => {
+    finish(await runMemoryDream());
+  });
+memory
+  .command("doctor")
+  .description("Diagnóstico do cofre")
+  .action(() => {
+    finish(runMemoryDoctor());
+  });
+memory
+  .command("rebuild")
+  .description("Rebuild completo do memory.db")
+  .action(() => {
+    finish(runMemoryRebuild());
+  });
 
 program
   .command("files")
@@ -325,13 +396,15 @@ program
   .requiredOption("--goal <text>", "Objetivo do pacote para o modelo")
   .requiredOption("--token-budget <n>", "Budget máximo aproximado do pacote", (value) => Number(value))
   .option("--style <style>", "brief | balanced | deep")
-  .action((opts: { sources: string; goal: string; tokenBudget: number; style?: string }) => {
+  .option("--synthesize", "Solicitar síntese interna opcional")
+  .action(async (opts: { sources: string; goal: string; tokenBudget: number; style?: string; synthesize?: boolean }) => {
     finish(
-      runPackContext({
+      await runPackContext({
         sources: opts.sources.split(",").map((item) => item.trim()).filter(Boolean),
         goal: opts.goal,
         tokenBudget: opts.tokenBudget,
         style: opts.style,
+        synthesize: opts.synthesize,
       }),
     );
   });
@@ -339,7 +412,7 @@ program
 program
   .command("retrieve")
   .description("Recuperar conteúdo original persistido por retrieve_handle")
-  .argument("<handle>", "Handle opaco no formato rh_<16 hex>")
+  .argument("<handle>", "Handle opaco no formato rh_<16 hex> ou mh_<16 hex>")
   .action((handle: string) => {
     finish(runRetrieve(handle));
   });

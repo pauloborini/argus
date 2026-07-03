@@ -7,6 +7,10 @@ export const FILE_MANIFEST_FILE = "file-manifest.json";
 export const STRUCTURAL_INDEX_FILE = "structural-index.json";
 export const INDEX_DB_FILE = "index.db";
 export const DIRTY_FLAG_FILE = "dirty.json";
+export const MEMORY_DIR = "memory";
+export const MEMORY_DB_FILE = "memory.db";
+export const MEMORY_CONFIG_FILE = "config.json";
+export const MEMORY_VAULT_DIR = "vault";
 export const PRODUCT_ID = "argus";
 export const SCHEMA_VERSION = "1.0.0";
 
@@ -62,6 +66,14 @@ export function getIndexDbPath(cwd: string = process.cwd()): string {
 
 export function getDirtyFlagPath(cwd: string = process.cwd()): string {
   return join(getWorkspacePath(cwd), DIRTY_FLAG_FILE);
+}
+
+export function getMemoryPath(cwd: string = process.cwd()): string {
+  return join(getWorkspacePath(cwd), MEMORY_DIR);
+}
+
+export function getMemoryDbPath(cwd: string = process.cwd()): string {
+  return join(getMemoryPath(cwd), MEMORY_DB_FILE);
 }
 
 export function workspaceExists(cwd: string = process.cwd()): boolean {

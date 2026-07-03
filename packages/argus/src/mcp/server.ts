@@ -60,16 +60,29 @@ const TOOL_INPUT_SCHEMAS = {
     goal: z.string().min(1),
     token_budget: z.number().int().positive().max(8000),
     style: z.enum(["brief", "balanced", "deep"]).optional(),
+    synthesize: z.boolean().optional(),
   }).passthrough(),
   retrieve: z.object({
-    handle: z.string().regex(/^rh_[a-f0-9]{16}$/),
+    handle: z.string().regex(/^(rh|mh)_[a-f0-9]{16}$/),
   }).passthrough(),
   semantic_search: z.object({
     query: z.string().min(1),
     mode: z.enum(["dense", "hybrid"]).optional(),
+    domain: z.enum(["code", "memory", "all"]).optional(),
     scope: z.string().min(1).optional(),
     kind: z.string().min(1).optional(),
     limit: z.number().int().positive().max(100).optional(),
+  }).passthrough(),
+  remember: z.object({
+    content: z.string().min(1),
+    type: z.enum(["inbox", "decision", "meeting", "entity", "project", "reference"]).optional(),
+    tags: z.array(z.string()).optional(),
+    links: z.array(z.string()).optional(),
+  }).passthrough(),
+  recall: z.object({
+    query: z.string().min(1),
+    limit: z.number().int().positive().max(50).optional(),
+    include_snippets: z.boolean().optional(),
   }).passthrough(),
 } as const;
 

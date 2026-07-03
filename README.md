@@ -5,12 +5,13 @@
 
 # Argus
 
-**Local code retrieval and context packing for coding agents.**
+**Local code + memory retrieval and context packing for coding agents.**
 
 Argus indexes a repository once and answers an agent's structural
 questions — *where is this symbol, what calls it, what breaks if I change it,
 give me just the relevant context* — without the agent reading and re-reading
-files. It runs entirely on your machine, has no UI, and speaks two interfaces:
+files. It also keeps a local knowledge vault under `.argus/memory/` for
+decisions, notes and project context. It runs entirely on your machine, has no UI, and speaks two interfaces:
 a **CLI** and an **MCP server**.
 
 > 📖 Looking for the exhaustive command list? See **[COMMANDS.md](COMMANDS.md)**.
@@ -75,6 +76,8 @@ argus install
 # Ask questions
 argus search "calculateTotal"            # find a symbol fast
 argus explore src/billing.ts --mode file # structured context for a file
+printf "# decision\n" | argus memory remember --stdin
+argus memory search decision
 ```
 
 After `install`, the auto-sync daemon keeps the index fresh on every save — no
@@ -107,9 +110,9 @@ To wire it by hand, point your agent or IDE at the stdio MCP server:
 }
 ```
 
-The server exposes ten tools: `search`, `explore`, `trace`, `impact`,
+The server exposes twelve tools: `search`, `explore`, `trace`, `impact`,
 `diff_impact`, `files`, `pack_context`, `retrieve`, `status` and
-`semantic_search`. They all read local state only.
+`semantic_search`, plus memory tools `remember` and `recall`. They all read/write local state only.
 
 ---
 
@@ -147,7 +150,7 @@ Two ideas worth knowing:
 - **Staleness.** The index can drift from the code. `status` and every query
   surface `fresh` / `stale` / `unknown` so results are never silently wrong.
 - **Retrieve handles.** `pack_context` may return a compact context plus an
-  opaque handle (`rh_…`). `retrieve <handle>` rehydrates the original, on
+  opaque handle (`rh_…` for code, `mh_…` for memory). `retrieve <handle>` rehydrates the original, on
   demand, confined to the same workspace.
 
 ---

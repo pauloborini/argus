@@ -58,6 +58,7 @@ export interface PackContextArgs {
   goal?: string;
   token_budget?: number;
   style?: "brief" | "balanced" | "deep";
+  synthesize?: boolean;
 }
 
 export interface RetrieveArgs {

@@ -88,8 +88,8 @@ describe("commands lifecycle", () => {
     expect(runDiffImpact()).toBe(1);
   });
 
-  it("pack-context retorna 1 sem workspace", () => {
+  it("pack-context retorna 1 sem workspace", async () => {
     useEmptyDir();
-    expect(runPackContext({ sources: ["app.ts"], goal: "debug", tokenBudget: 120 })).toBe(1);
+    await expect(runPackContext({ sources: ["app.ts"], goal: "debug", tokenBudget: 120 })).resolves.toBe(1);
   });
 });

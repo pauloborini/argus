@@ -1,11 +1,13 @@
 // Tools `pack_context`/`retrieve`: empacotamento e recuperação por handle.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { stubResponse } from "../../contracts/response-state.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { closeIndexDb, openIndexDb } from "../../storage/sqlite-index-store.js";
 import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { getVaultDir } from "../../memory/paths.js";
+import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
 import { uniqueByKey, isWithinPath } from "./common.js";
 import type { ToolResponsePayload, PackContextArgs, RetrieveArgs, IndexEnvelope, ExploreSnippetRef, PackOriginRef, PackRemovedEntry, PackSegment, StoredPackHandle, ReadStoredPackHandleResult, TraceNode } from "./common.js";
 import { LazyTraceGraph, personalizedPageRank } from "./graph.js";
@@ -66,7 +68,7 @@ function getPackedHandlePath(cwd: string, handle: string): string {
 }
 
 function isValidRetrieveHandle(handle: string): boolean {
-  return /^rh_[a-f0-9]{16}$/.test(handle);
+  return /^(rh|mh)_[a-f0-9]{16}$/.test(handle);
 }
 
 function compareReversibility(
@@ -501,7 +503,7 @@ function buildPackSegmentsFromSource(
     return { segments: [], limitations: [], reversibility: "full" };
   }
 
-  if (trimmed.startsWith("rh_")) {
+  if (trimmed.startsWith("rh_") || trimmed.startsWith("mh_")) {
     const stored = readStoredPackHandle(cwd, trimmed);
     if (!stored.found) {
       return {
@@ -514,6 +516,15 @@ function buildPackSegmentsFromSource(
       segments: stored.segments,
       limitations: stored.limitations,
       reversibility: stored.reversibility,
+    };
+  }
+
+  const memorySegment = buildMemoryPackSegment(cwd, trimmed);
+  if (memorySegment) {
+    return {
+      segments: [memorySegment],
+      limitations: [],
+      reversibility: "full",
     };
   }
 
@@ -621,6 +632,52 @@ function buildPackSegmentsFromSource(
   };
 }
 
+function buildMemoryPackSegment(cwd: string, source: string): PackSegment | null {
+  if (source.startsWith("memory:")) {
+    const rel = source.slice("memory:".length).replace(/^\/+/, "");
+    const vaultDir = getVaultDir(cwd);
+    const path = join(vaultDir, rel);
+    if (!isWithinPath(vaultDir, path) || !existsSync(path)) {
+      return null;
+    }
+    const text = readFileSync(path, "utf-8");
+    return {
+      ref: source,
+      text: [`Fonte: ${source}`, `Título: ${basename(rel)}`, "---", text.trim()].join("\n"),
+      originRefs: [{ ref: source, path: `memory/${rel}` }],
+    };
+  }
+
+  if (source.startsWith("note:")) {
+    const id = source.slice("note:".length).trim();
+    if (!id) {
+      return null;
+    }
+    try {
+      const db = openMemoryDb(cwd, { readonly: true });
+      try {
+        const row = db
+          .prepare("SELECT id, path, title, content FROM notes WHERE id = ? OR path = ? LIMIT 1")
+          .get(id, id) as { id: string; path: string; title: string; content: string } | undefined;
+        if (!row) {
+          return null;
+        }
+        return {
+          ref: source,
+          text: [`Fonte: note:${row.id}`, `Título: ${row.title}`, "---", row.content.trim()].join("\n"),
+          originRefs: [{ ref: source, path: `memory/${row.path}`, symbol: row.title }],
+        };
+      } finally {
+        closeMemoryDb(db);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function rankSegmentsByLazyPageRank(cwd: string, segments: PackSegment[]): PackSegment[] {
   const metadata = readWorkspaceMetadata(cwd);
   if (!metadata || segments.length <= 1) {
@@ -699,7 +756,10 @@ export function buildPackContextResponse(
     };
   }
 
-  if (envelope.state === "falha" && !sources.every((item) => item.startsWith("rh_"))) {
+  const sourceIsMemoryOnly = (item: string) =>
+    item.startsWith("rh_") || item.startsWith("mh_") || item.startsWith("memory:") || item.startsWith("note:");
+
+  if (envelope.state === "falha" && !sources.every(sourceIsMemoryOnly)) {
     return {
       packed_context: "",
       origin_refs: [],
@@ -814,8 +874,12 @@ export function buildPackContextResponse(
 
   let retrieveHandle: string | undefined;
   let reversibility: ReadStoredPackHandleResult["reversibility"] = sourceReversibility;
-  if (hadMaterialLoss) {
-    retrieveHandle = `rh_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const isMemoryOnlyPack = sources.every((source) => source.startsWith("memory:") || source.startsWith("note:") || source.startsWith("mh_"));
+  if (hadMaterialLoss || isMemoryOnlyPack) {
+    const handlePrefix = isMemoryOnlyPack
+      ? "mh"
+      : "rh";
+    retrieveHandle = `${handlePrefix}_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const storedReversibility = writeStoredPackHandle(cwd, {
       handle: retrieveHandle,
       created_at: new Date().toISOString(),
@@ -833,7 +897,7 @@ export function buildPackContextResponse(
     }
     if (storedReversibility === "none") {
       limitations.add("Compressão irreversível: storage do retrieve_handle indisponível ou incompleto.");
-    } else {
+    } else if (hadMaterialLoss) {
       limitations.add(
         "token_budget excedido; essencial preservado; ver removed_or_summarized e reutilize retrieve_handle em sources[].",
       );
@@ -854,6 +918,14 @@ export function buildPackContextResponse(
     retrieve_handle: retrieveHandle,
     reversibility,
     token_estimate: countTokens(packedContext),
+    synthesis: args?.synthesize
+      ? {
+          state: "parcial",
+          message: "W_SYNTHESIS_UNAVAILABLE: síntese LLM interna não configurada.",
+          citations: [],
+          gaps: [],
+        }
+      : undefined,
     ...stubResponse(state, "Contexto comprimido pronto para o modelo.", {
       limitations: Array.from(limitations),
       staleness_hint: envelope.staleness_hint,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.0 - 2026-07-02
+
+- BREAKING: Athena absorvido pelo Argus: um binário (`argus`), um MCP (`argus serve --mcp`) e um estado (`.argus/`).
+- novo módulo `packages/argus/src/memory/` com vault local em `.argus/memory/`, CLI `argus memory *`, storage SQLite/FTS e embeddings int8.
+- MCP passa de 10 para 12 tools: adiciona `remember` e `recall`; não expõe `think` nem alias público `capture`.
+- `semantic_search` aceita `domain=code|memory|all`; `explore`, `status`, `pack_context` e `retrieve` entendem memória.
+- migração fail-closed de `.athena/` para `.argus/memory/`; `athena-vault.db` vira backup `legacy-athena-vault.db`, nunca runtime.
+
 ## 1.2.0 - 2026-06-30
 
 - BREAKING: rename do produto de Atlas Cortex para Argus (binário, nome de pacote, diretório de estado `.cortex/`→`.argus/`, chave de MCP server, todos os comandos de instalação).
