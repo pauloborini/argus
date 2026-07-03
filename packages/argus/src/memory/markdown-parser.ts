@@ -5,6 +5,17 @@ export interface ParsedMarkdown {
   links: string[];
   created_at?: string;
   updated_at?: string;
+  scope?: string;
+  source?: string;
+  confidence?: string;
+  observed_at?: string;
+  valid_from?: string;
+  valid_until?: string;
+  superseded_by?: string;
+  supersedes?: string;
+  stale_reason?: string;
+  contradiction_reason?: string;
+  migrated_from_v1?: string;
   body: string;
 }
 
@@ -48,6 +59,17 @@ export function parseMarkdown(content: string, fallbackTitle: string): ParsedMar
     links: parseList(meta.get("links")),
     created_at: meta.get("created_at"),
     updated_at: meta.get("updated_at"),
+    scope: meta.get("scope"),
+    source: meta.get("source"),
+    confidence: meta.get("confidence"),
+    observed_at: meta.get("observed_at"),
+    valid_from: meta.get("valid_from"),
+    valid_until: meta.get("valid_until"),
+    superseded_by: meta.get("superseded_by"),
+    supersedes: meta.get("supersedes"),
+    stale_reason: meta.get("stale_reason"),
+    contradiction_reason: meta.get("contradiction_reason"),
+    migrated_from_v1: meta.get("migrated_from_v1"),
     body,
   };
 }

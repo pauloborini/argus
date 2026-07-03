@@ -115,7 +115,7 @@ describe("memory v2 contract", () => {
     expect(v1NoteIsMigratable()).toBe(true);
     expect(MEMORY_V2_V1_MIGRATION_DEFAULT_SCOPE).toBe("project");
     expect(MEMORY_V2_V1_MIGRATION_DEFAULT_SOURCE).toBe("v1_migration");
-    expect(MEMORY_SQLITE_SCHEMA_VERSION).toBe("1.0.0");
+    expect(MEMORY_SQLITE_SCHEMA_VERSION).toBe("2.0.0");
   });
 
   it("mapeia campos PRD para draft de persistencia", () => {
