@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FakeEmbedder } from "../../src/embeddings/embedder.js";
 import { buildToolResponseAsync } from "../../src/mcp/tools/response.js";
 import { DreamEngine } from "../../src/memory/dream-engine.js";
@@ -14,6 +14,7 @@ describe("memory vault", () => {
   let tempDir: string | undefined;
 
   afterEach(() => {
+    vi.restoreAllMocks();
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -99,6 +100,23 @@ describe("memory vault", () => {
     expect(config.vault_path).toBe(join(cwd, ".argus", "memory", "vault"));
     expect(config.db_path).toBe(join(cwd, ".argus", "memory", "memory.db"));
     expect(config.code_index_path).toBe(join(cwd, ".argus", "index.db"));
+  });
+
+  it("migração falha preservando origem .athena", () => {
+    const cwd = root();
+    rmSync(join(cwd, ".argus", "memory"), { recursive: true, force: true });
+    const athenaDir = join(cwd, ".athena");
+    const vaultDir = join(athenaDir, "vault", "inbox");
+    mkdirSync(vaultDir, { recursive: true });
+    writeFileSync(join(vaultDir, "legacy.md"), "# Legacy\n", "utf-8");
+    vi.spyOn(Date, "now").mockReturnValue(123);
+    writeFileSync(join(cwd, ".argus", `memory.migrating-${process.pid}-123`), "blocks tmp dir", "utf-8");
+
+    const result = migrateLegacyAthena(cwd);
+
+    expect(result.status).toBe("failed");
+    expect(existsSync(join(athenaDir, "vault", "inbox", "legacy.md"))).toBe(true);
+    expect(existsSync(join(cwd, ".argus", "memory"))).toBe(false);
   });
 
   it("think dry-run monta prompt com citações e gaps", async () => {

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -316,6 +317,35 @@ describe("S30 — daemon de auto-sync + instalação zero-toque", () => {
   });
 
   describe("install", () => {
+    it("respeita --no-memory em repo limpo", async () => {
+      const root = makeRepo();
+      originalCwd = process.cwd();
+      process.chdir(root);
+      writeFileSync(join(root, "sample.ts"), "export const sample = 1;\n");
+
+      const code = await runInstall({ noDaemon: true, noMcp: true, noMemory: true });
+
+      expect(code).toBe(0);
+      expect(existsSync(join(root, ".argus", "workspace.json"))).toBe(true);
+      expect(existsSync(join(root, ".argus", "index.db"))).toBe(true);
+      expect(existsSync(join(root, ".argus", "memory"))).toBe(false);
+    });
+
+    it("respeita --no-memory preservando .athena legado sem migrar", async () => {
+      const root = makeRepo();
+      originalCwd = process.cwd();
+      process.chdir(root);
+      writeFileSync(join(root, "sample.ts"), "export const sample = 1;\n");
+      mkdirSync(join(root, ".athena", "vault", "inbox"), { recursive: true });
+      writeFileSync(join(root, ".athena", "vault", "inbox", "legacy.md"), "# Legacy\n", "utf-8");
+
+      const code = await runInstall({ noDaemon: true, noMcp: true, noMemory: true });
+
+      expect(code).toBe(0);
+      expect(existsSync(join(root, ".athena", "vault", "inbox", "legacy.md"))).toBe(true);
+      expect(existsSync(join(root, ".argus", "memory"))).toBe(false);
+    });
+
     it("retorna falha parcial quando MCP não pôde ser registrado", async () => {
       const root = makeRepo();
       originalCwd = process.cwd();
