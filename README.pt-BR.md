@@ -176,8 +176,26 @@ namespaces, classes, structs, records, interfaces, enums e membros top-level
   por **embeddings é opcional e off-by-default**: rode `argus embed` e use a tool
   `semantic_search` (denso bge-small + fusão híbrida RRF). Os vetores não são
   auto-sincronizados — podem ficar stale e a tool sinaliza honestamente.
+- Memória inteligente (`remember`/`recall`, `pack_context` com `synthesize`,
+  `memory dream`) é **local-first**: nada sai do workspace sem configuração explícita
+  de provider LLM; sem embeddings ou LLM o runtime retorna `parcial` com limitações
+  documentadas, não certeza plena.
 
 ---
+
+## Release e validação
+
+Gates de release no monorepo (sem SLA de performance — valores orientativos):
+
+| Comando | Função |
+|---|---|
+| `npm run validate` | typecheck + testes + lint + build |
+| `npm run smoke:package` | tarball instalável + MCP 12 tools |
+| `npm run homologate` | sondas em ≥2 repos locais (`ARGUS_HOMOLOGATION_REPOS`) |
+| `npm run release:check` | consistência de versão |
+| `npm run release:eval` | evidência agregada memória/privacidade/performance com veredito bloqueante → `.argus/release-evaluation/latest.json` |
+
+Checklist de privacidade e avaliação agregada S05–S07: `packages/argus/tests/memory/release-evaluation.test.ts` e `packages/argus/tests/release-privacy.test.ts`. A avaliação de release usa dream dry-run real e sai com código não-zero quando o veredito não é `passed`.
 
 ## Desenvolvimento
 

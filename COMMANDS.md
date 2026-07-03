@@ -484,6 +484,11 @@ Run from the monorepo root.
 | `npm run smoke:package` | Install & exercise the tarball in a clean dir. |
 | `npm run homologate` | Validate external local repos (real retrieval probe). |
 | `npm run release:check` | Assert version consistency across root/runtime/plugin. |
+| `npm run release:eval` | Aggregated memory/privacy/performance evidence with blocking verdict → `.argus/release-evaluation/latest.json`. |
+
+Homologation needs at least two local repo paths. Set `ARGUS_HOMOLOGATION_REPOS=repoA:repoB` when defaults are missing.
+
+Release evaluation (S08) covers aggregated retrieval/memory, local-first privacy, degradation without embeddings/LLM, dream dry-run, and the 12-tool MCP surface (`remember`/`recall`). Recorded performance is indicative only — no SLA. A non-`passed` verdict exits non-zero.
 
 Tags `v*` run CI, tarball smoke, npm publish with provenance, and a GitHub
 Release with `SHA256SUMS`. The tag version must match root, runtime and plugin.
