@@ -128,7 +128,10 @@ describe("memory vault", () => {
     expect(result.state).toBe("sucesso");
     expect(String(result.dry_run_prompt)).toContain("memória local");
     expect(Array.isArray(result.citations)).toBe(true);
-    expect(Array.isArray(result.gaps)).toBe(true);
+    expect(Array.isArray(result.unknown)).toBe(true);
+    expect(Array.isArray(result.known)).toBe(true);
+    expect(Array.isArray(result.contradictions)).toBe(true);
+    expect(Array.isArray(result.stale_sources)).toBe(true);
   });
 
   it("dream tria inbox local e gera relatório sem sqlite-vec", async () => {
