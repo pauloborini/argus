@@ -20,7 +20,7 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: npm install --no-save
+      - run: npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock 2>/dev/null || true
       - run: npm run validate
       - run: npm run smoke:package
       - run: npm run release:check
