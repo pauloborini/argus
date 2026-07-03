@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { buildToolResponse } from "../src/mcp/tools/response.js";
+import { VaultEngine } from "../src/memory/vault-engine.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
 describe("explore tool", () => {
@@ -141,6 +142,51 @@ describe("explore tool", () => {
         item.toLowerCase().includes("kotlin"),
       ) ?? false,
     ).toBe(false);
+  });
+
+  it("memory_refs usa fallback FTS com mechanism e sinais v2 quando grafo vazio (S05)", async () => {
+    const root = setupWorkspace({
+      "utils.ts": "export function calculateTotal() { return 1; }\n",
+    });
+    expect(await runIndex()).toBe(0);
+    VaultEngine.init(root);
+    const vault = join(root, ".argus", "memory", "vault", "reference");
+    mkdirSync(vault, { recursive: true });
+    writeFileSync(
+      join(vault, "note-calc.md"),
+      [
+        "---",
+        'title: "Calc note"',
+        "type: reference",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: inferred",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        'stale_reason: "session_expired"',
+        "---",
+        "",
+        "calculateTotal memory reference",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    expect(VaultEngine.sync(root).state).toBe("sucesso");
+
+    const payload = buildToolResponse("explore", root, {
+      target: "calculateTotal",
+      mode: "symbol",
+      response_format: "detailed",
+    });
+    expect(payload.state).toBe("sucesso");
+    const refs = payload.memory_refs as Array<{
+      mechanism?: string;
+      confidence?: string;
+      evidence?: string;
+    }>;
+    expect(refs.length).toBeGreaterThan(0);
+    expect(refs[0]?.mechanism).toBe("fts-only");
+    expect(refs[0]?.confidence).toBe("inferred");
+    expect(refs[0]?.evidence).toBe("session_expired");
   });
 
 });

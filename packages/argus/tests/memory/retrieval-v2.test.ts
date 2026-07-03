@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  buildV2ReadSqlFilter,
   defaultMemoryReadFilter,
   enrichTemporalSignals,
   isScopeReadable,
@@ -12,6 +13,7 @@ import {
 } from "../../src/memory/memory-retrieval.js";
 import { VaultEngine } from "../../src/memory/vault-engine.js";
 import { initWorkspace } from "../../src/workspace/workspace.js";
+import { FakeEmbedder } from "../../src/embeddings/embedder.js";
 
 describe("memory retrieval v2 read filters (S05 T01)", () => {
   let tempDir: string | undefined;
@@ -77,6 +79,13 @@ describe("memory retrieval v2 read filters (S05 T01)", () => {
     ).toBe(false);
   });
 
+  it("filtro SQL inclui source antes do ranking", () => {
+    const filter = buildV2ReadSqlFilter({ sources: ["direct_capture"], asOf: "2026-01-01T00:00:00.000Z" });
+
+    expect(filter.clause).toContain("n.source IN (?)");
+    expect(filter.params).toEqual(["project", "user", "session", "agent", "2026-01-01T00:00:00.000Z", "direct_capture"]);
+  });
+
   it("recall exclui org e superseded; vigente vence", async () => {
     const cwd = root();
     VaultEngine.init(cwd);
@@ -124,7 +133,7 @@ describe("memory retrieval v2 read filters (S05 T01)", () => {
         "---",
         'title: "Org secret"',
         "type: decision",
-        "scope: org",
+        "scope: project",
         "source: direct_capture",
         "confidence: confirmed",
         "observed_at: 2026-01-01T00:00:00.000Z",
@@ -136,6 +145,13 @@ describe("memory retrieval v2 read filters (S05 T01)", () => {
       "utf-8",
     );
     expect(VaultEngine.sync(cwd).state).toBe("sucesso");
+    const { openMemoryDb, closeMemoryDb } = await import("../../src/memory/storage/sqlite-db.js");
+    const orgDb = openMemoryDb(cwd);
+    try {
+      orgDb.prepare("UPDATE notes SET scope = 'org' WHERE path = ?").run("decision/org-note.md");
+    } finally {
+      closeMemoryDb(orgDb);
+    }
 
     const recalled = await VaultEngine.recall("billing", { limit: 10 }, cwd);
     const titles = recalled.chunks.map((chunk) => chunk.title);
@@ -143,6 +159,91 @@ describe("memory retrieval v2 read filters (S05 T01)", () => {
     expect(titles).not.toContain("Billing antigo");
     expect(titles).not.toContain("Org secret");
     expect(recalled.chunks.every((chunk) => chunk.mechanism)).toBe(true);
+  });
+
+  it("valid_from futuro bloqueia leitura via SQL com asOf", async () => {
+    const cwd = root();
+    VaultEngine.init(cwd);
+    const vault = join(cwd, ".argus", "memory", "vault", "inbox");
+    mkdirSync(vault, { recursive: true });
+    writeFileSync(
+      join(vault, "future.md"),
+      [
+        "---",
+        'title: "Future fact"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: confirmed",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        "valid_from: 2099-06-01T00:00:00.000Z",
+        "---",
+        "",
+        "future token unique",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    expect(VaultEngine.sync(cwd).state).toBe("sucesso");
+    const recalled = await VaultEngine.recall("future token", { limit: 5 }, cwd);
+    expect(recalled.chunks).toHaveLength(0);
+  });
+
+  it("dense usa só notas legíveis antes do RRF", async () => {
+    const cwd = root();
+    VaultEngine.init(cwd);
+    const vault = join(cwd, ".argus", "memory", "vault", "inbox");
+    mkdirSync(vault, { recursive: true });
+    for (let index = 0; index < 60; index += 1) {
+      writeFileSync(
+        join(vault, `invalid-${index}.md`),
+        [
+          "---",
+          `title: "Invalid ${index}"`,
+          "type: inbox",
+          "scope: project",
+          "source: direct_capture",
+          "confidence: confirmed",
+          "observed_at: 2026-01-01T00:00:00.000Z",
+          "---",
+          "",
+          "alpha beta gamma hidden",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+    writeFileSync(
+      join(vault, "valid.md"),
+      [
+        "---",
+        'title: "Valid visible"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: confirmed",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        "---",
+        "",
+        "alpha visible",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    expect(VaultEngine.sync(cwd).state).toBe("sucesso");
+    expect((await VaultEngine.embed(cwd, new FakeEmbedder())).state).toBe("sucesso");
+
+    const { openMemoryDb, closeMemoryDb } = await import("../../src/memory/storage/sqlite-db.js");
+    const db = openMemoryDb(cwd);
+    try {
+      db.prepare("UPDATE notes SET scope = 'org' WHERE path LIKE 'inbox/invalid-%'").run();
+    } finally {
+      closeMemoryDb(db);
+    }
+
+    const recalled = await VaultEngine.recall("alpha beta gamma", { limit: 1 }, cwd, new FakeEmbedder());
+    expect(recalled.mechanism).toBe("hybrid-rrf");
+    expect(recalled.chunks.map((chunk) => chunk.title)).toEqual(["Valid visible"]);
   });
 
   it("stale_reason e contradiction_reason chegam ao chunk", async () => {

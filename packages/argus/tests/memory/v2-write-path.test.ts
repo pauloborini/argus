@@ -119,7 +119,8 @@ describe("memory v2 write path (S03)", () => {
     expect(VaultEngine.sync(cwd).state).toBe("sucesso");
 
     const search = VaultEngine.search("palavra-chave-unica-v1", { limit: 5 }, cwd);
-    expect(search.state).toBe("sucesso");
+    expect(search.state).toBe("parcial");
+    expect(search.mechanism).toBe("fts-only");
     expect(search.chunks.length).toBeGreaterThan(0);
 
     const db = openMemoryDb(cwd, { readonly: true });

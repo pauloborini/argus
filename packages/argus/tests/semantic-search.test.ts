@@ -129,24 +129,66 @@ describe("semantic_search tool", () => {
     await VaultEngine.embed(root, embedder);
 
     const envelope = buildIndexEnvelope(root, "lite");
+    const limit = 10;
+    const codeOnly = await buildSemanticSearchResponse(
+      root,
+      envelope,
+      { query: "billing invoice", domain: "code", limit },
+      { embedder },
+    );
+    const memoryOnly = await VaultEngine.recall("billing invoice", { limit }, root, embedder);
     const payload = await buildSemanticSearchResponse(
       root,
       envelope,
-      { query: "billing invoice", domain: "all", limit: 10 },
+      { query: "billing invoice", domain: "all", limit },
       { embedder },
     );
     expect(payload.state).toBe("sucesso");
     const candidates = payload.candidates as Candidate[];
     expect(candidates.some((c) => c.kind === "note")).toBe(true);
     expect(candidates.some((c) => c.id.startsWith("symbol:"))).toBe(true);
-    expect(candidates.every((c) => c.match_reason !== "memory")).toBe(true);
 
-    const codeIds = candidates.filter((c) => c.id.startsWith("symbol:")).map((c) => c.id);
-    const noteIds = candidates.filter((c) => c.id.startsWith("note:")).map((c) => c.id);
+    const codeIds = ((codeOnly.candidates as Candidate[]) ?? []).map((c) => c.id);
+    const noteIds = memoryOnly.chunks.map((chunk) => `note:${chunk.note_id}`);
     const expectedOrder = reciprocalRankFusion([codeIds, noteIds])
-      .slice(0, candidates.length)
+      .slice(0, limit)
       .map((item) => String(item.id));
     expect(candidates.map((c) => c.id)).toEqual(expectedOrder);
+
+    const rawSortOrder = [...candidates]
+      .sort((left, right) => {
+        const leftScore = (codeOnly.candidates as Candidate[]).find((c) => c.id === left.id)?.score
+          ?? memoryOnly.chunks.find((c) => `note:${c.note_id}` === left.id)?.score
+          ?? 0;
+        const rightScore = (codeOnly.candidates as Candidate[]).find((c) => c.id === right.id)?.score
+          ?? memoryOnly.chunks.find((c) => `note:${c.note_id}` === right.id)?.score
+          ?? 0;
+        return rightScore - leftScore;
+      })
+      .map((c) => c.id);
+    if (codeIds.length > 0 && noteIds.length > 0) {
+      expect(candidates.map((c) => c.id)).not.toEqual(rawSortOrder);
+    }
+  });
+
+  it("domain=all sem embeddings de código ainda funde memória por RRF", async () => {
+    const root = await setup();
+    VaultEngine.remember("# Memória lexical\n\ntermo memoria unico billing", { type: "inbox" }, root);
+    VaultEngine.sync(root);
+
+    const envelope = buildIndexEnvelope(root, "lite");
+    const payload = await buildSemanticSearchResponse(
+      root,
+      envelope,
+      { query: "billing memoria", domain: "all", limit: 10 },
+      { embedder },
+    );
+    expect(payload.state).toBe("parcial");
+    const candidates = payload.candidates as Candidate[];
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates.some((c) => c.kind === "note")).toBe(true);
+    const memory = payload.memory as { mechanism?: string } | undefined;
+    expect(memory?.mechanism).toBe("fts-only");
   });
 
   it("domain=all sem embeddings de memória retorna parcial com lexical útil", async () => {
@@ -167,6 +209,46 @@ describe("semantic_search tool", () => {
     expect(candidates.length).toBeGreaterThan(0);
     const memory = payload.memory as { mechanism?: string; state?: string } | undefined;
     expect(memory?.mechanism).toBe("fts-only");
+  });
+
+  it("domain=memory propaga sinais v2 nos candidatos", async () => {
+    const root = await setup();
+    const vault = join(root, ".argus", "memory", "vault", "inbox");
+    mkdirSync(vault, { recursive: true });
+    writeFileSync(
+      join(vault, "stale-search.md"),
+      [
+        "---",
+        'title: "Stale search"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: inferred",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        'stale_reason: "session_expired"',
+        "---",
+        "",
+        "stale search token",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    VaultEngine.sync(root);
+    const envelope = buildIndexEnvelope(root, "lite");
+    const payload = await buildSemanticSearchResponse(
+      root,
+      envelope,
+      { query: "stale search", domain: "memory", limit: 5 },
+      { embedder },
+    );
+    const candidates = payload.candidates as Array<{
+      stale_reason?: string;
+      confidence?: string;
+      match_reason?: string;
+    }>;
+    expect(candidates[0]?.stale_reason).toBe("session_expired");
+    expect(candidates[0]?.confidence).toBe("inferred");
+    expect(candidates[0]?.match_reason).toBe("fts-only");
   });
 
   it("MCP_TOOL_NAMES permanece com 12 tools", () => {
