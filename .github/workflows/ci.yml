@@ -22,7 +22,8 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: rm -rf node_modules package-lock.json && npm install
+      - run: npm ci
+      - run: npm install --no-save
       - run: npm run validate
 
   package-smoke:
@@ -33,6 +34,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: rm -rf node_modules package-lock.json && npm install
+      - run: npm ci
+      - run: npm install --no-save
       - run: npm run smoke:package
       - run: npm run release:check
