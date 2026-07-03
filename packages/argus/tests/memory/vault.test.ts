@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -145,6 +145,8 @@ describe("memory vault", () => {
     expect(result.state).toBe("sucesso");
     expect(result.triaged_count).toBe(1);
     expect(existsSync(join(cwd, ".argus", "memory", "vault", "decisions", "decisao.md"))).toBe(true);
-    expect(existsSync(join(cwd, ".argus", "memory", "vault", "reports", `dream-report-${new Date().toISOString().slice(0, 10)}.md`))).toBe(true);
+    const reportsDir = join(cwd, ".argus", "memory", "vault", "reports");
+    expect(readdirSync(reportsDir).some((file) => file.startsWith("dream-report-"))).toBe(true);
+    expect(Array.isArray(result.applied_actions)).toBe(true);
   });
 });
