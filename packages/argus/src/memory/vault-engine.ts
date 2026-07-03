@@ -37,9 +37,7 @@ export interface RememberOptions {
   file?: string;
 }
 
-export interface MemorySearchResult extends Omit<MemoryRetrievalChunk, "mechanism"> {
-  mechanism?: MemoryMatchMechanism;
-}
+export type MemorySearchResult = MemoryRetrievalChunk;
 
 export interface MemoryStatus {
   initialized: boolean;
@@ -148,6 +146,17 @@ function readAllNoteEmbeddings(db: Database): EmbeddingRow[] {
   return rows.map((row) => ({ symbol_id: Number.parseInt(row.note_id.slice(0, 12), 16), bytes: blobToInt8(row.vector) }));
 }
 
+function readReadableNotePseudoIds(
+  db: Database,
+  filter: MemoryReadFilter = defaultMemoryReadFilter(),
+): Set<number> {
+  const { clause, params } = buildV2ReadSqlFilter(filter);
+  const rows = db
+    .prepare(`SELECT n.id AS note_id FROM notes n WHERE ${clause}`)
+    .all(...params) as Array<{ note_id: string }>;
+  return new Set(rows.map((row) => Number.parseInt(row.note_id.slice(0, 12), 16)));
+}
+
 function readNotesByPseudoIds(
   db: Database,
   pseudoIds: number[],
@@ -206,7 +215,8 @@ async function hybridRows(
   const embedder = embedderOverride ?? createEmbedder();
   const [queryVector] = await embedder.embed([`${BGE_QUERY_INSTRUCTION}${query}`]);
   const q = quantizeInt8(queryVector!);
-  const dense = denseTopK(rows, q.bytes, Math.max(limit, 50));
+  const readableIds = readReadableNotePseudoIds(db, filter);
+  const dense = denseTopK(rows, q.bytes, Math.max(limit, 50), readableIds);
   const lexicalIds = lexical.map((hit) => Number.parseInt(hit.note_id.slice(0, 12), 16));
   const fused = reciprocalRankFusion([dense.map((hit) => hit.symbol_id), lexicalIds]).slice(0, limit);
   return {
@@ -433,7 +443,6 @@ export class VaultEngine {
       if (options.includeSnippets === false) {
         chunks = chunks.map((chunk) => ({ ...chunk, snippet: "" }));
       }
-      const readState = deriveReadState(chunks);
       const limitations: string[] = ["Busca sem embeddings; fallback FTS."];
       if (chunks.some((chunk) => chunk.stale_reason)) {
         limitations.push("Resultados incluem fatos com stale_reason.");
@@ -445,9 +454,9 @@ export class VaultEngine {
         mechanism,
         chunks,
         ...stubResponse(
-          "parcial",
+          chunks.length === 0 ? "sucesso" : "parcial",
           chunks.length ? "Busca de memória concluída (FTS)." : "Nenhuma nota encontrada.",
-          { limitations },
+          chunks.length ? { limitations } : undefined,
         ),
       };
     } finally {
@@ -503,7 +512,12 @@ export class VaultEngine {
       if (chunks.some((chunk) => chunk.contradiction_reason)) {
         limitations.push("Resultados incluem fatos com contradiction_reason.");
       }
-      const responseState = result.mechanism === "fts-only" ? "parcial" : readState;
+      const responseState =
+        result.mechanism === "fts-only"
+          ? chunks.length === 0
+            ? "sucesso"
+            : "parcial"
+          : readState;
       return {
         mechanism: result.mechanism,
         chunks,

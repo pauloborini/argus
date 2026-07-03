@@ -126,6 +126,10 @@ export interface SearchCandidate {
   end_line: number;
   score: number;
   match_reason: string;
+  confidence?: string;
+  stale_reason?: string;
+  contradiction_reason?: string;
+  superseded_by?: string;
 }
 
 export interface ExploreSnippetRef {

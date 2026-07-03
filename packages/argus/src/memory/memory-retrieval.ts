@@ -156,12 +156,24 @@ export function buildV2ReadSqlFilter(filter: MemoryReadFilter = defaultMemoryRea
   params: string[];
 } {
   const scopes = filter.scopes ?? DEFAULT_READ_SCOPES;
-  const placeholders = scopes.map(() => "?").join(", ");
+  const scopePlaceholders = scopes.map(() => "?").join(", ");
+  const asOf = filter.asOf ?? new Date().toISOString();
+  const clauses = [
+    `n.scope IN (${scopePlaceholders})`,
+    "(n.superseded_by IS NULL OR TRIM(n.superseded_by) = '')",
+    "(n.valid_from IS NULL OR n.valid_from <= ?)",
+  ];
+  const params: string[] = [...scopes, asOf];
+
+  if (filter.sources?.length) {
+    const sourcePlaceholders = filter.sources.map(() => "?").join(", ");
+    clauses.push(`n.source IN (${sourcePlaceholders})`);
+    params.push(...filter.sources);
+  }
+
   return {
-    clause: `n.scope IN (${placeholders})
-      AND (n.superseded_by IS NULL OR TRIM(n.superseded_by) = '')
-      AND (n.valid_from IS NULL OR n.valid_from <= datetime('now'))`,
-    params: [...scopes],
+    clause: clauses.join("\n      AND "),
+    params,
   };
 }
 

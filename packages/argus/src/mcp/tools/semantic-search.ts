@@ -54,7 +54,7 @@ interface MemoryCandidateChunk {
 
 function memoryToCandidate(chunk: MemoryCandidateChunk): SearchCandidate {
   const mechanism = chunk.mechanism ?? "memory";
-  return {
+  const candidate: SearchCandidate = {
     id: `note:${chunk.note_id}`,
     kind: "note",
     name: chunk.title,
@@ -63,8 +63,20 @@ function memoryToCandidate(chunk: MemoryCandidateChunk): SearchCandidate {
     end_line: 1,
     score: chunk.score,
     match_reason: mechanism,
-    snippet: chunk.snippet,
   };
+  if (chunk.confidence) {
+    candidate.confidence = chunk.confidence;
+  }
+  if (chunk.stale_reason) {
+    candidate.stale_reason = chunk.stale_reason;
+  }
+  if (chunk.contradiction_reason) {
+    candidate.contradiction_reason = chunk.contradiction_reason;
+  }
+  if (chunk.superseded_by) {
+    candidate.superseded_by = chunk.superseded_by;
+  }
+  return candidate;
 }
 
 function mapMemoryCandidates(chunks: MemoryCandidateChunk[] | undefined): SearchCandidate[] {
@@ -261,10 +273,28 @@ export async function buildSemanticSearchResponse(
     const filters = { scope: args?.scope?.trim().toLowerCase(), kind: args?.kind?.trim().toLowerCase() };
 
     if (!hasEmbeddings(db)) {
-      // Reusa o caminho degradado (fallback lexical) sem reabrir o DB.
-      const candidates = lexicalCandidates(db, query, limit, filters);
+      const codeCandidates = lexicalCandidates(db, query, limit, filters);
+      if (domain === "all") {
+        const memoryState = await VaultEngine.recall(query, { limit }, metadata.root_path, deps?.embedder);
+        const memoryCandidates = mapMemoryCandidates(memoryState.chunks as MemoryCandidateChunk[] | undefined);
+        const fused = fuseCodeAndMemoryCandidates(codeCandidates, memoryCandidates, limit);
+        return {
+          candidates: fused,
+          storage_backend: envelope.storage_backend,
+          schema_version: envelope.schema_version,
+          domain,
+          memory: { state: memoryState.state, mechanism: memoryState.mechanism },
+          ...stubResponse("parcial", EMBEDDINGS_UNAVAILABLE, {
+            limitations: [
+              "Busca semântica indisponível; fallback lexical. Execute argus embed.",
+              ...((memoryState.limitations as string[] | undefined) ?? []),
+            ],
+            staleness_hint: EMBEDDINGS_HINT,
+          }),
+        };
+      }
       return {
-        candidates,
+        candidates: codeCandidates,
         storage_backend: envelope.storage_backend,
         schema_version: envelope.schema_version,
         ...stubResponse("parcial", EMBEDDINGS_UNAVAILABLE, {
@@ -283,9 +313,28 @@ export async function buildSemanticSearchResponse(
       queryVector = vec;
     } catch (err) {
       if (err instanceof EmbeddingsUnavailableError) {
-        const candidates = lexicalCandidates(db, query, limit, filters);
+        const codeCandidates = lexicalCandidates(db, query, limit, filters);
+        if (domain === "all") {
+          const memoryState = await VaultEngine.recall(query, { limit }, metadata.root_path, deps?.embedder);
+          const memoryCandidates = mapMemoryCandidates(memoryState.chunks as MemoryCandidateChunk[] | undefined);
+          const fused = fuseCodeAndMemoryCandidates(codeCandidates, memoryCandidates, limit);
+          return {
+            candidates: fused,
+            storage_backend: envelope.storage_backend,
+            schema_version: envelope.schema_version,
+            domain,
+            memory: { state: memoryState.state, mechanism: memoryState.mechanism },
+            ...stubResponse("parcial", err.message, {
+              limitations: [
+                "Modelo de embedding indisponível; fallback lexical.",
+                ...((memoryState.limitations as string[] | undefined) ?? []),
+              ],
+              staleness_hint: EMBEDDINGS_HINT,
+            }),
+          };
+        }
         return {
-          candidates,
+          candidates: codeCandidates,
           storage_backend: envelope.storage_backend,
           schema_version: envelope.schema_version,
           ...stubResponse("parcial", err.message, {
