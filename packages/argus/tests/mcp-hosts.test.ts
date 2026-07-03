@@ -57,22 +57,34 @@ describe("mcp-hosts adapters", () => {
     process.env.ZCODE_CONFIG_HOME = savedZcodeConfigHome;
   });
 
-  it("claude-code: escopo global (default) registra em settings.json e é idempotente", () => {
+  it("claude-code: escopo local (default) registra em .mcp.json com ARGUS_WORKSPACE_ROOT", () => {
     const first = registerMcpForHosts(repo, ["claude-code"]);
     expect(first[0].ok).toBe(true);
     expect(first[0].changed).toBe(true);
 
-    const path = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
-    const config = readJson(path);
-    const servers = config.mcpServers as JsonRecord;
-    expect(servers[MCP_SERVER_KEY]).toBeDefined();
+    const path = join(repo, ".mcp.json");
+    expect(existsSync(path)).toBe(true);
+    const servers = readJson(path).mcpServers as JsonRecord;
+    const entry = servers[MCP_SERVER_KEY] as JsonRecord;
+    expect(entry).toBeDefined();
+    expect((entry.env as JsonRecord).ARGUS_WORKSPACE_ROOT).toBe(repo);
 
     const second = registerMcpForHosts(repo, ["claude-code"]);
     expect(second[0].changed).toBe(false);
     expect(second[0].message).toContain("já registrado");
   });
 
-  it("claude-code: escopo local (opt-in) registra em .mcp.json", () => {
+  it("claude-code: escopo global registra em settings.json", () => {
+    const res = registerMcpForHosts(repo, ["claude-code"], "global");
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    const path = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
+    const servers = readJson(path).mcpServers as JsonRecord;
+    expect(servers[MCP_SERVER_KEY]).toBeDefined();
+  });
+
+  it("claude-code: escopo local (opt-in explícito) registra em .mcp.json", () => {
     const res = registerMcpForHosts(repo, ["claude-code"], "local");
     expect(res[0].ok).toBe(true);
     expect(res[0].changed).toBe(true);
@@ -92,7 +104,7 @@ describe("mcp-hosts adapters", () => {
       "utf-8",
     );
 
-    registerMcpForHosts(repo, ["claude-code"]);
+    registerMcpForHosts(repo, ["claude-code"], "global");
     const config = readJson(path);
     const servers = config.mcpServers as JsonRecord;
     expect(servers.outro).toBeDefined();
@@ -132,17 +144,22 @@ describe("mcp-hosts adapters", () => {
     expect(again[0].changed).toBe(false);
   });
 
-  it("pi: escopo global escreve em PI_CODING_AGENT_DIR/mcp.json; local no repo", () => {
+  it("pi: escopo global escreve em PI_CODING_AGENT_DIR/mcp.json com lifecycle keep-alive", () => {
     const globalRes = registerMcpForHosts(repo, ["pi"], "global");
     expect(globalRes[0].ok).toBe(true);
     const globalPath = join(process.env.PI_CODING_AGENT_DIR!, "mcp.json");
     expect(existsSync(globalPath)).toBe(true);
-    const servers = readJson(globalPath).mcpServers as JsonRecord;
-    expect(servers[MCP_SERVER_KEY]).toBeDefined();
+    const entry = (readJson(globalPath).mcpServers as JsonRecord)[MCP_SERVER_KEY] as JsonRecord;
+    expect(entry).toBeDefined();
+    expect(entry.lifecycle).toBe("keep-alive");
 
     const localRes = registerMcpForHosts(repo, ["pi"], "local");
     expect(localRes[0].ok).toBe(true);
     expect(existsSync(join(repo, ".mcp.json"))).toBe(true);
+    const localEntry = (readJson(join(repo, ".mcp.json")).mcpServers as JsonRecord)[
+      MCP_SERVER_KEY
+    ] as JsonRecord;
+    expect(localEntry.lifecycle).toBe("keep-alive");
   });
 
   it("antigravity: registra forma mcpServers em ANTIGRAVITY_CONFIG_DIR/mcp_config.json", () => {
@@ -161,8 +178,24 @@ describe("mcp-hosts adapters", () => {
     expect(res2[0].changed).toBe(false);
   });
 
-  it("cursor: escopo global (default) registra em CURSOR_CONFIG_HOME/.cursor/mcp.json e é idempotente", () => {
+  it("cursor: escopo local (default) registra em .cursor/mcp.json com ARGUS_WORKSPACE_ROOT", () => {
     const res = registerMcpForHosts(repo, ["cursor"]);
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    const path = join(repo, ".cursor", "mcp.json");
+    expect(existsSync(path)).toBe(true);
+    const entry = (readJson(path).mcpServers as JsonRecord)[MCP_SERVER_KEY] as JsonRecord;
+    expect(entry).toBeDefined();
+    expect((entry.env as JsonRecord).ARGUS_WORKSPACE_ROOT).toBe(repo);
+
+    const again = registerMcpForHosts(repo, ["cursor"]);
+    expect(again[0].changed).toBe(false);
+    expect(again[0].message).toContain("já registrado");
+  });
+
+  it("cursor: escopo global registra em CURSOR_CONFIG_HOME/.cursor/mcp.json", () => {
+    const res = registerMcpForHosts(repo, ["cursor"], "global");
     expect(res[0].ok).toBe(true);
     expect(res[0].changed).toBe(true);
 
@@ -170,13 +203,9 @@ describe("mcp-hosts adapters", () => {
     expect(existsSync(path)).toBe(true);
     const servers = readJson(path).mcpServers as JsonRecord;
     expect(servers[MCP_SERVER_KEY]).toBeDefined();
-
-    const again = registerMcpForHosts(repo, ["cursor"]);
-    expect(again[0].changed).toBe(false);
-    expect(again[0].message).toContain("já registrado");
   });
 
-  it("cursor: escopo local (opt-in) registra em .cursor/mcp.json do repo", () => {
+  it("cursor: escopo local (opt-in explícito) registra em .cursor/mcp.json do repo", () => {
     const res = registerMcpForHosts(repo, ["cursor"], "local");
     expect(res[0].ok).toBe(true);
     expect(res[0].changed).toBe(true);
