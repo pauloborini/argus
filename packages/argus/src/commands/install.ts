@@ -67,15 +67,6 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   }
   summary.push(init.created ? "workspace criado" : "workspace já existia");
 
-  const migration = migrateLegacyAthena(cwd);
-  if (migration.status === "failed") {
-    console.error(migration.message);
-    return 1;
-  }
-  if (migration.status === "migrated") {
-    summary.push("legado .athena migrado para .argus/memory");
-  }
-
   // 2. Índice inicial
   const indexCode = await runIndex();
   if (indexCode !== 0) {
@@ -85,6 +76,15 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   summary.push("índice construído");
 
   if (!options.noMemory) {
+    const migration = migrateLegacyAthena(cwd);
+    if (migration.status === "failed") {
+      console.error(migration.message);
+      return 1;
+    }
+    if (migration.status === "migrated") {
+      summary.push("legado .athena migrado para .argus/memory");
+    }
+
     const initMemory = VaultEngine.init(cwd);
     if (initMemory.state === "falha") {
       console.error(initMemory.message);
