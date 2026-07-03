@@ -8,7 +8,7 @@ vi.mock("node:os", async (importOriginal) => {
   return {
     ...original,
     homedir: () => {
-      return (globalThis as any).__fakeHomedir || original.homedir();
+      return ((globalThis as Record<string, unknown>).__fakeHomedir as string | undefined) || original.homedir();
     },
   };
 });
@@ -194,7 +194,7 @@ describe("mcp-hosts adapters", () => {
 
   it("antigravity: registra em ambas as pastas padrão se ANTIGRAVITY_CONFIG_DIR não estiver setado", () => {
     const fakeHome = join(repo, "fake-home");
-    (globalThis as any).__fakeHomedir = fakeHome;
+    (globalThis as Record<string, unknown>).__fakeHomedir = fakeHome;
 
     const originalEnv = process.env.ANTIGRAVITY_CONFIG_DIR;
     delete process.env.ANTIGRAVITY_CONFIG_DIR;
@@ -217,7 +217,7 @@ describe("mcp-hosts adapters", () => {
       const res2 = registerMcpForHosts(repo, ["antigravity"], "global");
       expect(res2[0].changed).toBe(false);
     } finally {
-      delete (globalThis as any).__fakeHomedir;
+      delete (globalThis as Record<string, unknown>).__fakeHomedir;
       process.env.ANTIGRAVITY_CONFIG_DIR = originalEnv;
     }
   });
