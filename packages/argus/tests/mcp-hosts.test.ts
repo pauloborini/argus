@@ -84,12 +84,12 @@ describe("mcp-hosts adapters", () => {
     expect(second[0].message).toContain("já registrado");
   });
 
-  it("claude-code: escopo global registra em settings.json", () => {
+  it("claude-code: escopo global registra em ~/.claude.json (top-level mcpServers)", () => {
     const res = registerMcpForHosts(repo, ["claude-code"], "global");
     expect(res[0].ok).toBe(true);
     expect(res[0].changed).toBe(true);
 
-    const path = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
+    const path = join(process.env.CLAUDE_CONFIG_HOME!, ".claude.json");
     const servers = readJson(path).mcpServers as JsonRecord;
     expect(servers[MCP_SERVER_KEY]).toBeDefined();
   });
@@ -101,10 +101,10 @@ describe("mcp-hosts adapters", () => {
     expect(existsSync(join(repo, ".mcp.json"))).toBe(true);
   });
 
-  it("claude-code: preserva outros servers e outras chaves do settings.json (merge por chave)", () => {
+  it("claude-code: preserva outros servers e outras chaves do ~/.claude.json (merge por chave)", () => {
     const claudeDir = join(process.env.CLAUDE_CONFIG_HOME!);
     mkdirSync(claudeDir, { recursive: true });
-    const path = join(claudeDir, "settings.json");
+    const path = join(claudeDir, ".claude.json");
     writeFileSync(
       path,
       JSON.stringify({
@@ -312,11 +312,11 @@ describe("mcp-hosts adapters", () => {
     expect(result.downgraded).toBe(false);
   });
 
-  it("claude-code: escopo global escreve em CLAUDE_CONFIG_HOME/settings.json", () => {
+  it("claude-code: escopo global escreve em CLAUDE_CONFIG_HOME/.claude.json", () => {
     const res = registerMcpForHosts(repo, ["claude-code"], "global");
     expect(res[0].ok).toBe(true);
     expect(res[0].changed).toBe(true);
-    const path = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
+    const path = join(process.env.CLAUDE_CONFIG_HOME!, ".claude.json");
     expect(existsSync(path)).toBe(true);
     const servers = (readJson(path).mcpServers ?? {}) as JsonRecord;
     expect(servers[MCP_SERVER_KEY]).toBeDefined();
@@ -387,7 +387,7 @@ describe("mcp-hosts adapters", () => {
     registerMcpForHosts(repo, ["claude-code"], "global");
     registerMcpForHosts(repo, ["claude-code"], "local");
 
-    const globalPath = join(process.env.CLAUDE_CONFIG_HOME!, "settings.json");
+    const globalPath = join(process.env.CLAUDE_CONFIG_HOME!, ".claude.json");
     const localPath = join(repo, ".mcp.json");
     expect(existsSync(globalPath)).toBe(true);
     expect(existsSync(localPath)).toBe(true);
@@ -407,19 +407,20 @@ describe("mcp-hosts adapters", () => {
   // ZCode adapter
   // -------------------------------------------------------------------------
 
-  it("zcode: registra plugin, habilita no config.json e é idempotente", () => {
+  it("zcode: registra plugin no marketplace, habilita no config.json e é idempotente", () => {
     const zcodeHome = process.env.ZCODE_CONFIG_HOME!;
 
     const res = registerMcpForHosts(repo, ["zcode"]);
     expect(res[0].ok).toBe(true);
     expect(res[0].changed).toBe(true);
 
-    // plugin.json criado
+    // plugin.json criado no cache do marketplace
     const pluginJsonPath = join(
       zcodeHome,
       "cli",
       "plugins",
       "cache",
+      "zcode-plugins-official",
       "argus",
       ARGUS_VERSION,
       ".zcode-plugin",
@@ -428,25 +429,68 @@ describe("mcp-hosts adapters", () => {
     expect(existsSync(pluginJsonPath)).toBe(true);
     const plugin = readJson(pluginJsonPath);
     expect(plugin.name).toBe("argus");
+    expect(plugin.skills).toBe("./skills/");
+    expect(plugin.license).toBe("MIT");
     expect(plugin.mcpServers).toBeDefined();
     const server = (plugin.mcpServers as JsonRecord)[MCP_SERVER_KEY] as JsonRecord;
     expect(server).toBeDefined();
-    expect(server.transport).toBe("stdio");
+    expect(server.transport).toBeUndefined();
+    expect(server.cwd).toBe("${ZCODE_PROJECT_DIR}");
 
-    // seed.json criado
-    const seedPath = join(zcodeHome, "cli", "plugins", "cache", "argus", ARGUS_VERSION, ".zcode-plugin-seed.json");
+    // seed.json criado com marketplace correto
+    const seedPath = join(
+      zcodeHome,
+      "cli",
+      "plugins",
+      "cache",
+      "zcode-plugins-official",
+      "argus",
+      ARGUS_VERSION,
+      ".zcode-plugin-seed.json",
+    );
     expect(existsSync(seedPath)).toBe(true);
     const seed = readJson(seedPath);
-    expect(seed.marketplace).toBe("user");
+    expect(seed.marketplace).toBe("zcode-plugins-official");
     expect(seed.plugin).toBe("argus");
 
-    // config.json habilitado
+    // skills/argus/SKILL.md criado
+    const skillPath = join(
+      zcodeHome,
+      "cli",
+      "plugins",
+      "cache",
+      "zcode-plugins-official",
+      "argus",
+      ARGUS_VERSION,
+      "skills",
+      "argus",
+      "SKILL.md",
+    );
+    expect(existsSync(skillPath)).toBe(true);
+
+    // marketplace.json com entry argus
+    const mpPath = join(
+      zcodeHome,
+      "cli",
+      "plugins",
+      "marketplaces",
+      "zcode-plugins-official",
+      "marketplace.json",
+    );
+    expect(existsSync(mpPath)).toBe(true);
+    const mp = readJson(mpPath);
+    const mpEntry = (mp.plugins as JsonRecord[]).find((p) => p.name === "argus");
+    expect(mpEntry).toBeDefined();
+    expect(mpEntry!.source).toBe("filesystem");
+    expect(mpEntry!.version).toBe(ARGUS_VERSION);
+
+    // config.json habilitado com key correta
     const configPath = join(zcodeHome, "cli", "config.json");
     expect(existsSync(configPath)).toBe(true);
     const config = readJson(configPath);
     const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
     expect(enabled).toBeDefined();
-    expect(enabled["argus@user"]).toBe(true);
+    expect(enabled["argus@zcode-plugins-official"]).toBe(true);
 
     // Idempotência
     const res2 = registerMcpForHosts(repo, ["zcode"]);
@@ -455,28 +499,51 @@ describe("mcp-hosts adapters", () => {
     expect(res2[0].message).toContain("já registrado");
   });
 
-  it("zcode: unregister remove plugin e limpa config.json", () => {
+  it("zcode: unregister remove plugin, marketplace entry e limpa config.json", () => {
     const zcodeHome = process.env.ZCODE_CONFIG_HOME!;
 
     registerMcpForHosts(repo, ["zcode"]);
 
     const configPath = join(zcodeHome, "cli", "config.json");
-    const pluginDir = join(zcodeHome, "cli", "plugins", "cache", "argus");
+    const pluginVersionDir = join(
+      zcodeHome,
+      "cli",
+      "plugins",
+      "cache",
+      "zcode-plugins-official",
+      "argus",
+      ARGUS_VERSION,
+    );
+    const mpPath = join(
+      zcodeHome,
+      "cli",
+      "plugins",
+      "marketplaces",
+      "zcode-plugins-official",
+      "marketplace.json",
+    );
 
     expect(existsSync(configPath)).toBe(true);
-    expect(existsSync(pluginDir)).toBe(true);
+    expect(existsSync(pluginVersionDir)).toBe(true);
 
     const results = unregisterMcpForHosts(repo, ["zcode"]);
     const changed = results.filter((r) => r.changed);
     expect(changed.length).toBeGreaterThanOrEqual(1);
 
     // Plugin dir removido
-    expect(existsSync(pluginDir)).toBe(false);
+    expect(existsSync(pluginVersionDir)).toBe(false);
 
-    // config.json limpo (argus@user removido)
+    // config.json limpo
     const config = readJson(configPath);
     const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
-    expect(enabled?.["argus@user"]).toBeUndefined();
+    expect(enabled?.["argus@zcode-plugins-official"]).toBeUndefined();
+
+    // marketplace.json sem entry argus (mas arquivo preservado)
+    if (existsSync(mpPath)) {
+      const mp = readJson(mpPath);
+      const mpEntry = (mp.plugins as JsonRecord[]).find((p) => p.name === "argus");
+      expect(mpEntry).toBeUndefined();
+    }
   });
 
   it("zcode: unregister sem plugin ainda limpa enabledPlugins do config.json", () => {
@@ -490,7 +557,7 @@ describe("mcp-hosts adapters", () => {
       JSON.stringify({
         plugins: {
           enabledPlugins: {
-            "argus@user": true,
+            "argus@zcode-plugins-official": true,
             "outro@marketplace": true,
           },
         },
@@ -506,7 +573,7 @@ describe("mcp-hosts adapters", () => {
     // Outro plugin preservado
     const config = readJson(configPath);
     const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
-    expect(enabled?.["argus@user"]).toBeUndefined();
+    expect(enabled?.["argus@zcode-plugins-official"]).toBeUndefined();
     expect(enabled?.["outro@marketplace"]).toBe(true);
   });
 
@@ -535,9 +602,66 @@ describe("mcp-hosts adapters", () => {
 
     const config = readJson(configPath);
     const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
-    expect(enabled?.["argus@user"]).toBe(true);
+    expect(enabled?.["argus@zcode-plugins-official"]).toBe(true);
     expect(enabled?.["outro@marketplace"]).toBe(true);
     // skills preservadas
     expect((config as JsonRecord).skills).toBeDefined();
+  });
+
+  it("zcode: migra instalação legacy (cache/argus/ + argus@user)", () => {
+    const zcodeHome = process.env.ZCODE_CONFIG_HOME!;
+
+    // Simula instalação legacy: cache/argus/ + argus@user no config.json
+    const legacyDir = join(zcodeHome, "cli", "plugins", "cache", "argus", ARGUS_VERSION);
+    mkdirSync(join(legacyDir, ".zcode-plugin"), { recursive: true });
+    writeFileSync(
+      join(legacyDir, ".zcode-plugin", "plugin.json"),
+      JSON.stringify({
+        name: "argus",
+        version: ARGUS_VERSION,
+        mcpServers: {
+          argus: { command: "node", args: ["old"], transport: "stdio" },
+        },
+      }),
+    );
+
+    const configPath = join(zcodeHome, "cli", "config.json");
+    mkdirSync(join(zcodeHome, "cli"), { recursive: true });
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        plugins: { enabledPlugins: { "argus@user": true, "other@mp": true } },
+      }),
+      "utf-8",
+    );
+
+    const res = registerMcpForHosts(repo, ["zcode"]);
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    // Diretório legacy removido
+    expect(existsSync(legacyDir)).toBe(false);
+
+    // Enable key legacy removido, canônico adicionado
+    const config = readJson(configPath);
+    const enabled = (config.plugins as JsonRecord)?.enabledPlugins as JsonRecord;
+    expect(enabled?.["argus@user"]).toBeUndefined();
+    expect(enabled?.["argus@zcode-plugins-official"]).toBe(true);
+    // Outro plugin preservado
+    expect(enabled?.["other@mp"]).toBe(true);
+
+    // Formato canônico criado
+    const canonicalPath = join(
+      zcodeHome,
+      "cli",
+      "plugins",
+      "cache",
+      "zcode-plugins-official",
+      "argus",
+      ARGUS_VERSION,
+      ".zcode-plugin",
+      "plugin.json",
+    );
+    expect(existsSync(canonicalPath)).toBe(true);
   });
 });

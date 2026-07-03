@@ -162,6 +162,17 @@ function userConfigHome(): string {
   return join(homedir(), ".config");
 }
 
+/**
+ * Config global do Claude Code para MCP user-scope: `~/.claude.json` (top-level
+ * `mcpServers`) — o MESMO arquivo que `claude mcp add -s user` edita.
+ * NÃO é `~/.claude/settings.json`: o settings.json só honra permissions/hooks/
+ * env/model/statusLine/enable*Mcp*; um bloco `mcpServers` ali é ignorado.
+ * CLAUDE_CONFIG_HOME sobrescreve o dir home (usado em testes p/ não tocar a máquina).
+ */
+function claudeGlobalConfigPath(): string {
+  return join(process.env.CLAUDE_CONFIG_HOME ?? homedir(), ".claude.json");
+}
+
 /** True se o binário está no PATH (auto-detecção de hosts via CLI). */
 function hasBinary(name: string): boolean {
   const probe = process.platform === "win32" ? "where" : "which";
@@ -414,31 +425,78 @@ function piConfigPath(repoRoot: string, scope: McpScope): string {
 }
 
 // ---------------------------------------------------------------------------
-// Adapter ZCode: plugin em ~/.zcode/cli/plugins/cache/argus/.
-// ZCode NÃO lê `.mcp.json` de projeto — só carrega MCP servers de plugins
-// (plugin.json → mcpServers). O cwd usa `${ZCODE_PROJECT_DIR}` para o argus
-// achar `.argus/` no workspace atual. Plugin global: uma vez instalado, todos
-// os projetos com `.argus/` ganham o MCP automaticamente.
+// Adapter ZCode: plugin descoberto via marketplace.
+//
+// ZCode NÃO lê `.mcp.json` de projeto nem escaneia `cache/` arbitrário — só
+// carrega plugins listados em `marketplaces/<marketplace>/marketplace.json`,
+// cada entry com `cachePath` apontando para `cache/<marketplace>/<plugin>/<version>/`.
+// O talos (projeto irmão) usa o mesmo padrão.
+//
+// Para um plugin de terceiros como o argus, o caminho funcional é:
+//   cache/zcode-plugins-official/argus/<version>/
+//     ├── .zcode-plugin/plugin.json   (manifesto com mcpServers, skills, license)
+//     ├── .zcode-plugin-seed.json     (marketplace: "zcode-plugins-official")
+//     └── skills/argus/SKILL.md       (skill mínima — todo plugin do ZCode tem)
+//   marketplaces/zcode-plugins-official/marketplace.json   (entry argus adicionada)
+//   cli/config.json → enabledPlugins["argus@zcode-plugins-official"] = true
+//
+// MCP: o server entry usa `cwd`+`env` (sem `transport`) — o ZCode resolve isso
+// via plugin host mechanism (compatível com android-emulator, ios-simulator).
+// `cwd: ${ZCODE_PROJECT_DIR}` faz o argus achar `.argus/` no workspace atual.
 //
 // ZCODE_CONFIG_HOME sobrescreve ~/.zcode (escape para Windows ou custom path).
 // ---------------------------------------------------------------------------
+
+/** Marketplace do ZCode onde o argus é publicado (mesmo canal dos oficiais). */
+const ZCODE_MARKETPLACE = "zcode-plugins-official";
+
+/** Enable key no config.json: "<plugin>@<marketplace>". */
+const ZCODE_PLUGIN_ENABLE_KEY = `argus@${ZCODE_MARKETPLACE}`;
 
 function zcodeHome(): string {
   return process.env.ZCODE_CONFIG_HOME ?? join(homedir(), ".zcode");
 }
 
+/** Raiz do cache de plugins do ZCode. */
+function zcodePluginsRoot(): string {
+  return join(zcodeHome(), "cli", "plugins");
+}
+
+/** Diretório do plugin argus dentro do cache do marketplace. */
 function zcodePluginDir(): string {
-  return join(zcodeHome(), "cli", "plugins", "cache", "argus");
+  return join(zcodePluginsRoot(), "cache", ZCODE_MARKETPLACE, "argus", ARGUS_VERSION);
 }
 
 function zcodePluginJsonPath(): string {
-  return join(zcodePluginDir(), ARGUS_VERSION, ".zcode-plugin", "plugin.json");
+  return join(zcodePluginDir(), ".zcode-plugin", "plugin.json");
 }
 
 function zcodeSeedPath(): string {
-  return join(zcodePluginDir(), ARGUS_VERSION, ".zcode-plugin-seed.json");
+  return join(zcodePluginDir(), ".zcode-plugin-seed.json");
 }
 
+/** Caminho do SKILL.md mínimo do plugin (todo plugin do ZCode tem skills/). */
+function zcodeSkillPath(): string {
+  return join(zcodePluginDir(), "skills", "argus", "SKILL.md");
+}
+
+/** Caminho do marketplace.json onde o argus é registrado. */
+function zcodeMarketplaceJsonPath(): string {
+  return join(zcodePluginsRoot(), "marketplaces", ZCODE_MARKETPLACE, "marketplace.json");
+}
+
+/** Conteúdo do SKILL.md mínimo do plugin argus. */
+const ZCODE_ARGUS_SKILL_MD = `# Argus
+
+Argus CLI – indexação estrutural e busca semântica local para codebases.
+As tools MCP ficam disponíveis automaticamente quando o plugin está habilitado.
+`;
+
+/**
+ * Manifesto do plugin argus para o ZCode. Sem `transport` no server entry:
+ * o ZCode usa plugin host mechanism quando há cwd/env (mesmo padrão de
+ * android-emulator e ios-simulator).
+ */
 function buildZcodePluginConfig() {
   const entry = buildServerEntry("global");
   return {
@@ -446,13 +504,12 @@ function buildZcodePluginConfig() {
     version: ARGUS_VERSION,
     description: "Argus CLI – indexação estrutural e busca semântica local para codebases",
     author: { name: "Paulo Borini" },
+    license: "MIT",
+    skills: "./skills/",
     mcpServers: {
       [MCP_SERVER_KEY]: {
         command: entry.command,
         args: entry.args,
-        // Sem "transport": o ZCode usa o plugin host mechanism quando há
-        // cwd/env (compatível com android-emulator, ios-simulator, etc.).
-        // "transport": "stdio" conflita com cwd/env e causa rejeição silenciosa.
         cwd: "${ZCODE_PROJECT_DIR}",
         env: {
           [ARGUS_WORKSPACE_ROOT_ENV]: "${ZCODE_PROJECT_DIR}",
@@ -462,13 +519,22 @@ function buildZcodePluginConfig() {
   };
 }
 
+/** Conteúdo canônico do seed.json do plugin. */
+function buildZcodeSeed() {
+  return {
+    hash: "",
+    marketplace: ZCODE_MARKETPLACE,
+    plugin: "argus",
+    pluginVersion: ARGUS_VERSION,
+    source: "filesystem",
+    version: 1,
+  };
+}
+
 /** Caminho do config.json do ZCode CLI (~/.zcode/cli/config.json). */
 function zcodeCliConfigPath(): string {
   return join(zcodeHome(), "cli", "config.json");
 }
-
-/** Chave do plugin no enabledPlugins: "argus@user". */
-const ZCODE_PLUGIN_ENABLE_KEY = "argus@user";
 
 interface ZCodeCliConfig {
   plugins?: {
@@ -476,6 +542,92 @@ interface ZCodeCliConfig {
     [key: string]: unknown;
   };
   [key: string]: unknown;
+}
+
+interface ZcodeMarketplaceEntry {
+  cachePath: string;
+  name: string;
+  source: string;
+  version: string;
+}
+
+interface ZcodeMarketplace {
+  name: string;
+  plugins: ZcodeMarketplaceEntry[];
+  version?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Registra (ou atualiza) a entry argus no marketplace.json do ZCode.
+ * Preserva outras entries e chaves — merge idempotente por `name`.
+ */
+function registerInZcodeMarketplace(): { changed: boolean; error?: string } {
+  const mpPath = zcodeMarketplaceJsonPath();
+  try {
+    let marketplace: ZcodeMarketplace;
+    if (existsSync(mpPath)) {
+      marketplace = readJson<ZcodeMarketplace>(mpPath);
+      if (!Array.isArray(marketplace.plugins)) {
+        marketplace.plugins = [];
+      }
+    } else {
+      marketplace = { name: ZCODE_MARKETPLACE, plugins: [] };
+    }
+
+    const expectedEntry: ZcodeMarketplaceEntry = {
+      cachePath: zcodePluginDir(),
+      name: "argus",
+      source: "filesystem",
+      version: ARGUS_VERSION,
+    };
+
+    const idx = marketplace.plugins.findIndex((p) => p.name === "argus");
+    if (idx >= 0) {
+      const existing = marketplace.plugins[idx];
+      if (
+        existing.cachePath === expectedEntry.cachePath &&
+        existing.version === expectedEntry.version &&
+        existing.source === expectedEntry.source
+      ) {
+        return { changed: false };
+      }
+      marketplace.plugins[idx] = expectedEntry;
+    } else {
+      marketplace.plugins.push(expectedEntry);
+    }
+
+    writeJson(mpPath, marketplace);
+    return { changed: true };
+  } catch (err) {
+    return { changed: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Remove a entry argus do marketplace.json (idempotente).
+ * Preserva demais entries e o arquivo se vazio (não deixa cache órfão).
+ */
+function unregisterFromZcodeMarketplace(): { changed: boolean; error?: string } {
+  const mpPath = zcodeMarketplaceJsonPath();
+  if (!existsSync(mpPath)) {
+    return { changed: false };
+  }
+  try {
+    const marketplace = readJson<ZcodeMarketplace>(mpPath);
+    if (!Array.isArray(marketplace.plugins)) {
+      return { changed: false };
+    }
+    const idx = marketplace.plugins.findIndex((p) => p.name === "argus");
+    if (idx < 0) {
+      return { changed: false };
+    }
+    marketplace.plugins.splice(idx, 1);
+    writeJson(mpPath, marketplace);
+    return { changed: true };
+  } catch (err) {
+    return { changed: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** Habilita o plugin argus no config.json do ZCode (idempotente). */
@@ -498,7 +650,10 @@ function enableZcodePlugin(): { changed: boolean; error?: string } {
   }
 }
 
-/** Remove o plugin argus do enabledPlugins do ZCode (idempotente). */
+/**
+ * Remove o plugin argus do enabledPlugins do ZCode.
+ * Também limpa enable keys legacy ("argus@user") de versões anteriores.
+ */
 function disableZcodePlugin(): { changed: boolean; error?: string } {
   const configPath = zcodeCliConfigPath();
   if (!existsSync(configPath)) {
@@ -507,91 +662,190 @@ function disableZcodePlugin(): { changed: boolean; error?: string } {
   try {
     const config = readJson<ZCodeCliConfig>(configPath);
     const enabled = config.plugins?.enabledPlugins;
-    if (!enabled || !(ZCODE_PLUGIN_ENABLE_KEY in enabled)) {
+    if (!enabled) {
       return { changed: false };
     }
-    delete enabled[ZCODE_PLUGIN_ENABLE_KEY];
-    writeJson(configPath, config);
-    return { changed: true };
+    let changed = false;
+    // Remove a chave canônica e a legacy "argus@user" (versões antigas).
+    for (const key of [ZCODE_PLUGIN_ENABLE_KEY, "argus@user"]) {
+      if (key in enabled) {
+        delete enabled[key];
+        changed = true;
+      }
+    }
+    if (changed) {
+      writeJson(configPath, config);
+    }
+    return { changed };
   } catch (err) {
     return { changed: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * Migra instalações legacy: versões antigas do adapter gravavam o plugin em
+ * `cache/argus/` (fora de qualquer marketplace) com `marketplace: "user"` no
+ * seed e enable key `argus@user`. Essa combinação nunca foi descoberta pelo
+ * ZCode. Detecta e remove o diretório órfão para não deixar lixo.
+ */
+function migrateLegacyZcodeInstall(): { migrated: boolean; details: string[] } {
+  const details: string[] = [];
+  const legacyDir = join(zcodePluginsRoot(), "cache", "argus");
+
+  // 1. Remove diretório legacy cache/argus/ (se existir e diferente do canônico)
+  if (existsSync(legacyDir) && legacyDir !== zcodePluginDir()) {
+    try {
+      rmSync(legacyDir, { recursive: true, force: true });
+      details.push("cache/argus/ legacy removido");
+    } catch {
+      // não-fatal: o novo install funciona independentemente
+    }
+  }
+
+  // 2. Limpa enable key legacy "argus@user" do config.json
+  const configPath = zcodeCliConfigPath();
+  if (existsSync(configPath)) {
+    try {
+      const config = readJson<ZCodeCliConfig>(configPath);
+      const enabled = config.plugins?.enabledPlugins;
+      if (enabled && "argus@user" in enabled) {
+        delete enabled["argus@user"];
+        writeJson(configPath, config);
+        details.push("argus@user legacy removido do config.json");
+      }
+    } catch {
+      // não-fatal
+    }
+  }
+
+  return { migrated: details.length > 0, details };
+}
+
+/**
+ * Verifica se a instalação atual está completa e consistente:
+ * plugin.json + seed + skills + marketplace.json entry + enable key.
+ */
+function isZcodeInstallComplete(): boolean {
+  if (!existsSync(zcodePluginJsonPath())) return false;
+  if (!existsSync(zcodeSeedPath())) return false;
+  if (!existsSync(zcodeSkillPath())) return false;
+
+  // marketplace.json com entry argus
+  const mpPath = zcodeMarketplaceJsonPath();
+  if (!existsSync(mpPath)) return false;
+  try {
+    const mp = readJson<ZcodeMarketplace>(mpPath);
+    const entry = mp.plugins?.find((p) => p.name === "argus");
+    if (!entry || entry.cachePath !== zcodePluginDir()) return false;
+  } catch {
+    return false;
+  }
+
+  // enable key no config.json
+  const configPath = zcodeCliConfigPath();
+  if (!existsSync(configPath)) return false;
+  try {
+    const config = readJson<ZCodeCliConfig>(configPath);
+    if (!config.plugins?.enabledPlugins?.[ZCODE_PLUGIN_ENABLE_KEY]) return false;
+  } catch {
+    return false;
+  }
+
+  return true;
 }
 
 const zcodeAdapter: HostAdapter = {
   id: "zcode",
   scopes: ["global"],
   register(_repoRoot, _scope) {
-    const pluginPath = zcodePluginJsonPath();
-    const zcodeServer = buildZcodePluginConfig().mcpServers[MCP_SERVER_KEY];
-
-    if (existsSync(pluginPath)) {
-      try {
-        const existing = JSON.parse(readFileSync(pluginPath, "utf-8"));
-        const existingServer = existing?.mcpServers?.[MCP_SERVER_KEY];
-        if (existingServer && sameServerEntry(existingServer, zcodeServer)) {
-          // Plugin já instalado — garante que está habilitado no config.json
-          const enabled = enableZcodePlugin();
-          const extra = enabled.changed ? " (habilitado no config.json)" : "";
-          return {
-            host: "zcode",
-            ok: true,
-            changed: enabled.changed,
-            message: `zcode: plugin já registrado${extra}`,
-          };
-        }
-      } catch {
-        // plugin.json ilegível: sobrescreve
-      }
-    }
-
     try {
-      writeJson(pluginPath, buildZcodePluginConfig());
-      writeJson(zcodeSeedPath(), {
-        hash: "",
-        marketplace: "user",
-        plugin: "argus",
-        pluginVersion: ARGUS_VERSION,
-        source: "filesystem",
-        version: 1,
-      });
-      const enabled = enableZcodePlugin();
-      const parts: string[] = [`zcode: plugin registrado em ${zcodePluginDir()}`];
-      if (!enabled.error && enabled.changed) {
-        parts.push("habilitado no config.json");
-      } else if (enabled.error) {
-        parts.push(`(config.json: ${enabled.error})`);
+      // Migra instalações legacy antes de instalar o formato canônico.
+      const migration = migrateLegacyZcodeInstall();
+
+      // Instalação completa: plugin.json + seed + skills + marketplace + enable
+      if (isZcodeInstallComplete()) {
+        // Reescreve plugin.json/seed se o conteúdo mudou (ex.: version bump)
+        const existing = JSON.parse(readFileSync(zcodePluginJsonPath(), "utf-8"));
+        const canonical = buildZcodePluginConfig();
+        const canonicalServer = canonical.mcpServers[MCP_SERVER_KEY];
+        const existingServer = existing?.mcpServers?.[MCP_SERVER_KEY];
+        const needsUpdate =
+          !sameServerEntry(existingServer, canonicalServer) ||
+          existing?.version !== ARGUS_VERSION ||
+          existing?.skills !== canonical.skills ||
+          "transport" in (existingServer ?? {});
+
+        if (!needsUpdate) {
+          const parts = ["zcode: plugin já registrado"];
+          if (migration.migrated) parts.push(`(migrado: ${migration.details.join(", ")})`);
+          return { host: "zcode", ok: true, changed: migration.migrated, message: parts.join(" ") };
+        }
       }
-      return {
-        host: "zcode",
-        ok: true,
-        changed: true,
-        message: parts.join(", "),
-      };
+
+      // Escreve todos os arquivos do plugin
+      mkdirSync(join(zcodePluginDir(), ".zcode-plugin"), { recursive: true });
+      mkdirSync(dirname(zcodeSkillPath()), { recursive: true });
+
+      writeJson(zcodePluginJsonPath(), buildZcodePluginConfig());
+      writeJson(zcodeSeedPath(), buildZcodeSeed());
+      writeFileSync(zcodeSkillPath(), ZCODE_ARGUS_SKILL_MD, "utf-8");
+
+      // Registra no marketplace.json
+      const mpResult = registerInZcodeMarketplace();
+
+      // Habilita no config.json
+      const enableResult = enableZcodePlugin();
+
+      const parts: string[] = [`zcode: plugin registrado em ${zcodePluginDir()}`];
+      if (mpResult.changed) parts.push("adicionado ao marketplace.json");
+      if (mpResult.error) parts.push(`(marketplace: ${mpResult.error})`);
+      if (enableResult.changed) parts.push("habilitado no config.json");
+      if (enableResult.error) parts.push(`(config.json: ${enableResult.error})`);
+      if (migration.migrated) parts.push(`(migrado: ${migration.details.join(", ")})`);
+
+      return { host: "zcode", ok: true, changed: true, message: parts.join(", ") };
     } catch (err) {
       return errorResult("zcode", err);
     }
   },
   unregister(_repoRoot, _scope) {
-    const dir = zcodePluginDir();
     const parts: string[] = [];
     let changed = false;
 
-    // 1. Remove o plugin do config.json (sempre tenta, mesmo sem dir)
+    // 1. Remove do marketplace.json
+    const mpResult = unregisterFromZcodeMarketplace();
+    if (mpResult.changed) {
+      changed = true;
+      parts.push("removido do marketplace.json");
+    }
+
+    // 2. Desabilita no config.json (limpa canônico + legacy)
     const disabled = disableZcodePlugin();
     if (disabled.changed) {
       changed = true;
       parts.push("removido do config.json");
     }
 
-    // 2. Remove os arquivos do plugin
-    if (existsSync(dir)) {
+    // 3. Remove os arquivos do plugin
+    if (existsSync(zcodePluginDir())) {
       try {
-        rmSync(dir, { recursive: true, force: true });
+        rmSync(zcodePluginDir(), { recursive: true, force: true });
         changed = true;
         parts.push("plugin removido");
       } catch (err) {
         return errorResult("zcode", err);
+      }
+    }
+
+    // 4. Limpa diretório legacy cache/argus/ se existir (versões antigas)
+    const legacyDir = join(zcodePluginsRoot(), "cache", "argus");
+    if (existsSync(legacyDir)) {
+      try {
+        rmSync(legacyDir, { recursive: true, force: true });
+        changed = true;
+        parts.push("cache/argus/ legacy removido");
+      } catch {
+        // não-fatal
       }
     }
 
@@ -629,16 +883,14 @@ function errorResult(id: McpHostId, err: unknown): HostRegistrationResult {
 }
 
 const ADAPTERS: Record<McpHostId, HostAdapter> = {
-  // Claude Code: local → .mcp.json na raiz do repo; global → ~/.claude/settings.json.
+  // Claude Code: local → .mcp.json na raiz do repo; global → ~/.claude.json
+  // (top-level mcpServers, user-scope — mesmo arquivo do `claude mcp add -s user`).
   // Default = local (env ARGUS_WORKSPACE_ROOT com path absoluto do repo).
-  // CLAUDE_CONFIG_HOME sobrescreve ~/.claude (usado em testes para não tocar a máquina real).
   "claude-code": makeMcpServersAdapter({
     id: "claude-code",
     scopes: ["local", "global"],
     configPath: (root, scope) =>
-      scope === "global"
-        ? join(process.env.CLAUDE_CONFIG_HOME ?? join(homedir(), ".claude"), "settings.json")
-        : join(root, ".mcp.json"),
+      scope === "global" ? claudeGlobalConfigPath() : join(root, ".mcp.json"),
   }),
   // Cursor: local → .cursor/mcp.json no repo; global → ~/.cursor/mcp.json.
   // Default = local (env ARGUS_WORKSPACE_ROOT com path absoluto do repo).
@@ -795,9 +1047,7 @@ export function registerMcpForHosts(
 function resolveConfigPath(id: McpHostId, repoRoot: string, scope: McpScope): string | undefined {
   switch (id) {
     case "claude-code":
-      return scope === "global"
-        ? join(process.env.CLAUDE_CONFIG_HOME ?? join(homedir(), ".claude"), "settings.json")
-        : join(repoRoot, ".mcp.json");
+      return scope === "global" ? claudeGlobalConfigPath() : join(repoRoot, ".mcp.json");
     case "cursor":
       return scope === "global"
         ? join(process.env.CURSOR_CONFIG_HOME ?? homedir(), ".cursor", "mcp.json")
@@ -812,7 +1062,7 @@ function resolveConfigPath(id: McpHostId, repoRoot: string, scope: McpScope): st
         "mcp_config.json",
       );
     case "zcode":
-      return zcodePluginJsonPath();
+      return zcodeMarketplaceJsonPath();
     case "codex":
       return undefined; // delega ao CLI, sem arquivo direto
   }
