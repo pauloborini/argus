@@ -29,7 +29,7 @@
 | `diff_impact` | Impacto do diff Git |
 | `files` | Árvore indexada |
 | `pack_context` | Empacotar contexto com token budget + handles |
-| `retrieve` | Reidratar handle `rh_*` |
+| `retrieve` | Reidratar handle `rh_*` ou `mh_*` |
 | `status` | Saúde do índice (código + memória) |
 | `semantic_search` | Busca semântica/híbrida |
 
@@ -45,7 +45,7 @@
 | Capacidade Athena | Destino |
 |-------------------|---------|
 | `athena_think` (síntese LLM + gap analysis) | Interno: flag opcional em `pack_context` (`synthesize: true`) ou path futuro `explore --synthesize` — **não** tool pública na v1 |
-| `dream` cycle | Comando CLI `argus memory dream` + daemon (background) |
+| `dream` cycle | Comando CLI `argus memory dream`; daemon/background fica pós-S11 |
 | `doctor` / `rebuild` | `argus memory doctor` / `argus memory rebuild` |
 
 **Rationale:** Leitura e escrita explícitas (`recall` / `remember`) cobrem o que o agente precisa decidir. Síntese com LLM é caro e ambíguo como tool — melhor acoplar a `pack_context` quando o objetivo já está declarado (`goal`).
@@ -56,7 +56,7 @@
 
 | Tool existente | Comportamento após absorção |
 |----------------|----------------------------|
-| `explore` | Se o alvo casar símbolo/arquivo, anexar notas ligadas (tags, wiki-links, `argus_db_path` legado, path overlap) em `memory_refs[]` |
+| `explore` | Se o alvo casar símbolo/arquivo, anexar notas ligadas (tags, wiki-links, menção de símbolo, path overlap) em `memory_refs[]` |
 | `semantic_search` | Novo parâmetro opcional `domain`: `code` (default) \| `memory` \| `all`. `all` funde rankings (RRF) código + cofre |
 | `pack_context` | `sources` aceita handles de memória (`mh_*`) além de paths/símbolos/`rh_*`; monta pacote unificado |
 | `status` | Reporta staleness de `index.db` **e** `memory.db` + último sync do vault |
@@ -71,6 +71,7 @@
 ├── file-manifest.json      # inventário código (existente)
 ├── index.db                # índice estrutural + embeddings de código (existente)
 ├── dirty.json              # flag código (existente)
+├── packed-handles/         # rh_* e mh_* no store existente de retrieve
 ├── memory/
 │   ├── vault/              # markdown fonte (ex-.athena/vault/)
 │   │   ├── entities/
@@ -79,12 +80,12 @@
 │   │   ├── projects/
 │   │   ├── references/
 │   │   └── inbox/
-│   ├── memory.db           # índice FTS + vec do cofre (ex-athena-vault.db)
+│   ├── memory.db           # índice FTS + embeddings int8 do cofre
+│   ├── legacy-athena-vault.db # backup opcional do DB legado; não é runtime
 │   └── config.json         # LLM keys, embed model, paths (ex-.athena/config.json)
-└── handles/                # opcional: rh_* e mh_* no mesmo store ou tabelas distintas
 ```
 
-**Migração:** `argus install` detecta `.athena/` legado e move para `.argus/memory/` (one-shot, idempotente).
+**Migração:** `argus install` detecta `.athena/` legado e migra vault/config para `.argus/memory/` (one-shot, idempotente). O DB legado não vira `memory.db`; fica como backup `legacy-athena-vault.db` e o índice novo é reconstruído por `argus memory sync` + `argus memory embed`. Falha durante migração com legado presente é hard-fail, não warning.
 
 ---
 
@@ -116,7 +117,7 @@ Mapeamento Athena → Argus (rename, não copy-paste cego):
 | Biblioteca | `@huggingface/transformers` (já no Argus) — remover `@xenova/transformers` |
 | Modelo | `Xenova/bge-small-en-v1.5` para **código e memória** |
 | Armazenamento código | int8 quantizado (existente) |
-| Armazenamento memória | Migrar de `sqlite-vec` para o mesmo padrão int8 **ou** manter `sqlite-vec` só em `memory.db` até convergir — **preferência: int8 unificado** para uma dependência a menos |
+| Armazenamento memória | Mesmo padrão int8 do Argus; `sqlite-vec` não entra no pacote |
 
 Re-embed obrigatório na migração Athena → Argus (modelos diferentes hoje).
 
@@ -128,6 +129,7 @@ Namespace `argus memory`:
 
 ```bash
 argus memory init          # vault + memory.db
+argus memory remember      # captura nota/decisão/insight via CLI
 argus memory sync          # markdown → SQLite
 argus memory embed         # vetores do cofre
 argus memory search <q>    # debug humano
@@ -136,7 +138,7 @@ argus memory doctor        # diagnóstico
 argus memory rebuild       # rebuild completo do cofre
 ```
 
-`argus install` passa a incluir `memory init` + primeiro `memory sync` quando `--with-memory` (default **on**).
+`argus install` passa a incluir `memory init` + primeiro `memory sync` quando `--with-memory` (default **on**). `--no-memory` é opt-out.
 
 ---
 
@@ -174,7 +176,7 @@ Resposta: envelope + `mechanism` (`hybrid-rrf` | `fts-only`) + `chunks[]` com `p
 - Código: `rh_<16hex>` (existente)
 - Memória: `mh_<16hex>` (novo) — chunk ou nota inteira para `pack_context` / `retrieve`
 
-`retrieve` aceita ambos os prefixos.
+`retrieve` aceita ambos os prefixos no mesmo store `.argus/packed-handles/`. A implementação precisa atualizar o regex no registry JSON Schema, no Zod do servidor MCP e no helper `isValidRetrieveHandle`.
 
 ---
 
@@ -192,7 +194,7 @@ Resposta: envelope + `mechanism` (`hybrid-rrf` | `fts-only`) + `chunks[]` com `p
 
 - Um MCP, um binário, um diretório `.argus/`
 - Agentes registrados hoje continuam com as 10 tools; após upgrade ganham `remember`/`recall`
-- Breaking: paths `.athena/` deprecados; MCP server `athena` removido
+- Breaking: paths `.athena/` deprecados; MCP server `athena` removido; `argus install` passa a preparar memória por default
 - `ArgusBridge` deixa de existir — leitura direta no processo
 
 ---
