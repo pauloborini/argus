@@ -19,7 +19,7 @@ jobs:
           node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
+      - run: npm install
       - run: npm run validate
       - run: npm run smoke:package
       - run: npm run release:check
