@@ -1,7 +1,7 @@
 // Busca densa brute-force: varre todos os vetores int8 e rankeia por cosine.
 // Para repos típicos (dezenas de milhares de símbolos × 384 dims int8) isso é
 // uma varredura de poucos MB em memória — milissegundos, sem dep nativa de
-// vector-store. sqlite-vec só compensaria em escala que não temos.
+// vector-store.
 
 import { cosineInt8 } from "./quantize.js";
 

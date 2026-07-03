@@ -22,6 +22,7 @@ import {
   searchFtsInternal,
 } from "../../storage/sqlite-index-store.js";
 import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { VaultEngine } from "../../memory/vault-engine.js";
 import { WORKSPACE_MISSING, STALE_RUN_EMBED } from "./common.js";
 import type { IndexEnvelope, SearchCandidate, ToolResponsePayload } from "./common.js";
 
@@ -29,12 +30,21 @@ export interface SemanticSearchArgs {
   query?: string;
   limit?: number;
   mode?: "dense" | "hybrid";
+  domain?: "code" | "memory" | "all";
   scope?: string;
   kind?: string;
 }
 
 export interface SemanticSearchDeps {
   embedder?: Embedder;
+}
+
+interface MemoryCandidateChunk {
+  note_id: string;
+  title: string;
+  path: string;
+  score: number;
+  snippet?: string;
 }
 
 const EMBEDDINGS_UNAVAILABLE =
@@ -88,6 +98,10 @@ function invalidWorkspace(envelope: IndexEnvelope): ToolResponsePayload {
   };
 }
 
+function codeEnvelopeUnavailable(envelope: IndexEnvelope): boolean {
+  return envelope.state === "falha" || !envelope.structuralIndex;
+}
+
 /**
  * Caminho síncrono degradado: sem embeddar a query. Usado pelo dispatcher
  * síncrono (`buildToolResponse`) e quando os vetores estão ausentes — devolve
@@ -106,17 +120,6 @@ export function buildSemanticSearchDegraded(
       storage_backend: envelope.storage_backend,
       schema_version: envelope.schema_version,
       ...stubResponse("falha", "Input inválido para a tool"),
-    };
-  }
-  if (envelope.state === "falha" || !envelope.structuralIndex) {
-    return {
-      candidates: [],
-      storage_backend: envelope.storage_backend,
-      schema_version: envelope.schema_version,
-      ...stubResponse(envelope.state, envelope.message, {
-        limitations: envelope.limitations,
-        staleness_hint: envelope.staleness_hint,
-      }),
     };
   }
 
@@ -156,6 +159,7 @@ export async function buildSemanticSearchResponse(
   deps?: SemanticSearchDeps,
 ): Promise<ToolResponsePayload> {
   const query = args?.query?.trim() ?? "";
+  const domain = args?.domain ?? "code";
   if (!query) {
     return {
       candidates: [],
@@ -164,7 +168,59 @@ export async function buildSemanticSearchResponse(
       ...stubResponse("falha", "Input inválido para a tool"),
     };
   }
-  if (envelope.state === "falha" || !envelope.structuralIndex) {
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return invalidWorkspace(envelope);
+  }
+
+  if (domain === "memory") {
+    const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, metadata.root_path, deps?.embedder);
+    return {
+      candidates: ((memory.chunks as MemoryCandidateChunk[] | undefined) ?? []).map((chunk) => ({
+        id: `note:${chunk.note_id}`,
+        kind: "note",
+        name: chunk.title,
+        path: chunk.path,
+        start_line: 1,
+        end_line: 1,
+        score: chunk.score,
+        match_reason: "memory",
+        snippet: chunk.snippet,
+      })),
+      storage_backend: envelope.storage_backend,
+      schema_version: envelope.schema_version,
+      mechanism: memory.mechanism,
+      ...stubResponse(memory.state === "falha" ? "falha" : memory.state === "parcial" ? "parcial" : "sucesso", "Busca semântica no cofre concluída.", {
+        limitations: memory.limitations,
+      }),
+    };
+  }
+
+  if (codeEnvelopeUnavailable(envelope) && domain === "all") {
+    const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, metadata.root_path, deps?.embedder);
+    return {
+      candidates: ((memory.chunks as MemoryCandidateChunk[] | undefined) ?? []).map((chunk) => ({
+        id: `note:${chunk.note_id}`,
+        kind: "note",
+        name: chunk.title,
+        path: chunk.path,
+        start_line: 1,
+        end_line: 1,
+        score: chunk.score,
+        match_reason: "memory",
+        snippet: chunk.snippet,
+      })),
+      storage_backend: envelope.storage_backend,
+      schema_version: envelope.schema_version,
+      domain,
+      memory: { state: memory.state, mechanism: memory.mechanism },
+      ...stubResponse("parcial", "Busca limitada ao cofre; índice de código indisponível.", {
+        limitations: [...(envelope.limitations ?? []), ...((memory.limitations as string[] | undefined) ?? [])],
+      }),
+    };
+  }
+
+  if (codeEnvelopeUnavailable(envelope)) {
     return {
       candidates: [],
       storage_backend: envelope.storage_backend,
@@ -174,11 +230,6 @@ export async function buildSemanticSearchResponse(
         staleness_hint: envelope.staleness_hint,
       }),
     };
-  }
-
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata) {
-    return invalidWorkspace(envelope);
   }
 
   const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
@@ -267,10 +318,32 @@ export async function buildSemanticSearchResponse(
     const stale =
       indexMeta && embMeta ? indexMeta.manifest_hash !== embMeta.manifest_hash : false;
 
+    let finalCandidates = candidates;
+    let memoryState: ToolResponsePayload | null = null;
+    if (domain === "all") {
+      memoryState = await VaultEngine.recall(query, { limit }, metadata.root_path, deps?.embedder);
+      const memoryCandidates = ((memoryState.chunks as MemoryCandidateChunk[] | undefined) ?? []).map((chunk) => ({
+        id: `note:${chunk.note_id}`,
+        kind: "note",
+        name: chunk.title,
+        path: chunk.path,
+        start_line: 1,
+        end_line: 1,
+        score: chunk.score,
+        match_reason: "memory",
+        snippet: chunk.snippet,
+      }));
+      finalCandidates = [...candidates, ...memoryCandidates]
+        .sort((left, right) => right.score - left.score)
+        .slice(0, limit);
+    }
+
     return {
-      candidates,
+      candidates: finalCandidates,
       storage_backend: envelope.storage_backend,
       schema_version: envelope.schema_version,
+      domain,
+      memory: memoryState ? { state: memoryState.state, mechanism: memoryState.mechanism } : undefined,
       ...stubResponse(
         stale ? "stale" : "sucesso",
         stale

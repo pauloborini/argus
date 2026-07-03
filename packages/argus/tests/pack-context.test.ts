@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { openIndexDb } from "../src/storage/sqlite-index-store.js";
-import { buildToolResponse } from "../src/mcp/tools/response.js";
+import { buildToolResponse, buildToolResponseAsync } from "../src/mcp/tools/response.js";
 import { getIndexDbPath, initWorkspace } from "../src/workspace/workspace.js";
 
 describe("pack context tool", () => {
@@ -166,6 +166,44 @@ describe("pack context tool", () => {
     expect(retrieved.state).toBe("sucesso");
     expect(retrieved.reversibility).toBe("full");
     expect(String(retrieved.content)).toContain("utils.ts");
+  });
+
+  it("pack-context gera mh_* recuperável para fonte memory: sem depender de corte por budget", () => {
+    const root = setupWorkspace();
+    const noteDir = join(root, ".argus", "memory", "vault", "inbox");
+    mkdirSync(noteDir, { recursive: true });
+    writeFileSync(join(noteDir, "nota.md"), "# Nota\n\nconteudo da memoria\n", "utf-8");
+
+    const payload = buildToolResponse("pack_context", root, {
+      sources: ["memory:inbox/nota.md"],
+      goal: "usar memoria",
+      token_budget: 400,
+      style: "balanced",
+    });
+    expect(payload.state).toBe("sucesso");
+    expect(String(payload.retrieve_handle)).toMatch(/^mh_[a-f0-9]{16}$/);
+
+    const retrieved = buildToolResponse("retrieve", root, { handle: String(payload.retrieve_handle) });
+    expect(retrieved.state).toBe("sucesso");
+    expect(String(retrieved.content)).toContain("conteudo da memoria");
+  });
+
+  it("pack-context synthesize usa ThinkEngine no caminho async", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "sintetizar contexto",
+      token_budget: 400,
+      style: "balanced",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    expect(["sucesso", "parcial", "stale"]).toContain(payload.state);
+    const synthesis = payload.synthesis as { goal?: string; dry_run_prompt?: string; state?: string };
+    expect(synthesis.goal).toBe("sintetizar contexto");
+    expect(String(synthesis.dry_run_prompt)).toContain("Contexto:");
   });
 
   it("GC evict handles antigos ao gravar um novo (TTL)", async () => {

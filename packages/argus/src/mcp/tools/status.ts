@@ -7,11 +7,13 @@ import { readDirtyFlag } from "../../discovery/dirty-flag.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { IndexDbCorruptedError, IndexDbSchemaError } from "../../storage/index-persistence.js";
 import { getManifestPath, readWorkspaceMetadata, resolveRespectGitignore } from "../../workspace/workspace.js";
+import { VaultEngine } from "../../memory/vault-engine.js";
 import { INDEX_MISSING, STALE_INDEX, WORKSPACE_MISSING, STRUCTURAL_INDEX_MISSING, PARTIAL_NO_MANIFEST_LIMITATIONS, PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS, PARTIAL_STRUCTURAL_MISSING_LIMITATIONS, PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS, STALE_RUN_SYNC, STALE_RUN_INDEX, STALE_UNKNOWN, loadStructuralIndex, mergeStructuralLimitations, buildIndexVersion } from "./common.js";
 import type { ToolResponsePayload } from "./common.js";
 
 export function buildStatusResponse(cwd: string): ToolResponsePayload {
   const metadata = readWorkspaceMetadata(cwd);
+  const memory = VaultEngine.status(cwd);
 
   if (!metadata) {
     return {
@@ -22,6 +24,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       index_version: null,
       storage_backend: null,
       schema_version: null,
+      memory,
       ...stubResponse("falha", WORKSPACE_MISSING),
     };
   }
@@ -38,7 +41,8 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
         coverage_by_language: {},
         index_version: null,
         storage_backend: null,
-        schema_version: null,
+          schema_version: null,
+          memory,
         ...stubResponse("parcial", err.message, {
           limitations: PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS,
           staleness_hint: `${STALE_RUN_INDEX}: Execute argus index para reconstruir o manifest.`,
@@ -57,6 +61,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       index_version: null,
       storage_backend: null,
       schema_version: null,
+      memory,
       ...stubResponse("parcial", INDEX_MISSING, {
         limitations: PARTIAL_NO_MANIFEST_LIMITATIONS,
         staleness_hint: `${STALE_RUN_INDEX}: Execute argus index para criar o manifest inicial.`,
@@ -77,6 +82,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
         index_version: null,
         storage_backend: "sqlite",
         schema_version: null,
+        memory,
         ...stubResponse("falha", err.message, {
           limitations: PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS,
           staleness_hint: `${STALE_RUN_INDEX}: Execute argus index para reconstruir o índice estrutural.`,
@@ -102,6 +108,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
     dirty_pending: dirtyFlag
       ? { paths: dirtyFlag.paths.length, force_full: dirtyFlag.force_full, since_ref: dirtyFlag.since_ref }
       : null,
+    memory,
   };
 
   if (!structural) {

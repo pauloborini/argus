@@ -5,12 +5,13 @@
 
 # Argus
 
-**Code retrieval e context packing local para agentes de código.**
+**Code retrieval, memória local e context packing para agentes de código.**
 
 O Argus indexa um repositório uma vez e responde às perguntas
 estruturais de um agente — *onde está este símbolo, o que o chama, o que quebra
 se eu mudar, me dê só o contexto relevante* — sem o agente ler e reler
-arquivos. Roda inteiramente na sua máquina, não tem UI e fala duas interfaces:
+arquivos. Também mantém um cofre local em `.argus/memory/` para decisões,
+notas e contexto de projeto. Roda inteiramente na sua máquina, não tem UI e fala duas interfaces:
 um **CLI** e um **servidor MCP**.
 
 > 📖 Quer a lista exaustiva de comandos? Veja **[COMMANDS.pt-BR.md](COMMANDS.pt-BR.md)**.
@@ -107,9 +108,9 @@ Para fiar à mão, aponte seu agente ou IDE para o servidor MCP stdio:
 }
 ```
 
-O servidor expõe dez tools: `search`, `explore`, `trace`, `impact`,
+O servidor expõe doze tools: `search`, `explore`, `trace`, `impact`,
 `diff_impact`, `files`, `pack_context`, `retrieve`, `status` e
-`semantic_search`. Todas leem apenas estado local.
+`semantic_search`, além de `remember` e `recall` para memória. Todas leem/escrevem apenas estado local.
 
 ---
 

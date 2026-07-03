@@ -3,12 +3,13 @@ import { serializePayload } from "../output.js";
 
 export async function runSemanticSearch(
   query: string,
-  options?: { mode?: "dense" | "hybrid"; scope?: string; kind?: string; limit?: number },
+  options?: { mode?: "dense" | "hybrid"; domain?: "code" | "memory" | "all"; scope?: string; kind?: string; limit?: number },
 ): Promise<number> {
   try {
     const payload = await buildToolResponseAsync("semantic_search", process.cwd(), {
       query,
       mode: options?.mode,
+      domain: options?.domain,
       scope: options?.scope,
       kind: options?.kind,
       limit: options?.limit,

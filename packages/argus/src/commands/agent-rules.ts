@@ -19,6 +19,13 @@ perguntas estruturais a partir do índice:
 - \`files\` — estrutura indexada.
 - \`pack_context\` / \`retrieve\` — empacotar e reidratar contexto.
 - \`status\` — saúde e staleness do índice.
+- \`semantic_search\` — busca semântica em código, memória ou ambos (\`domain\`).
+
+Memória local no mesmo estado \`.argus/\`:
+
+- \`remember\` — capturar decisão/insight no cofre.
+- \`recall\` — buscar no cofre sem LLM.
+- \`pack_context\` aceita código + memória; prefira pacote único a múltiplas leituras.
 
 O índice é mantido fresco automaticamente: hooks git marcam mudanças e o
 servidor MCP roda sync incremental antes de responder. Não é preciso rodar

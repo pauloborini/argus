@@ -10,6 +10,8 @@ export const MCP_TOOL_NAMES = [
   "retrieve",
   "status",
   "semantic_search",
+  "remember",
+  "recall",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -116,6 +118,7 @@ export const TOOL_INPUT_JSON_SCHEMAS = {
       goal: { type: "string" },
       token_budget: { type: "integer", minimum: 1, maximum: 8000 },
       style: { type: "string", enum: ["brief", "balanced", "deep"] },
+      synthesize: { type: "boolean" },
       response_format: RESPONSE_FORMAT_SCHEMA,
     },
     required: ["sources", "goal", "token_budget"],
@@ -124,7 +127,7 @@ export const TOOL_INPUT_JSON_SCHEMAS = {
   retrieve: {
     type: "object" as const,
     properties: {
-      handle: { type: "string", pattern: "^rh_[a-f0-9]{16}$" },
+      handle: { type: "string", pattern: "^(rh|mh)_[a-f0-9]{16}$" },
       response_format: RESPONSE_FORMAT_SCHEMA,
     },
     required: ["handle"],
@@ -135,9 +138,33 @@ export const TOOL_INPUT_JSON_SCHEMAS = {
     properties: {
       query: { type: "string" },
       mode: { type: "string", enum: ["dense", "hybrid"] },
+      domain: { type: "string", enum: ["code", "memory", "all"] },
       scope: { type: "string" },
       kind: { type: "string" },
       limit: { type: "integer", minimum: 1, maximum: 100 },
+      response_format: RESPONSE_FORMAT_SCHEMA,
+    },
+    required: ["query"],
+    additionalProperties: true,
+  },
+  remember: {
+    type: "object" as const,
+    properties: {
+      content: { type: "string" },
+      type: { type: "string", enum: ["inbox", "decision", "meeting", "entity", "project", "reference"] },
+      tags: { type: "array", items: { type: "string" } },
+      links: { type: "array", items: { type: "string" } },
+      response_format: RESPONSE_FORMAT_SCHEMA,
+    },
+    required: ["content"],
+    additionalProperties: true,
+  },
+  recall: {
+    type: "object" as const,
+    properties: {
+      query: { type: "string" },
+      limit: { type: "integer", minimum: 1, maximum: 50 },
+      include_snippets: { type: "boolean" },
       response_format: RESPONSE_FORMAT_SCHEMA,
     },
     required: ["query"],
@@ -156,6 +183,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   retrieve: "Recuperar explicitamente conteúdo original de um retrieve_handle local",
   status: "Saúde, staleness e confiança do índice local",
   semantic_search: "Busca semântica densa (embeddings) com fusão híbrida; use quando o lexical vier vazio",
+  remember: "Capturar nota, decisão ou insight no cofre local",
+  recall: "Buscar no cofre local com FTS/híbrido, sem LLM",
 };
 
 /** Array de tools com name + description + inputSchema — para descoberta pelo agente. */

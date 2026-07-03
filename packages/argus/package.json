@@ -1,6 +1,6 @@
 {
   "name": "argus",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "Local code retrieval and context packing for coding agents",
   "license": "MIT",
   "author": "Paulo Borini",
@@ -46,6 +46,7 @@
     "better-sqlite3": "^11.10.0",
     "commander": "^13.1.0",
     "ignore": "^7.0.5",
+    "js-yaml": "^4.3.0",
     "tree-sitter": "^0.22.1",
     "tree-sitter-c-sharp": "^0.23.1",
     "tree-sitter-dart": "^1.0.0",
@@ -59,6 +60,7 @@
     "zod": "^3.25.28"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.15.21",
     "eslint": "^9.28.0",
     "protobufjs": "^7.4.0",

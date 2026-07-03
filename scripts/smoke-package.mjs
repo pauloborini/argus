@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packageDir = join(repoRoot, "packages", "argus");
-const workDir = mkdtempSync(join(tmpdir(), "argus-smoke-"));
+const safeTmpRoot = existsSync("/tmp") ? "/tmp" : tmpdir();
+const workDir = mkdtempSync(join(safeTmpRoot, "argus-smoke-"));
+const nodeGypCache = mkdtempSync(join(safeTmpRoot, "argus-node-gyp-"));
 let tarball;
 
 try {
@@ -23,6 +25,7 @@ try {
   execFileSync("npm", ["install", "--ignore-scripts=false", tarball], {
     cwd: workDir,
     stdio: "inherit",
+    env: { ...process.env, npm_config_devdir: nodeGypCache },
   });
 
   const version = execFileSync(
@@ -49,6 +52,10 @@ try {
   const cli = join(workDir, "node_modules", "argus", "dist", "cli.js");
   execFileSync(process.execPath, [cli, "init"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "index"], { cwd: workDir, stdio: "inherit" });
+  execFileSync(process.execPath, [cli, "memory", "init"], { cwd: workDir, stdio: "inherit" });
+  execFileSync(process.execPath, [cli, "memory", "remember", "# nota\\n"], { cwd: workDir, stdio: "inherit" });
+  execFileSync(process.execPath, [cli, "memory", "sync"], { cwd: workDir, stdio: "inherit" });
+  execFileSync(process.execPath, [cli, "memory", "search", "nota"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "search", "sample"], {
     cwd: workDir,
     stdio: "inherit",
@@ -68,7 +75,7 @@ try {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    if (tools.tools.length !== 10 || !tools.tools.some((tool) => tool.name === "retrieve")) {
+    if (tools.tools.length !== 12 || !tools.tools.some((tool) => tool.name === "remember") || !tools.tools.some((tool) => tool.name === "recall")) {
       throw new Error(`Smoke MCP recebeu surface inesperada: ${tools.tools.map((tool) => tool.name)}`);
     }
     const status = await client.callTool({ name: "status", arguments: {} });
@@ -87,6 +94,7 @@ try {
   console.log(`Smoke do tarball aprovado: argus@${version}`);
 } finally {
   rmSync(workDir, { recursive: true, force: true });
+  rmSync(nodeGypCache, { recursive: true, force: true });
   if (tarball) {
     try {
       unlinkSync(tarball);

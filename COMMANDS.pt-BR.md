@@ -43,6 +43,7 @@ máquina (binario no PATH ou diretorio de config presente).
 argus install                     # fiação completa (auto-detecta hosts)
 argus install --no-daemon         # só índice + MCP (sem daemon/serviço)
 argus install --no-mcp            # não registra MCP nos hosts
+argus install --no-memory         # não inicializa .argus/memory
 argus install --hosts claude-code,codex  # restringe os hosts MCP (CSV)
 argus install --global            # registra MCP global (todos os projetos)
 argus install --local             # registra MCP só neste repo
@@ -144,6 +145,25 @@ argus embed --batch 64   # tamanho do lote de inferência (default 32)
 |---|---|
 | `--batch <n>` | Símbolos por lote de inferência. |
 
+### `argus memory`
+Cofre local de conhecimento em `.argus/memory/`.
+
+```bash
+argus memory init
+printf "# nota\n" | argus memory remember --stdin
+argus memory remember "decisão" --type decision --tag s11 --link src/cli.ts
+argus memory sync
+argus memory embed
+argus memory search "nota"
+argus memory doctor
+argus memory rebuild
+argus memory dream
+```
+
+A memória usa runtime local-first e embeddings int8 como a busca de código.
+Legado `.athena/athena-vault.db` vira apenas backup
+`.argus/memory/legacy-athena-vault.db`; runtime novo é `.argus/memory/memory.db`.
+
 ### `argus scip import`
 Importa edges precisas de um arquivo SCIP — **opcional e off-by-default**.
 SCIP (Sourcegraph Code Intelligence Protocol) fornece IDs de símbolo globalmente
@@ -222,6 +242,7 @@ argus semantic-search "combinar ranking lexical e denso" --mode dense --limit 5
 | Flag | Significado |
 |---|---|
 | `--mode <mode>` | `dense` (só vetores) · `hybrid` (fusão RRF com lexical, default). |
+| `--domain <domain>` | `code` (default) · `memory` · `all`. |
 | `--scope <path>` | Restringe candidatos a um path/dir. |
 | `--kind <kind>` | Restringe por tipo de símbolo. |
 | `--limit <n>` | Máximo de candidatos. |

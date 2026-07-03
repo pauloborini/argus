@@ -16,7 +16,10 @@ import { buildImpactResponse } from "./impact.js";
 import { buildRetrieveResponse, buildPackContextResponse } from "./pack.js";
 import { buildDiffImpactResponse } from "./diff-impact.js";
 import { buildExploreResponse } from "./explore.js";
+import { buildRememberResponse, type RememberArgs } from "./remember.js";
+import { buildRecallResponse, buildRecallResponseAsync, type RecallArgs } from "./recall.js";
 import { compressPayload } from "./payload-compress.js";
+import { ThinkEngine } from "../../memory/think-engine.js";
 
 /** Respostas honestas por tool — campos vazios alinhados a SURFACE_MCP_CLI.md (S02) */
 type ResponseFormat = "concise" | "detailed";
@@ -163,6 +166,10 @@ function buildToolResponseInner(
       // Caminho síncrono: degrada para fallback lexical (sem embeddar a query).
       // A busca densa real exige embed assíncrono → buildToolResponseAsync.
       return buildSemanticSearchDegraded(cwd, envelope, args as SemanticSearchArgs | undefined);
+    case "remember":
+      return buildRememberResponse(cwd, args as RememberArgs | undefined);
+    case "recall":
+      return buildRecallResponse(cwd, args as RecallArgs | undefined);
   }
 }
 
@@ -178,7 +185,8 @@ export async function buildToolResponseAsync(
   deps?: SemanticSearchDeps,
 ): Promise<ToolResponsePayload> {
   if (tool === "semantic_search") {
-    if (!readWorkspaceMetadata(cwd)) {
+    const domain = (args as SemanticSearchArgs | undefined)?.domain;
+    if (!readWorkspaceMetadata(cwd) && domain !== "memory") {
       return applyResponseFormat(
         buildToolResponseInner(tool, cwd, args),
         resolveResponseFormat(args),
@@ -193,6 +201,31 @@ export async function buildToolResponseAsync(
       deps,
     );
     return applyResponseFormat(inner, resolveResponseFormat(args), tool);
+  }
+  if (tool === "remember") {
+    return applyResponseFormat(
+      buildRememberResponse(cwd, args as RememberArgs | undefined),
+      resolveResponseFormat(args),
+      tool,
+    );
+  }
+  if (tool === "recall") {
+    return applyResponseFormat(
+      await buildRecallResponseAsync(cwd, args as RecallArgs | undefined, deps?.embedder),
+      resolveResponseFormat(args),
+      tool,
+    );
+  }
+  if (tool === "pack_context" && (args as PackContextArgs | undefined)?.synthesize === true) {
+    const envelope = buildIndexEnvelope(cwd, "full");
+    const pack = buildPackContextResponse(cwd, envelope, args as PackContextArgs | undefined);
+    if (pack.state !== "falha" && typeof pack.packed_context === "string") {
+      pack.synthesis = await ThinkEngine.think(String((args as PackContextArgs | undefined)?.goal ?? ""), {
+        context: pack.packed_context,
+        cwd,
+      });
+    }
+    return applyResponseFormat(pack, resolveResponseFormat(args), tool);
   }
   return buildToolResponse(tool, cwd, args);
 }

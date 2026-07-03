@@ -19,6 +19,8 @@ import {
 } from "../daemon/registry.js";
 import { installService, uninstallService } from "../daemon/service.js";
 import { isDaemonRunning, runDaemonReload, runDaemonStart } from "./daemon.js";
+import { migrateLegacyAthena } from "../memory/migrate-legacy-athena.js";
+import { VaultEngine } from "../memory/vault-engine.js";
 
 /** Aguarda o daemon publicar o pidfile após um start destacado (best-effort). */
 async function waitForDaemon(timeoutMs = 2_000): Promise<boolean> {
@@ -42,6 +44,8 @@ export interface InstallOptions {
   noMcp?: boolean;
   /** Instala hooks git como fallback (default: não — o daemon cobre). */
   withHooks?: boolean;
+  /** Pula init/sync do cofre de memória. */
+  noMemory?: boolean;
 }
 
 /**
@@ -63,6 +67,15 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   }
   summary.push(init.created ? "workspace criado" : "workspace já existia");
 
+  const migration = migrateLegacyAthena(cwd);
+  if (migration.status === "failed") {
+    console.error(migration.message);
+    return 1;
+  }
+  if (migration.status === "migrated") {
+    summary.push("legado .athena migrado para .argus/memory");
+  }
+
   // 2. Índice inicial
   const indexCode = await runIndex();
   if (indexCode !== 0) {
@@ -70,6 +83,20 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
     return indexCode;
   }
   summary.push("índice construído");
+
+  if (!options.noMemory) {
+    const initMemory = VaultEngine.init(cwd);
+    if (initMemory.state === "falha") {
+      console.error(initMemory.message);
+      return 1;
+    }
+    const syncMemory = VaultEngine.sync(cwd);
+    if (syncMemory.state === "falha") {
+      console.error(syncMemory.message);
+      return 1;
+    }
+    summary.push("cofre de memória inicializado");
+  }
 
   // 3. Agent-rules (alavanca portável para o agente usar o Argus)
   runAgentRulesInstall(cwd);

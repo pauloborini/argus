@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MCP_SERVER_NAME, MCP_TOOL_NAMES } from "../src/mcp/tool-registry.js";
+import { MCP_SERVER_NAME, MCP_TOOL_NAMES, TOOL_INPUT_JSON_SCHEMAS } from "../src/mcp/tool-registry.js";
 import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 
@@ -28,8 +28,8 @@ describe("tool-registry", () => {
     return tempDir;
   }
 
-  it("registra as dez tools do runtime maduro", () => {
-    expect(MCP_TOOL_NAMES).toHaveLength(10);
+  it("registra as doze tools do runtime unificado", () => {
+    expect(MCP_TOOL_NAMES).toHaveLength(12);
     expect(MCP_TOOL_NAMES).toEqual([
       "search",
       "explore",
@@ -41,7 +41,13 @@ describe("tool-registry", () => {
       "retrieve",
       "status",
       "semantic_search",
+      "remember",
+      "recall",
     ]);
+  });
+
+  it("retrieve aceita handles de código e memória no JSON Schema", () => {
+    expect(TOOL_INPUT_JSON_SCHEMAS.retrieve.properties.handle.pattern).toBe("^(rh|mh)_[a-f0-9]{16}$");
   });
 
   it("servidor MCP identificado como argus", () => {
