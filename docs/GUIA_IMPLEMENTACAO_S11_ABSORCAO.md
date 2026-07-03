@@ -39,7 +39,7 @@ A absorção está **concluída** quando todos os itens abaixo forem verdadeiros
 - [ ] `packages/argus/src/memory/` contém o cofre portado; **não** há imports de `athena` no Argus
 - [ ] Layout `.argus/memory/` funciona; migração `.athena/` → `.argus/memory/` é idempotente
 - [ ] MCP expõe **12 tools**: 10 existentes + `remember` + `recall`
-- [ ] CLI `argus memory *` cobre init/sync/embed/search/dream/doctor/rebuild
+- [ ] CLI `argus memory *` cobre init/remember/sync/embed/search/dream/doctor/rebuild
 - [ ] `argus install` inicializa memória por default (`--no-memory` opt-out)
 - [ ] Testes portados passam: `npm run validate` no Argus
 - [ ] `explore`, `semantic_search`, `pack_context`, `status` enriquecidos conforme ADR
@@ -92,13 +92,15 @@ Gate estendido (S11b+):
 
 ```bash
 npm run validate          # typecheck + test + lint + build
-npm run homologate        # smoke de pacote publicável
+npm run smoke:package     # tarball instalável + smoke CLI/MCP
+npm run homologate        # smoke multi-repo de retrieval útil
 ```
 
 Gate manual por feature de memória:
 
 ```bash
 argus memory init
+printf "# nota\n" | argus memory remember --stdin
 argus memory sync
 argus memory search "teste"
 argus serve --mcp         # ListTools deve listar 12 tools
@@ -124,8 +126,8 @@ argus serve --mcp         # ListTools deve listar 12 tools
 | 10 | `core/hot-updater.ts` (27) | `memory/hot-updater.ts` | Port se ainda usado por dream |
 | 11 | `core/embedding-provider.ts` (65) | — | **Não portar** — substituído por `embeddings/embedder.ts` |
 | 12 | `core/argus-bridge.ts` (189) | — | **Não portar** — substituído por `CodeIndexReader` interno |
-| 13 | `storage/sqlite-db.ts` (128) | `memory/storage/sqlite-db.ts` | Port; renomear `AthenaDbSchemaError` → `MemoryDbSchemaError`; remover sqlite-vec se int8 |
-| 14 | `storage/sqlite-schema.ts` (143) | `memory/storage/sqlite-schema.ts` | Port; adaptar vec → int8 ou manter vec temporário |
+| 13 | `storage/sqlite-db.ts` (128) | `memory/storage/sqlite-db.ts` | Port; renomear `AthenaDbSchemaError` → `MemoryDbSchemaError`; não carregar `sqlite-vec` |
+| 14 | `storage/sqlite-schema.ts` (143) | `memory/storage/sqlite-schema.ts` | Port; adaptar embeddings para int8 |
 | 15 | `utils/paths.ts` (64) | `memory/paths.ts` | Reescrever: resolver sob `.argus/memory/` |
 | 16 | `utils/logger.ts` (22) | Reusar `../output.js` ou criar `memory/logger.ts` fino | Preferir logger compartilhado se existir; senão port mínimo |
 | 17 | `cli.ts` (303) | `commands/memory/*.ts` | Não portar monolito; extrair por comando |
@@ -137,9 +139,10 @@ argus serve --mcp         # ListTools deve listar 12 tools
 | Arquivo | Responsabilidade |
 |---------|------------------|
 | `memory/code-index-reader.ts` | Leitura readonly de `.argus/index.db` (substitui `ArgusBridge`) |
-| `memory/migrate-legacy-athena.ts` | Move `.athena/` → `.argus/memory/` |
+| `memory/migrate-legacy-athena.ts` | Migra `.athena/` → `.argus/memory/` com backup do DB legado |
 | `memory/paths.ts` | `getMemoryDir()`, `getVaultDir()`, `getMemoryDbPath()`, `getMemoryConfigPath()` |
 | `commands/memory/init.ts` | `argus memory init` |
+| `commands/memory/remember.ts` | `argus memory remember` |
 | `commands/memory/sync.ts` | `argus memory sync` |
 | `commands/memory/embed.ts` | `argus memory embed` |
 | `commands/memory/search.ts` | `argus memory search` |
@@ -153,7 +156,7 @@ argus serve --mcp         # ListTools deve listar 12 tools
 
 | Arquivo | Mudança |
 |---------|---------|
-| `cli.ts` | Subcomando `memory` com 7 ações |
+| `cli.ts` | Subcomando `memory` com 8 ações |
 | `mcp/tool-registry.ts` | Adicionar `remember`, `recall` em `MCP_TOOL_NAMES`, schemas, descriptions |
 | `mcp/server.ts` | Zod schemas + dispatch para remember/recall |
 | `mcp/tools/response.ts` | Cases `remember` / `recall` em `buildToolResponseAsync` |
@@ -164,7 +167,9 @@ argus serve --mcp         # ListTools deve listar 12 tools
 | `commands/install.ts` | Passo memory init+sync; flag `--no-memory` |
 | `commands/agent-rules.ts` | Documentar `remember`/`recall` no bloco |
 | `workspace/workspace.ts` | Constantes `MEMORY_DIR`, helpers opcionais |
-| `package.json` (argus) | `js-yaml`; remover necessidade de `sqlite-vec` se int8 |
+| `package.json` (argus) | `js-yaml`; manter `sqlite-vec` fora do pacote |
+| `scripts/smoke-package.mjs` | Esperar 12 tools e exercitar init/memory |
+| `scripts/homologate.mjs` | Incluir checagem leve de `status.memory` após init |
 | `COMMANDS.md` / `README.md` | Seção memory + 12 tools |
 | `CLAUDE.md` / `AGENTS.md` | Template do bloco agent-rules |
 
@@ -189,6 +194,7 @@ argus serve --mcp         # ListTools deve listar 12 tools
 | Teste | O que valida |
 |-------|----------------|
 | `tests/memory/migrate-legacy.test.ts` | `.athena/` → `.argus/memory/` idempotente |
+| `tests/tool-registry.test.ts` | Surface MCP exata com 12 tools; stubs de `remember`/`recall` |
 | `tests/mcp-tools-enrichment.test.ts` | `explore` com `memory_refs`, `semantic_search domain=all` |
 | `tests/pack-memory-handle.test.ts` | `mh_*` em pack_context + retrieve |
 
@@ -208,9 +214,9 @@ argus serve --mcp         # ListTools deve listar 12 tools
 "@types/js-yaml": "^4.0.9"
 ```
 
-**Não adicionar:** `@xenova/transformers`, `sqlite-vec` (meta: embeddings int8 unificados).
+**Não adicionar:** `@xenova/transformers`, `sqlite-vec`.
 
-**Opcional fase 1 (aterrissagem mais rápida):** manter `sqlite-vec` só em `memory.db` até S11d; documentar como dívida. Preferência ADR: int8 desde S11b.
+**Direção fechada:** usar embeddings int8 desde S11b. Manter `sqlite-vec` temporário parece mais rápido, mas cria dependência nativa pública, smoke extra e segunda migração. Não vale.
 
 ---
 
@@ -275,10 +281,11 @@ Comportamento:
 
 1. Se `{cwd}/.athena/` existe e `{cwd}/.argus/memory/` **não** existe → mover/renomear:
    - `.athena/vault/` → `.argus/memory/vault/`
-   - `.athena/athena-vault.db` → `.argus/memory/memory.db`
+   - `.athena/athena-vault.db` → `.argus/memory/legacy-athena-vault.db` (backup; não abrir como runtime)
    - `.athena/config.json` → `.argus/memory/config.json` (reescrever paths internos)
 2. Se destino já existe → no-op com log
 3. Se `.athena/` vazio → no-op
+4. Criar `memory.db` novo só via `argus memory sync`; nunca reaproveitar schema Athena ativo
 
 Atualizar `config.json` migrado:
 
@@ -293,7 +300,14 @@ Atualizar `config.json` migrado:
 
 Remover campo `argus_db_path`; adicionar `code_index_path` opcional.
 
-**Aceite:** `tests/memory/migrate-legacy.test.ts` — 3 cenários (fresh, migrate, idempotent).
+Semântica de erro:
+
+- Sem `.athena/`: `status: "skipped"`.
+- `.athena/` + destino inexistente + sucesso: `status: "migrated"`.
+- Destino já existe: `status: "skipped_existing_destination"`.
+- Falha com `.athena/` presente: retornar `status: "failed"` + `message`; chamador deve hard-fail. Não continuar com migração parcial.
+
+**Aceite:** `tests/memory/migrate-legacy.test.ts` — fresh, migrate, idempotent, failed-preserves-source.
 
 ### S11a-05 — Hook migração em `runInit` / `runInstall`
 
@@ -301,10 +315,11 @@ Em `commands/init.ts` e início de `commands/install.ts`:
 
 ```typescript
 import { migrateLegacyAthena } from "../memory/migrate-legacy-athena.js";
-migrateLegacyAthena(cwd); // nunca throw; log stderr se falhar
+const migration = migrateLegacyAthena(cwd);
+if (migration.status === "failed") return 1;
 ```
 
-**Aceite:** `argus init` em repo com `.athena/` legado produz `.argus/memory/`.
+**Aceite:** `argus init` em repo com `.athena/` legado produz `.argus/memory/`; em falha, `.athena/` permanece íntegro e comando retorna exit code 1.
 
 ### Gate S11a
 
@@ -326,12 +341,14 @@ npx vitest run tests/memory/paths.test.ts tests/memory/migrate-legacy.test.ts
 3. Renomes:
    - `AthenaDbSchemaError` → `MemoryDbSchemaError`
    - `getDatabasePath` imports → `../paths.js`
-4. **Embeddings:** escolha A (preferida) ou B:
+4. **Embeddings:** implementar int8 já na S11b:
 
-| Opção | Ação |
-|-------|------|
-| **A — int8** | Reescrever schema v2: tabela `note_embeddings` (note_id, bytes, scale, content_hash) espelhando `embeddings-store.ts` do código |
-| **B — sqlite-vec** | Manter `vec0` temporário; adicionar dep `sqlite-vec` ao package.json |
+| Tabela | Campos mínimos |
+|--------|----------------|
+| `note_embeddings` | `note_id`, `vector`, `scale`, `dim`, `content_hash` |
+| `note_embeddings_meta` | `model`, `dim`, `built_at`, `note_count`, `vault_hash` |
+
+Espelhar `storage/embeddings-store.ts`: `quantizeInt8`, blob int8, busca densa brute-force + RRF lexical. Não carregar `sqlite-vec`.
 
 **Aceite:** port de `tests/memory/sqlite-foundation.test.ts` verde.
 
@@ -375,7 +392,6 @@ export class CodeIndexReader {
   static open(cwd: string): CodeIndexReader;
   getStatus(): CodeIndexStatus;
   resolveSymbol(name: string, scope?: string): CodeRef[];
-  findNotesForPath(relativePath: string): never; // memória — não aqui
 }
 ```
 
@@ -408,6 +424,7 @@ Em `cli.ts`:
 ```typescript
 const memory = program.command("memory").description("Cofre de conhecimento local");
 memory.command("init")...
+memory.command("remember [text]")...
 memory.command("sync")...
 memory.command("embed")...
 memory.command("search <query>")...
@@ -418,7 +435,17 @@ memory.command("rebuild")...
 
 Padrão de saída: alinhar ao Argus (JSON compacto, `state`, exit code ≠ 0 só em `falha`).
 
-**Aceite:** `tests/memory/cli-smoke.test.ts` — init → capture via CLI → sync → search.
+`remember` CLI:
+
+```bash
+argus memory remember "texto"
+argus memory remember --stdin --type decision --tag s11 --link src/cli.ts
+argus memory remember --file docs/nota.md
+```
+
+Não criar alias público `capture`; manter vocabulário igual ao MCP.
+
+**Aceite:** `tests/memory/cli-smoke.test.ts` — init → remember via CLI → sync → search.
 
 ### S11b-06 — MCP `remember` e `recall`
 
@@ -452,9 +479,9 @@ Registrar schemas Zod espelhando registry.
 
 #### `mcp/tools/response.ts`
 
-Adicionar cases no dispatcher async.
+Adicionar cases em `buildToolResponseInner` e `buildToolResponseAsync`. Atualizar comentários/contagens que hoje assumem 10 tools ou "outras 9".
 
-**Aceite:** `tests/memory/mcp-remember-recall.test.ts` — ListTools = 12; round-trip capture+recall.
+**Aceite:** `tests/memory/mcp-remember-recall.test.ts` — ListTools = 12; round-trip remember+recall.
 
 ### S11b-07 — Port think + dream (interno)
 
@@ -487,16 +514,21 @@ if (!options.noMemory) {
 
 CLI: `--no-memory` no `install`.
 
-**Aceite:** `argus install` em repo limpo cria `.argus/memory/vault/inbox/`.
+Ordem: `migrateLegacyAthena` → `runMemoryInit` → `runMemorySync`. Se migração falhar com `.athena/` presente, `install` deve retornar falha antes de registrar MCP/daemon.
+
+**Aceite:** `argus install` em repo limpo cria `.argus/memory/vault/inbox/`; `argus install --no-memory` não cria `.argus/memory/`; repo com `.athena/` corrompido não perde origem e falha cedo.
 
 ### Gate S11b
 
 ```bash
 npm run validate
+npm run smoke:package
 npm run homologate
 # smoke manual
-argus memory init && argus memory sync
-echo "# nota" | argus memory capture  # se expuser capture CLI, ou via MCP remember
+argus memory init
+printf "# nota\n" | argus memory remember --stdin
+argus memory sync
+argus memory search nota
 ```
 
 ---
@@ -546,7 +578,14 @@ domain?: "code" | "memory" | "all"; // default "code"
 | `memory` | Só `memory/hybrid-search` |
 | `all` | RRF entre candidatos código + notas; prefixos `symbol:` e `note:` |
 
-**Aceite:** `tests/mcp-tools-enrichment.test.ts` — `domain=all` retorna ambos tipos.
+Também atualizar:
+
+- `mcp/tool-registry.ts` JSON Schema com `domain`.
+- `mcp/server.ts` Zod com `domain`.
+- `cli.ts` / `commands/semantic-search.ts` com `--domain <code|memory|all>`.
+- `SemanticSearchArgs` em `mcp/tools/semantic-search.ts`.
+
+**Aceite:** `tests/mcp-tools-enrichment.test.ts` — `domain=all` retorna ambos tipos; `domain=code` preserva comportamento atual.
 
 ### S11c-03 — `status` + bloco memory
 
@@ -566,7 +605,9 @@ memory?: {
 
 Ler via `VaultEngine.status()` ou query leve em `memory.db`.
 
-**Aceite:** status com cofre vazio vs populado.
+Semântica: memória ausente ou corrompida não deve transformar `status` do índice de código em `falha`; preencher `memory.initialized=false` ou `memory.staleness="unknown"` e adicionar `limitations`.
+
+**Aceite:** status com cofre vazio vs populado; status sem memória continua útil para código.
 
 ### Gate S11c
 
@@ -583,12 +624,12 @@ npx vitest run tests/mcp-tools-enrichment.test.ts
 
 ### S11d-01 — Handles de memória `mh_*`
 
-Arquivo: `mcp/tools/pack.ts` (ou extrair `memory-handles.ts`)
+Arquivo: `mcp/tools/pack.ts` (ou extrair helper `packed-memory-handles.ts`)
 
 | Prefixo | Conteúdo | Storage |
 |---------|----------|---------|
 | `rh_*` | Pack de código (existente) | `.argus/packed-handles/` |
-| `mh_*` | Chunk/nota de memória | `.argus/memory-handles/` |
+| `mh_*` | Chunk/nota de memória | `.argus/packed-handles/` |
 
 Funções:
 
@@ -598,7 +639,12 @@ function registerMemoryHandle(cwd, noteId, chunk?): string;
 function readMemoryHandle(cwd, handle): { content, path, title };
 ```
 
-Atualizar `isValidRetrieveHandle` → aceitar `rh_` **ou** `mh_`.
+Atualizar:
+
+- `isValidRetrieveHandle` em `mcp/tools/pack.ts` → aceitar `rh_` **ou** `mh_`.
+- `TOOL_INPUT_JSON_SCHEMAS.retrieve.properties.handle.pattern` → `^(rh|mh)_[a-f0-9]{16}$`.
+- Zod em `mcp/server.ts` → mesmo regex.
+- GC de `packed_handles` → preservar os dois prefixos.
 
 **Aceite:** `tests/pack-memory-handle.test.ts`.
 
@@ -639,24 +685,25 @@ Se `true` e `llm_provider != none`:
 2. Chamar `ThinkEngine.think(goal, { context: pack, dryRun: false })`
 3. Retornar `synthesis`, `citations`, `gaps` no payload
 
-**Não** expor como tool MCP.
+Não expor como tool separada. `synthesize` é só campo opcional de `pack_context`.
 
 **Aceite:** teste com `dry_run`/mock LLM em `think-engine.test.ts`.
 
-### S11d-04 — Unificar embeddings memória (int8)
+### S11d-04 — Consolidar embeddings memória (int8)
 
-Se ficou em sqlite-vec na S11b:
+Checklist final:
 
-1. Migration v3 em `memory/storage/sqlite-schema.ts`
-2. `memory/embed-engine.ts` usa `quantizeInt8` + tabela alinhada ao código
-3. Remover dependência `sqlite-vec`
+1. `memory/storage/sqlite-schema.ts` não referencia `vec0` / `sqlite-vec`.
+2. `memory/embed-engine.ts` usa `quantizeInt8` + tabela alinhada ao código.
+3. `package.json` e lockfile não têm `sqlite-vec`.
 
-**Aceite:** `argus memory embed` + `recall` com `mechanism: hybrid-rrf`.
+**Aceite:** `argus memory embed` + `recall` com `mechanism: hybrid-rrf`; `rg "sqlite-vec|vec0" packages/argus/src package.json package-lock.json` não retorna nada.
 
 ### Gate S11d
 
 ```bash
 npm run validate
+npm run smoke:package
 npm run homologate
 ```
 
@@ -706,7 +753,7 @@ pack_context aceita código + memória; prefira pack_context a múltiplas tools.
 
 ### S11e-05 — Versão Argus
 
-Bump **2.0.0** (breaking: novas tools, layout memory, install behavior).
+Bump **2.0.0** por mudança de produto e migração Athena: `argus install` passa a preparar memória por default, `.athena/` é absorvido/deprecado e o pacote passa a publicar cofre + code retrieval num runtime único. As 2 tools novas são aditivas para Argus; não usar isso como justificativa de breaking isolada.
 
 ```bash
 npm run release:check
@@ -717,6 +764,7 @@ npm run release:check
 ```bash
 cd /Volumes/Dados/projetos/argus
 npm run validate
+npm run smoke:package
 npm run homologate
 npm run release:check
 
@@ -737,7 +785,7 @@ argus memory doctor
 | `athena mcp` / MCP server `athena` | `argus serve --mcp` / server `argus` |
 | `.athena/` | `.argus/memory/` (migração automática) |
 | `ATHENA_VAULT_PATH` | `ARGUS_MEMORY_PATH` |
-| `athena-vault.db` | `memory.db` |
+| `athena-vault.db` | `legacy-athena-vault.db` backup; `memory.db` novo via sync/embed |
 | MCP tools `athena_*` (4) | `remember`, `recall` (+ enriquecimento interno) |
 | `config.argus_db_path` | `config.code_index_path` (opcional) |
 | Embeddings MiniLM + sqlite-vec | bge-small + int8 (re-embed obrigatório) |
@@ -747,6 +795,7 @@ argus memory doctor
 ```bash
 cd <repo>
 argus install              # migra .athena se existir
+argus memory sync          # cria/recria memory.db
 argus memory embed         # re-gerar vetores
 # Remover MCP athena dos hosts (install do argus sobrescreve)
 ```
@@ -757,12 +806,13 @@ argus memory embed         # re-gerar vetores
 
 | ID | Risco / decisão | Mitigação | Decidir em |
 |----|-----------------|-----------|------------|
-| R1 | int8 vs sqlite-vec na S11b atrasar | Opção B temporária | S11b-01 |
-| R2 | Envelope Athena (`sucesso`) vs Argus (`state`) | Camada adaptadora em commands/memory | S11b-05 |
+| R1 | Port int8 atrasar S11b | Não aceitar `sqlite-vec`; implementar store simples espelhado no Argus | S11b-01 |
+| R2 | Envelope Athena (`sucesso`) vs Argus (`state`) | Normalizar na borda CLI/MCP; core pode migrar em etapas | S11b-05 |
 | R3 | Dois `sqlite-db.ts` no mesmo processo | Namespaces `memory/storage` vs `storage`; sem singleton global compartilhado | S11b-01 |
-| R4 | Tamanho do pacote npm (+js-yaml, modelos HF) | Já existe transformers no Argus | — |
-| R5 | Dream cycle no daemon | Fase 2: hook no `daemon/pipeline.ts` | pós-S11e |
-| R6 | `think` só via pack_context vs CLI `argus memory think` | ADR: só interno; CLI debug opcional | S11d |
+| R4 | Migração parcial de `.athena/` | Migrador fail-closed; backup DB legado; teste `failed-preserves-source` | S11a |
+| R5 | Tamanho do pacote npm (+js-yaml, modelo HF em cache runtime) | Já existe transformers no Argus; validar com `smoke:package` | S11b+ |
+| R6 | Dream cycle no daemon | Não entra na S11; hook no `daemon/pipeline.ts` fica pós-S11e | pós-S11e |
+| R7 | `think` como tool/CLI separada aumentar roteamento | ADR: sem tool separada; só `pack_context.synthesize` opcional | S11d |
 
 ---
 
