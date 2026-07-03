@@ -36,8 +36,8 @@ servidor MCP nos hosts detectados e registra o repo no daemon de auto-sync (com
 serviço de usuário auto-start). Idempotente.
 
 Sem `--hosts`, fia **Claude Code** e **Cursor** sempre (idioma de projeto) e
-**auto-detecta** Codex, OpenCode, Pi, Antigravity e ZCode quando instalados nesta
-máquina (binario no PATH ou diretorio de config presente).
+**auto-detecta** Codex, OpenCode, Pi, Antigravity, ZCode e VS Code quando
+instalados nesta máquina (binario no PATH ou diretorio de config presente).
 
 ```bash
 argus install                     # fiação completa (auto-detecta hosts)
@@ -63,6 +63,7 @@ argus install --with-hooks        # adiciona hooks git como fallback de daemon d
 | `pi` | JSON `mcpServers` | global | `~/.pi/agent/mcp.json` (`PI_CODING_AGENT_DIR`) ou repo |
 | `antigravity` | JSON `mcpServers` | global | `~/.gemini/antigravity-ide/mcp_config.json` (`ANTIGRAVITY_CONFIG_DIR`) |
 | `zcode` | Plugin filesystem + JSON `mcpServers` | global | `~/.zcode/cli/plugins/cache/argus/<version>/.zcode-plugin/plugin.json` (`ZCODE_CONFIG_HOME`) |
+| `vscode` | JSON `mcpServers` | local (repo) | `.vscode/mcp.json` (`VSCODE_CONFIG_HOME`) |
 
 No modo global o MCP é registrado com **caminho absoluto** (não depende do cwd),
 valendo em todos os projetos. A config existente é sempre **mesclada** — outros
