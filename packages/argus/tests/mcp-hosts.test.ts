@@ -1,7 +1,17 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import * as os from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:os", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:os")>();
+  return {
+    ...original,
+    homedir: () => {
+      return (globalThis as any).__fakeHomedir || original.homedir();
+    },
+  };
+});
 import {
   registerMcpForHosts,
   unregisterMcpForHosts,
@@ -29,7 +39,7 @@ describe("mcp-hosts adapters", () => {
   let savedZcodeConfigHome: string | undefined;
 
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), "argus-hosts-"));
+    repo = mkdtempSync(join(os.tmpdir(), "argus-hosts-"));
     savedPiDir = process.env.PI_CODING_AGENT_DIR;
     savedXdg = process.env.XDG_CONFIG_HOME;
     savedAntigravityDir = process.env.ANTIGRAVITY_CONFIG_DIR;
@@ -176,6 +186,36 @@ describe("mcp-hosts adapters", () => {
     // Idempotência
     const res2 = registerMcpForHosts(repo, ["antigravity"], "global");
     expect(res2[0].changed).toBe(false);
+  });
+
+  it("antigravity: registra em ambas as pastas padrão se ANTIGRAVITY_CONFIG_DIR não estiver setado", () => {
+    const fakeHome = join(repo, "fake-home");
+    (globalThis as any).__fakeHomedir = fakeHome;
+
+    const originalEnv = process.env.ANTIGRAVITY_CONFIG_DIR;
+    delete process.env.ANTIGRAVITY_CONFIG_DIR;
+
+    try {
+      const res = registerMcpForHosts(repo, ["antigravity"], "global");
+      expect(res[0].ok).toBe(true);
+      expect(res[0].changed).toBe(true);
+
+      const path1 = join(fakeHome, ".gemini", "antigravity", "mcp_config.json");
+      const path2 = join(fakeHome, ".gemini", "antigravity-ide", "mcp_config.json");
+
+      expect(existsSync(path1)).toBe(true);
+      expect(existsSync(path2)).toBe(true);
+
+      expect(readJson(path1).mcpServers as JsonRecord).toBeDefined();
+      expect(readJson(path2).mcpServers as JsonRecord).toBeDefined();
+
+      // Idempotência
+      const res2 = registerMcpForHosts(repo, ["antigravity"], "global");
+      expect(res2[0].changed).toBe(false);
+    } finally {
+      delete (globalThis as any).__fakeHomedir;
+      process.env.ANTIGRAVITY_CONFIG_DIR = originalEnv;
+    }
   });
 
   it("cursor: escopo local (default) registra em .cursor/mcp.json com ARGUS_WORKSPACE_ROOT", () => {
