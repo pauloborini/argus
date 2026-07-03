@@ -1,6 +1,6 @@
 {
   "name": "argus",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Local code and memory retrieval with context packing for coding agents",
   "author": {
     "name": "Paulo Borini",
