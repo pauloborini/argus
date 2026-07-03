@@ -450,7 +450,9 @@ function buildZcodePluginConfig() {
       [MCP_SERVER_KEY]: {
         command: entry.command,
         args: entry.args,
-        transport: "stdio",
+        // Sem "transport": o ZCode usa o plugin host mechanism quando há
+        // cwd/env (compatível com android-emulator, ios-simulator, etc.).
+        // "transport": "stdio" conflita com cwd/env e causa rejeição silenciosa.
         cwd: "${ZCODE_PROJECT_DIR}",
         env: {
           [ARGUS_WORKSPACE_ROOT_ENV]: "${ZCODE_PROJECT_DIR}",
@@ -662,30 +664,83 @@ const ADAPTERS: Record<McpHostId, HostAdapter> = {
     id: "antigravity",
     scopes: ["global"],
     register(repoRoot, scope) {
-      const antigravityBaseAdapter = makeMcpServersAdapter({
-        id: "antigravity",
-        scopes: ["global"],
-        configPath: () => {
-          const base = process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide");
-          return join(base, "mcp_config.json");
-        },
-      });
-      return antigravityBaseAdapter.register(repoRoot, scope);
+      const bases = process.env.ANTIGRAVITY_CONFIG_DIR
+        ? [process.env.ANTIGRAVITY_CONFIG_DIR]
+        : [
+            join(homedir(), ".gemini", "antigravity"),
+            join(homedir(), ".gemini", "antigravity-ide"),
+          ];
+
+      let anyChanged = false;
+      let allOk = true;
+      const messages: string[] = [];
+
+      for (const base of bases) {
+        const adapter = makeMcpServersAdapter({
+          id: "antigravity",
+          scopes: ["global"],
+          configPath: () => join(base, "mcp_config.json"),
+        });
+        const res = adapter.register(repoRoot, scope);
+        if (!res.ok) {
+          allOk = false;
+        }
+        if (res.changed) {
+          anyChanged = true;
+        }
+        messages.push(res.message);
+      }
+
+      return {
+        host: "antigravity",
+        ok: allOk,
+        changed: anyChanged,
+        message: messages.join(" | "),
+      };
     },
     unregister(repoRoot, scope) {
-      const antigravityBaseAdapter = makeMcpServersAdapter({
-        id: "antigravity",
-        scopes: ["global"],
-        configPath: () => {
-          const base = process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide");
-          return join(base, "mcp_config.json");
-        },
-      });
-      return antigravityBaseAdapter.unregister(repoRoot, scope);
+      const bases = process.env.ANTIGRAVITY_CONFIG_DIR
+        ? [process.env.ANTIGRAVITY_CONFIG_DIR]
+        : [
+            join(homedir(), ".gemini", "antigravity"),
+            join(homedir(), ".gemini", "antigravity-ide"),
+          ];
+
+      let anyChanged = false;
+      let allOk = true;
+      const messages: string[] = [];
+
+      for (const base of bases) {
+        const adapter = makeMcpServersAdapter({
+          id: "antigravity",
+          scopes: ["global"],
+          configPath: () => join(base, "mcp_config.json"),
+        });
+        const res = adapter.unregister(repoRoot, scope);
+        if (!res.ok) {
+          allOk = false;
+        }
+        if (res.changed) {
+          anyChanged = true;
+        }
+        messages.push(res.message);
+      }
+
+      return {
+        host: "antigravity",
+        ok: allOk,
+        changed: anyChanged,
+        message: messages.join(" | "),
+      };
     },
     isPresent() {
-      const base = process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide");
-      return existsSync(base);
+      if (process.env.ANTIGRAVITY_CONFIG_DIR) {
+        return existsSync(process.env.ANTIGRAVITY_CONFIG_DIR);
+      }
+      return (
+        existsSync(join(homedir(), ".gemini", "antigravity")) ||
+        existsSync(join(homedir(), ".gemini", "antigravity-ide"))
+      );
     },
   },
   zcode: zcodeAdapter,
@@ -753,7 +808,7 @@ function resolveConfigPath(id: McpHostId, repoRoot: string, scope: McpScope): st
       return piConfigPath(repoRoot, scope);
     case "antigravity":
       return join(
-        process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity-ide"),
+        process.env.ANTIGRAVITY_CONFIG_DIR ?? join(homedir(), ".gemini", "antigravity"),
         "mcp_config.json",
       );
     case "zcode":
