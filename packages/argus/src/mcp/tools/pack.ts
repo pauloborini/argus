@@ -568,6 +568,13 @@ function buildPackSegmentsFromSource(
   const callers = (payload.callers as Array<{ name: string; path: string }> | undefined) ?? [];
   const callees = (payload.callees as Array<{ name: string; path: string }> | undefined) ?? [];
   const snippets = ((payload.snippets as ExploreSnippetRef[] | undefined) ?? []).slice(0, config.snippetLimit);
+  const memoryRefs = (payload.memory_refs as Array<{
+    path: string;
+    title: string;
+    mechanism?: string;
+    confidence?: string;
+    evidence?: string;
+  }> | undefined) ?? [];
   const originRefs = uniqueOriginRefs([
     ...centralSymbols.map((item) => ({
       ref: trimmed,
@@ -616,17 +623,39 @@ function buildPackSegmentsFromSource(
       : null,
     callers.length > 0 ? `Chamadores: ${callers.map((item) => `${item.name}@${item.path}`).join(", ")}` : null,
     callees.length > 0 ? `Callees: ${callees.map((item) => `${item.name}@${item.path}`).join(", ")}` : null,
+    memoryRefs.length > 0
+      ? `Notas relacionadas (grafo): ${memoryRefs
+          .map((item) => `${item.title} [${item.mechanism ?? "graph"}/${item.confidence ?? "inferred"}]`)
+          .join("; ")}`
+      : null,
     ...snippetBlocks,
   ].filter((item): item is string => Boolean(item && item.trim().length > 0));
 
+  const segments: PackSegment[] = [
+    {
+      ref: trimmed,
+      text: lines.join("\n"),
+      originRefs,
+    },
+  ];
+
+  for (const memoryRef of memoryRefs.slice(0, 3)) {
+    const related = buildMemoryPackSegment(cwd, `memory:${memoryRef.path}`);
+    if (!related) {
+      continue;
+    }
+    related.text = [
+      `Relação: ${memoryRef.mechanism ?? "graph"} (${memoryRef.confidence ?? "inferred"})`,
+      memoryRef.evidence ? `Evidência: ${memoryRef.evidence}` : null,
+      related.text,
+    ]
+      .filter((item): item is string => Boolean(item))
+      .join("\n");
+    segments.push(related);
+  }
+
   return {
-    segments: [
-      {
-        ref: trimmed,
-        text: lines.join("\n"),
-        originRefs,
-      },
-    ],
+    segments,
     limitations: ((payload.limitations as string[] | undefined) ?? []).slice(0, 4),
     reversibility: "full",
   };

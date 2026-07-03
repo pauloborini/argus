@@ -65,7 +65,7 @@ describe("memory vault", () => {
       domain: "memory",
       response_format: "detailed",
     }, { embedder: new FakeEmbedder() });
-    expect(payload.state).toBe("sucesso");
+    expect(payload.state).toBe("parcial");
     expect(payload.mechanism).toBe("fts-only");
     expect((payload.candidates as unknown[]).length).toBeGreaterThan(0);
   });

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
+import { VaultEngine } from "../src/memory/vault-engine.js";
 import { openIndexDb } from "../src/storage/sqlite-index-store.js";
 import { buildToolResponse, buildToolResponseAsync } from "../src/mcp/tools/response.js";
 import { getIndexDbPath, initWorkspace } from "../src/workspace/workspace.js";
@@ -186,6 +187,40 @@ describe("pack context tool", () => {
     const retrieved = buildToolResponse("retrieve", root, { handle: String(payload.retrieve_handle) });
     expect(retrieved.state).toBe("sucesso");
     expect(String(retrieved.content)).toContain("conteudo da memoria");
+  });
+
+  it("pack-context enriquece com notas relacionadas por grafo em fonte symbol", async () => {
+    const root = setupWorkspace();
+    const noteDir = join(root, ".argus", "memory", "vault", "decision");
+    mkdirSync(noteDir, { recursive: true });
+    writeFileSync(
+      join(noteDir, "graph-pack.md"),
+      [
+        "---",
+        'title: "Pack graph"',
+        "type: decision",
+        'tags: ["calculateTotal"]',
+        "---",
+        "",
+        "Decisão sobre `calculateTotal` em `utils.ts`.",
+      ].join("\n"),
+      "utf-8",
+    );
+    VaultEngine.init(root);
+    VaultEngine.sync(root);
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("pack_context", root, {
+      sources: ["calculateTotal"],
+      goal: "entender decisão ligada ao símbolo",
+      token_budget: 800,
+      style: "balanced",
+    });
+    expect(["sucesso", "parcial", "stale"]).toContain(payload.state);
+    const packed = String(payload.packed_context);
+    expect(packed).toContain("Notas relacionadas (grafo)");
+    expect(packed).toContain("symbol_mention");
+    expect(packed).toContain("Pack graph");
   });
 
   it("pack-context synthesize usa ThinkEngine no caminho async", async () => {

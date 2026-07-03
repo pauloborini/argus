@@ -45,6 +45,48 @@ interface MemoryCandidateChunk {
   path: string;
   score: number;
   snippet?: string;
+  mechanism?: string;
+  confidence?: string;
+  stale_reason?: string;
+  contradiction_reason?: string;
+  superseded_by?: string;
+}
+
+function memoryToCandidate(chunk: MemoryCandidateChunk): SearchCandidate {
+  const mechanism = chunk.mechanism ?? "memory";
+  return {
+    id: `note:${chunk.note_id}`,
+    kind: "note",
+    name: chunk.title,
+    path: chunk.path,
+    start_line: 1,
+    end_line: 1,
+    score: chunk.score,
+    match_reason: mechanism,
+    snippet: chunk.snippet,
+  };
+}
+
+function mapMemoryCandidates(chunks: MemoryCandidateChunk[] | undefined): SearchCandidate[] {
+  return (chunks ?? []).map(memoryToCandidate);
+}
+
+function fuseCodeAndMemoryCandidates(
+  codeCandidates: SearchCandidate[],
+  memoryCandidates: SearchCandidate[],
+  limit: number,
+): SearchCandidate[] {
+  const codeIds = codeCandidates.map((candidate) => candidate.id);
+  const memoryIds = memoryCandidates.map((candidate) => candidate.id);
+  const byId = new Map([...codeCandidates, ...memoryCandidates].map((candidate) => [candidate.id, candidate]));
+  const fused = reciprocalRankFusion([codeIds, memoryIds])
+    .slice(0, limit)
+    .map((item) => byId.get(String(item.id)))
+    .filter((candidate): candidate is SearchCandidate => candidate !== undefined);
+  for (let rank = 0; rank < fused.length; rank += 1) {
+    fused[rank] = { ...fused[rank]!, score: Number((1 / (rank + 1)).toFixed(4)) };
+  }
+  return fused;
 }
 
 const EMBEDDINGS_UNAVAILABLE =
@@ -176,17 +218,7 @@ export async function buildSemanticSearchResponse(
   if (domain === "memory") {
     const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, metadata.root_path, deps?.embedder);
     return {
-      candidates: ((memory.chunks as MemoryCandidateChunk[] | undefined) ?? []).map((chunk) => ({
-        id: `note:${chunk.note_id}`,
-        kind: "note",
-        name: chunk.title,
-        path: chunk.path,
-        start_line: 1,
-        end_line: 1,
-        score: chunk.score,
-        match_reason: "memory",
-        snippet: chunk.snippet,
-      })),
+      candidates: mapMemoryCandidates(memory.chunks as MemoryCandidateChunk[] | undefined),
       storage_backend: envelope.storage_backend,
       schema_version: envelope.schema_version,
       mechanism: memory.mechanism,
@@ -199,17 +231,7 @@ export async function buildSemanticSearchResponse(
   if (codeEnvelopeUnavailable(envelope) && domain === "all") {
     const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, metadata.root_path, deps?.embedder);
     return {
-      candidates: ((memory.chunks as MemoryCandidateChunk[] | undefined) ?? []).map((chunk) => ({
-        id: `note:${chunk.note_id}`,
-        kind: "note",
-        name: chunk.title,
-        path: chunk.path,
-        start_line: 1,
-        end_line: 1,
-        score: chunk.score,
-        match_reason: "memory",
-        snippet: chunk.snippet,
-      })),
+      candidates: mapMemoryCandidates(memory.chunks as MemoryCandidateChunk[] | undefined),
       storage_backend: envelope.storage_backend,
       schema_version: envelope.schema_version,
       domain,
@@ -320,22 +342,18 @@ export async function buildSemanticSearchResponse(
 
     let finalCandidates = candidates;
     let memoryState: ToolResponsePayload | null = null;
+    let responseState: "sucesso" | "parcial" | "stale" = stale ? "stale" : "sucesso";
+    const responseLimitations: string[] = stale
+      ? ["Embeddings defasados; refresque com argus embed."]
+      : [];
     if (domain === "all") {
       memoryState = await VaultEngine.recall(query, { limit }, metadata.root_path, deps?.embedder);
-      const memoryCandidates = ((memoryState.chunks as MemoryCandidateChunk[] | undefined) ?? []).map((chunk) => ({
-        id: `note:${chunk.note_id}`,
-        kind: "note",
-        name: chunk.title,
-        path: chunk.path,
-        start_line: 1,
-        end_line: 1,
-        score: chunk.score,
-        match_reason: "memory",
-        snippet: chunk.snippet,
-      }));
-      finalCandidates = [...candidates, ...memoryCandidates]
-        .sort((left, right) => right.score - left.score)
-        .slice(0, limit);
+      const memoryCandidates = mapMemoryCandidates(memoryState.chunks as MemoryCandidateChunk[] | undefined);
+      finalCandidates = fuseCodeAndMemoryCandidates(candidates, memoryCandidates, limit);
+      if (memoryState.state === "parcial") {
+        responseState = "parcial";
+        responseLimitations.push(...((memoryState.limitations as string[] | undefined) ?? []));
+      }
     }
 
     return {
@@ -345,13 +363,17 @@ export async function buildSemanticSearchResponse(
       domain,
       memory: memoryState ? { state: memoryState.state, mechanism: memoryState.mechanism } : undefined,
       ...stubResponse(
-        stale ? "stale" : "sucesso",
+        responseState,
         stale
           ? EMBEDDINGS_STALE
-          : candidates.length > 0
+          : finalCandidates.length > 0
             ? "Busca semântica concluída."
             : "Nenhum candidato semântico encontrado.",
-        stale ? { limitations: ["Embeddings defasados; refresque com argus embed."], staleness_hint: EMBEDDINGS_HINT } : undefined,
+        responseLimitations.length
+          ? { limitations: responseLimitations, staleness_hint: stale ? EMBEDDINGS_HINT : undefined }
+          : stale
+            ? { limitations: ["Embeddings defasados; refresque com argus embed."], staleness_hint: EMBEDDINGS_HINT }
+            : undefined,
       ),
     };
   } finally {
