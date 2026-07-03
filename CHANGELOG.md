@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.1 - 2026-07-03
+
+- correção: compatibilidade do plugin ZCode e registro MCP em hosts codex/opencode/pi/antigravity/zcode.
+- correção: resolução de workspace no `argus serve --mcp` com fallback para múltiplos diretórios de configuração.
+
 ## 2.0.0 - 2026-07-02
 
 - BREAKING: Athena absorvido pelo Argus: um binário (`argus`), um MCP (`argus serve --mcp`) e um estado (`.argus/`).

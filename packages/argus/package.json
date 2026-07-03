@@ -1,6 +1,6 @@
 {
   "name": "argus",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Local code retrieval and context packing for coding agents",
   "license": "MIT",
   "author": "Paulo Borini",
