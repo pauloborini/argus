@@ -484,6 +484,11 @@ Rode a partir da raiz do monorepo.
 | `npm run smoke:package` | Instala e exercita o tarball num diretório limpo. |
 | `npm run homologate` | Valida repos externos locais (sonda de retrieval real). |
 | `npm run release:check` | Verifica consistência de versão root/runtime/plugin. |
+| `npm run release:eval` | Evidência agregada memória/privacidade/performance com veredito bloqueante → `.argus/release-evaluation/latest.json`. |
+
+Homologação exige pelo menos dois paths locais. Defina `ARGUS_HOMOLOGATION_REPOS=repoA:repoB` se os defaults não existirem.
+
+Avaliação de release (S08) cobre retrieval/memória agregados, privacidade local-first, degradação sem embeddings/LLM, dream dry-run e superfície MCP de 12 tools (`remember`/`recall`). Performance registrada é orientativa, sem SLA. Veredito diferente de `passed` sai com código não-zero.
 
 Tags `v*` rodam CI, smoke do tarball, publicação npm com provenance e GitHub
 Release com `SHA256SUMS`. A versão da tag deve coincidir com root, runtime e

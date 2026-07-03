@@ -177,6 +177,26 @@ members (`.cs`/`.csx`).
   **embeddings are optional and off-by-default**: run `argus embed` and use the
   `semantic_search` tool (dense bge-small + hybrid RRF fusion). Vectors are not
   auto-synced — they can go stale, and the tool signals it honestly.
+- Intelligent memory (`remember`/`recall`, `pack_context` with `synthesize`,
+  `memory dream`) is **local-first**: nothing leaves the workspace without an
+  explicit LLM provider config; without embeddings or LLM the runtime returns
+  `parcial` with documented limitations, not full certainty.
+
+---
+
+## Release validation
+
+Monorepo release gates (no performance SLA — indicative timings only):
+
+| Command | Role |
+|---|---|
+| `npm run validate` | typecheck + tests + lint + build |
+| `npm run smoke:package` | installable tarball + MCP 12 tools |
+| `npm run homologate` | probes on ≥2 local repos (`ARGUS_HOMOLOGATION_REPOS`) |
+| `npm run release:check` | version consistency |
+| `npm run release:eval` | aggregated memory/privacy/performance evidence with blocking verdict → `.argus/release-evaluation/latest.json` |
+
+Privacy checklist and S05–S07 aggregate evaluation: `packages/argus/tests/memory/release-evaluation.test.ts` and `packages/argus/tests/release-privacy.test.ts`. The release evaluation uses a real dream dry-run and exits non-zero when the verdict is not `passed`.
 
 ---
 

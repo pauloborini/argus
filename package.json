@@ -15,7 +15,8 @@
     "validate": "npm run typecheck && npm test && npm run lint && npm run build",
     "smoke:package": "node scripts/smoke-package.mjs",
     "homologate": "npm run build && node scripts/homologate.mjs",
-    "release:check": "node scripts/check-release.mjs"
+    "release:check": "node scripts/check-release.mjs",
+    "release:eval": "npm run build && node scripts/release-evaluation.mjs"
   },
   "engines": {
     "node": ">=20"

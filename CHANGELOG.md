@@ -7,6 +7,9 @@
 - MCP passa de 10 para 12 tools: adiciona `remember` e `recall`; não expõe `think` nem alias público `capture`.
 - `semantic_search` aceita `domain=code|memory|all`; `explore`, `status`, `pack_context` e `retrieve` entendem memória.
 - migração fail-closed de `.athena/` para `.argus/memory/`; `athena-vault.db` vira backup `legacy-athena-vault.db`, nunca runtime.
+- avaliação de release S08: testes agregados `release-evaluation` e `release-privacy`, script `npm run release:eval` com dream dry-run real e veredito bloqueante (evidência em `.argus/release-evaluation/latest.json`), gates `validate` / `smoke:package` / `homologate` / `release:check`.
+- sintese LLM permanece opt-in via `pack_context.synthesize` com `llm_provider` explícito; sem provider configurado a resposta é `parcial` com gaps.
+- embeddings e provider LLM são opcionais; ambientes sem modelo degradam para `parcial`/`fts-only`, nunca promessa de certeza plena.
 
 ## 1.2.0 - 2026-06-30
 
