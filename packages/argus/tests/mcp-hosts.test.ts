@@ -37,6 +37,7 @@ describe("mcp-hosts adapters", () => {
   let savedClaudeConfigHome: string | undefined;
   let savedCursorConfigHome: string | undefined;
   let savedZcodeConfigHome: string | undefined;
+  let savedVscodeConfigHome: string | undefined;
 
   beforeEach(() => {
     repo = mkdtempSync(join(os.tmpdir(), "argus-hosts-"));
@@ -46,6 +47,7 @@ describe("mcp-hosts adapters", () => {
     savedClaudeConfigHome = process.env.CLAUDE_CONFIG_HOME;
     savedCursorConfigHome = process.env.CURSOR_CONFIG_HOME;
     savedZcodeConfigHome = process.env.ZCODE_CONFIG_HOME;
+    savedVscodeConfigHome = process.env.VSCODE_CONFIG_HOME;
     // Aponta os escopos globais para dentro do tmp (sem tocar a máquina real).
     process.env.PI_CODING_AGENT_DIR = join(repo, "home-pi", "agent");
     process.env.XDG_CONFIG_HOME = join(repo, "home-config");
@@ -53,6 +55,7 @@ describe("mcp-hosts adapters", () => {
     process.env.CLAUDE_CONFIG_HOME = join(repo, "home-claude");
     process.env.CURSOR_CONFIG_HOME = join(repo, "home-cursor");
     process.env.ZCODE_CONFIG_HOME = join(repo, "home-zcode");
+    process.env.VSCODE_CONFIG_HOME = join(repo, "home-vscode");
   });
 
   afterEach(() => {
@@ -65,6 +68,7 @@ describe("mcp-hosts adapters", () => {
     process.env.CLAUDE_CONFIG_HOME = savedClaudeConfigHome;
     process.env.CURSOR_CONFIG_HOME = savedCursorConfigHome;
     process.env.ZCODE_CONFIG_HOME = savedZcodeConfigHome;
+    process.env.VSCODE_CONFIG_HOME = savedVscodeConfigHome;
   });
 
   it("claude-code: escopo local (default) registra em .mcp.json com ARGUS_WORKSPACE_ROOT", () => {
@@ -663,5 +667,91 @@ describe("mcp-hosts adapters", () => {
       "plugin.json",
     );
     expect(existsSync(canonicalPath)).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // VS Code adapter
+  // -------------------------------------------------------------------------
+
+  it("vscode: escopo local (default) registra em .vscode/mcp.json com ARGUS_WORKSPACE_ROOT", () => {
+    const res = registerMcpForHosts(repo, ["vscode"]);
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    const path = join(repo, ".vscode", "mcp.json");
+    expect(existsSync(path)).toBe(true);
+    const entry = (readJson(path).mcpServers as JsonRecord)[MCP_SERVER_KEY] as JsonRecord;
+    expect(entry).toBeDefined();
+    expect((entry.env as JsonRecord).ARGUS_WORKSPACE_ROOT).toBe(repo);
+
+    const again = registerMcpForHosts(repo, ["vscode"]);
+    expect(again[0].changed).toBe(false);
+    expect(again[0].message).toContain("já registrado");
+  });
+
+  it("vscode: escopo global registra em VSCODE_CONFIG_HOME/.vscode/mcp.json", () => {
+    const res = registerMcpForHosts(repo, ["vscode"], "global");
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+
+    const path = join(process.env.VSCODE_CONFIG_HOME!, ".vscode", "mcp.json");
+    expect(existsSync(path)).toBe(true);
+    const servers = readJson(path).mcpServers as JsonRecord;
+    expect(servers[MCP_SERVER_KEY]).toBeDefined();
+  });
+
+  it("vscode: escopo local (opt-in explícito) registra em .vscode/mcp.json do repo", () => {
+    const res = registerMcpForHosts(repo, ["vscode"], "local");
+    expect(res[0].ok).toBe(true);
+    expect(res[0].changed).toBe(true);
+    expect(existsSync(join(repo, ".vscode", "mcp.json"))).toBe(true);
+  });
+
+  it("vscode: preserva outros servers no .vscode/mcp.json (merge por chave)", () => {
+    const vscodeDir = join(repo, ".vscode");
+    mkdirSync(vscodeDir, { recursive: true });
+    const path = join(vscodeDir, "mcp.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        mcpServers: { outro: { command: "x", args: [] } },
+        inputs: [{ id: "x" }],
+      }),
+      "utf-8",
+    );
+
+    registerMcpForHosts(repo, ["vscode"], "local");
+    const config = readJson(path);
+    const servers = config.mcpServers as JsonRecord;
+    expect(servers.outro).toBeDefined();
+    expect(servers[MCP_SERVER_KEY]).toBeDefined();
+    expect(config.inputs).toBeDefined();
+
+    unregisterMcpForHosts(repo, ["vscode"], "local");
+    const after = readJson(path);
+    const serversAfter = after.mcpServers as JsonRecord;
+    expect(serversAfter.outro).toBeDefined();
+    expect(serversAfter[MCP_SERVER_KEY]).toBeUndefined();
+    expect(after.inputs).toBeDefined();
+  });
+
+  it("vscode: unregister sem scope limpa ambos escopos (global + local)", () => {
+    registerMcpForHosts(repo, ["vscode"], "global");
+    registerMcpForHosts(repo, ["vscode"], "local");
+
+    const globalPath = join(process.env.VSCODE_CONFIG_HOME!, ".vscode", "mcp.json");
+    const localPath = join(repo, ".vscode", "mcp.json");
+    expect(existsSync(globalPath)).toBe(true);
+    expect(existsSync(localPath)).toBe(true);
+
+    const results = unregisterMcpForHosts(repo, ["vscode"]);
+    const okResults = results.filter((r) => r.ok);
+    expect(okResults.length).toBe(2);
+
+    const globalConfig = readJson(globalPath);
+    expect((globalConfig.mcpServers as JsonRecord)[MCP_SERVER_KEY]).toBeUndefined();
+
+    const localConfig = readJson(localPath);
+    expect((localConfig.mcpServers as JsonRecord)[MCP_SERVER_KEY]).toBeUndefined();
   });
 });
