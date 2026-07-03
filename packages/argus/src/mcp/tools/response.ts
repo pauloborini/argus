@@ -5,7 +5,7 @@ import { SQLITE_SCHEMA_VERSION } from "../../storage/sqlite-prepared.js";
 import { readWorkspaceMetadata } from "../../workspace/workspace.js";
 import type { McpToolName } from "../tool-registry.js";
 import { WORKSPACE_MISSING, buildIndexEnvelope, isWithinPath } from "./common.js";
-import type { ToolResponsePayload, SearchArgs, FilesArgs, ExploreArgs, TraceArgs, ImpactArgs, DiffImpactArgs, PackContextArgs, RetrieveArgs, StructuralLoadMode } from "./common.js";
+import type { ToolResponsePayload, SearchArgs, FilesArgs, ExploreArgs, TraceArgs, ImpactArgs, DiffImpactArgs, PackContextArgs, PackOriginRef, PackRemovedEntry, RetrieveArgs, StructuralLoadMode } from "./common.js";
 import { buildStatusResponse } from "./status.js";
 import { buildFilesResponse, applyFilesFilters, readFilesForTsv } from "./files.js";
 import { buildSearchResponse } from "./search.js";
@@ -223,6 +223,14 @@ export async function buildToolResponseAsync(
       pack.synthesis = await ThinkEngine.think(String((args as PackContextArgs | undefined)?.goal ?? ""), {
         context: pack.packed_context,
         cwd,
+        packEvidence: {
+          origin_refs: pack.origin_refs as PackOriginRef[] | undefined,
+          retrieve_handle: typeof pack.retrieve_handle === "string" ? pack.retrieve_handle : undefined,
+          removed_or_summarized: pack.removed_or_summarized as PackRemovedEntry[] | undefined,
+          limitations: pack.limitations as string[] | undefined,
+          staleness_hint: pack.staleness_hint as string | undefined,
+          reversibility: typeof pack.reversibility === "string" ? pack.reversibility : undefined,
+        },
       });
     }
     return applyResponseFormat(pack, resolveResponseFormat(args), tool);

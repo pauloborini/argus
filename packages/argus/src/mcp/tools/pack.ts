@@ -947,14 +947,6 @@ export function buildPackContextResponse(
     retrieve_handle: retrieveHandle,
     reversibility,
     token_estimate: countTokens(packedContext),
-    synthesis: args?.synthesize
-      ? {
-          state: "parcial",
-          message: "W_SYNTHESIS_UNAVAILABLE: síntese LLM interna não configurada.",
-          citations: [],
-          gaps: [],
-        }
-      : undefined,
     ...stubResponse(state, "Contexto comprimido pronto para o modelo.", {
       limitations: Array.from(limitations),
       staleness_hint: envelope.staleness_hint,

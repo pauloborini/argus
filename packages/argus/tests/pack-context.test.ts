@@ -4,6 +4,9 @@ import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { VaultEngine } from "../src/memory/vault-engine.js";
+import { writeMemoryConfig } from "../src/memory/config.js";
+import { LlmProviderError } from "../src/memory/llm-provider.js";
+import { MCP_TOOL_NAMES } from "../src/mcp/tool-registry.js";
 import { openIndexDb } from "../src/storage/sqlite-index-store.js";
 import { buildToolResponse, buildToolResponseAsync } from "../src/mcp/tools/response.js";
 import { getIndexDbPath, initWorkspace } from "../src/workspace/workspace.js";
@@ -14,6 +17,7 @@ describe("pack context tool", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     if (originalCwd) {
       process.chdir(originalCwd);
       originalCwd = undefined;
@@ -223,7 +227,7 @@ describe("pack context tool", () => {
     expect(packed).toContain("Pack graph");
   });
 
-  it("pack-context synthesize usa ThinkEngine no caminho async", async () => {
+  it("pack-context synthesize retorna payload honesto estruturado", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
@@ -236,9 +240,312 @@ describe("pack context tool", () => {
       response_format: "detailed",
     });
     expect(["sucesso", "parcial", "stale"]).toContain(payload.state);
-    const synthesis = payload.synthesis as { goal?: string; dry_run_prompt?: string; state?: string };
+    const synthesis = payload.synthesis as {
+      goal?: string;
+      state?: string;
+      known?: unknown[];
+      unknown?: unknown[];
+      contradictions?: unknown[];
+      stale_sources?: unknown[];
+      citations?: unknown[];
+      handles?: { retrieve_handle?: string };
+      dry_run_prompt?: string;
+    };
     expect(synthesis.goal).toBe("sintetizar contexto");
-    expect(String(synthesis.dry_run_prompt)).toContain("Contexto:");
+    expect(Array.isArray(synthesis.known)).toBe(true);
+    expect(Array.isArray(synthesis.unknown)).toBe(true);
+    expect(Array.isArray(synthesis.contradictions)).toBe(true);
+    expect(Array.isArray(synthesis.stale_sources)).toBe(true);
+    expect(Array.isArray(synthesis.citations)).toBe(true);
+    expect(synthesis.handles).toBeDefined();
+    expect(synthesis.state).toBe("parcial");
+    expect(synthesis.unknown?.length).toBeGreaterThan(0);
+  });
+
+  it("todo known tem citation_ids resolvíveis em citations", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    writeMemoryConfig(
+      {
+        vault_path: join(root, ".argus", "memory", "vault"),
+        db_path: join(root, ".argus", "memory", "memory.db"),
+        llm_provider: "openai",
+        openai_api_key: "test-key",
+      },
+      root,
+    );
+    vi.spyOn(await import("../src/memory/llm-provider.js"), "createLlmProvider").mockReturnValue({
+      complete: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          known: [{ text: "calculateTotal existe em utils.ts", citation_ids: ["cite_origin_0"] }],
+          unknown: [],
+        }),
+      ),
+    });
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "sintetizar contexto",
+      token_budget: 400,
+      style: "balanced",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as {
+      known?: Array<{ citation_ids?: string[] }>;
+      citations?: Array<{ id: string }>;
+    };
+    const citationIds = new Set((synthesis.citations ?? []).map((item) => item.id));
+    for (const item of synthesis.known ?? []) {
+      for (const id of item.citation_ids ?? []) {
+        expect(citationIds.has(id)).toBe(true);
+      }
+    }
+  });
+
+  it("nota contraditoria entra em contradictions e nao em known", async () => {
+    const root = setupWorkspace();
+    const noteDir = join(root, ".argus", "memory", "vault", "inbox");
+    mkdirSync(noteDir, { recursive: true });
+    writeFileSync(
+      join(noteDir, "conflict.md"),
+      [
+        "---",
+        'title: "Conflito pack"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: inferred",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        'contradiction_reason: "conflicting_values_same_scope"',
+        "---",
+        "",
+        "token conflict pack unique",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    VaultEngine.init(root);
+    VaultEngine.sync(root);
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["memory:inbox/conflict.md"],
+      goal: "token conflict pack",
+      token_budget: 400,
+      style: "balanced",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as {
+      contradictions?: Array<{ reason?: string }>;
+      known?: unknown[];
+    };
+    expect((synthesis.contradictions ?? []).some((item) => item.reason?.includes("conflicting"))).toBe(true);
+    expect(synthesis.known ?? []).toHaveLength(0);
+  });
+
+  it("fonte memory explicitamente empacotada expõe contradição mesmo fora do recall por goal", async () => {
+    const root = setupWorkspace();
+    const noteDir = join(root, ".argus", "memory", "vault", "inbox");
+    mkdirSync(noteDir, { recursive: true });
+    writeFileSync(
+      join(noteDir, "explicit-conflict.md"),
+      [
+        "---",
+        'title: "Conflito explícito"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: inferred",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        'contradiction_reason: "explicit_source_conflict"',
+        "---",
+        "",
+        "alpha beta gamma",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    VaultEngine.init(root);
+    VaultEngine.sync(root);
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["memory:inbox/explicit-conflict.md"],
+      goal: "objetivo sem tokens da nota",
+      token_budget: 400,
+      style: "balanced",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as {
+      contradictions?: Array<{ reason?: string }>;
+    };
+    expect((synthesis.contradictions ?? []).some((item) => item.reason === "explicit_source_conflict")).toBe(true);
+  });
+
+  it("nota stale entra em stale_sources", async () => {
+    const root = setupWorkspace();
+    const noteDir = join(root, ".argus", "memory", "vault", "inbox");
+    mkdirSync(noteDir, { recursive: true });
+    writeFileSync(
+      join(noteDir, "stale.md"),
+      [
+        "---",
+        'title: "Stale pack"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: inferred",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        'stale_reason: "session_expired"',
+        "---",
+        "",
+        "token stale pack unique",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    VaultEngine.init(root);
+    VaultEngine.sync(root);
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["memory:inbox/stale.md"],
+      goal: "token stale pack",
+      token_budget: 400,
+      style: "balanced",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as {
+      stale_sources?: Array<{ reason?: string }>;
+    };
+    expect((synthesis.stale_sources ?? []).some((item) => item.reason === "session_expired")).toBe(true);
+  });
+
+  it("sem LLM configurado retorna synthesis parcial com gaps", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "sintetizar sem llm",
+      token_budget: 400,
+      style: "balanced",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as { state?: string; unknown?: unknown[] };
+    expect(synthesis.state).toBe("parcial");
+    expect((synthesis.unknown ?? []).length).toBeGreaterThan(0);
+    expect(payload.state).not.toBe("falha");
+  });
+
+  it("provider falhando degrada para parcial sem falhar a tool", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    writeMemoryConfig(
+      {
+        vault_path: join(root, ".argus", "memory", "vault"),
+        db_path: join(root, ".argus", "memory", "memory.db"),
+        llm_provider: "openai",
+        openai_api_key: "invalid-key",
+      },
+      root,
+    );
+    vi.spyOn(await import("../src/memory/llm-provider.js"), "createLlmProvider").mockReturnValue({
+      complete: vi.fn().mockRejectedValue(new LlmProviderError("E_LLM_FAILED", "provider down")),
+    });
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "sintetizar com falha",
+      token_budget: 400,
+      style: "balanced",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as { state?: string; unknown?: unknown[] };
+    expect(synthesis.state).toBe("parcial");
+    expect(payload.state).not.toBe("falha");
+    expect((synthesis.unknown ?? []).length).toBeGreaterThan(0);
+  });
+
+  it("budget insuficiente declara truncamento em unknown com handle", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "entender refactor",
+      token_budget: 80,
+      style: "deep",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as {
+      unknown?: Array<{ reason?: string; handle?: string }>;
+      handles?: { retrieve_handle?: string };
+    };
+    expect(typeof payload.retrieve_handle).toBe("string");
+    expect(
+      (synthesis.unknown ?? []).some(
+        (item) => item.reason === "budget_truncation" && item.handle === payload.retrieve_handle,
+      ),
+    ).toBe(true);
+    expect(synthesis.handles?.retrieve_handle).toBe(payload.retrieve_handle);
+  });
+
+  it("budget insuficiente mantém synthesis parcial mesmo com LLM respondendo", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    writeMemoryConfig(
+      {
+        vault_path: join(root, ".argus", "memory", "vault"),
+        db_path: join(root, ".argus", "memory", "memory.db"),
+        llm_provider: "openai",
+        openai_api_key: "test-key",
+      },
+      root,
+    );
+    vi.spyOn(await import("../src/memory/llm-provider.js"), "createLlmProvider").mockReturnValue({
+      complete: vi.fn().mockResolvedValue(JSON.stringify({ known: [], unknown: [] })),
+    });
+
+    const payload = await buildToolResponseAsync("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "entender refactor",
+      token_budget: 80,
+      style: "deep",
+      synthesize: true,
+      response_format: "detailed",
+    });
+    const synthesis = payload.synthesis as {
+      state?: string;
+      unknown?: Array<{ reason?: string }>;
+    };
+    expect(synthesis.state).toBe("parcial");
+    expect((synthesis.unknown ?? []).some((item) => item.reason === "budget_truncation")).toBe(true);
+  });
+
+  it("sem synthesize mantem contrato baseline sem synthesis", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "entender refactor",
+      token_budget: 400,
+      style: "balanced",
+    });
+    expect(payload.synthesis).toBeUndefined();
+    expect(String(payload.packed_context)).toContain("utils.ts");
+    expect((payload.origin_refs as unknown[]).length).toBeGreaterThan(0);
+    expect(payload.reversibility).toBe("full");
+  });
+
+  it("MCP_TOOL_NAMES permanece com 12 tools", () => {
+    expect(MCP_TOOL_NAMES).toHaveLength(12);
+    expect(MCP_TOOL_NAMES).not.toContain("think");
   });
 
   it("GC evict handles antigos ao gravar um novo (TTL)", async () => {
