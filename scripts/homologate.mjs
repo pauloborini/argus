@@ -129,7 +129,7 @@ for (const source of targets) {
     const startedAt = Date.now();
     execFileSync(process.execPath, [cli, "index"], { cwd: target, stdio: "pipe" });
     const durationMs = Date.now() - startedAt;
-    const statusRaw = execFileSync(process.execPath, [cli, "status"], {
+    const statusRaw = execFileSync(process.execPath, [cli, "status", "--json"], {
       cwd: target,
       encoding: "utf8",
     });
