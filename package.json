@@ -7,11 +7,11 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@pauloborini/argus",
-    "benchmark:mvp": "npm run benchmark:mvp --workspace=@pauloborini/argus",
-    "test": "npm run test --workspace=@pauloborini/argus",
-    "lint": "npm run lint --workspace=@pauloborini/argus",
-    "typecheck": "npm run typecheck --workspace=@pauloborini/argus",
+    "build": "npm run build --workspace=@owerride/argus",
+    "benchmark:mvp": "npm run benchmark:mvp --workspace=@owerride/argus",
+    "test": "npm run test --workspace=@owerride/argus",
+    "lint": "npm run lint --workspace=@owerride/argus",
+    "typecheck": "npm run typecheck --workspace=@owerride/argus",
     "validate": "npm run typecheck && npm test && npm run lint && npm run build",
     "smoke:package": "node scripts/smoke-package.mjs",
     "homologate": "npm run build && node scripts/homologate.mjs",
