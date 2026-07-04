@@ -8,7 +8,8 @@ The complete, no-prose list of commands. For *what it is* and *why*, read the
 All examples assume the `argus` binary on your PATH — **not** `npm install -g argus` (wrong package on npmjs.org). See **[README → Install](README.md#install)**.
 
 ```bash
-npm install -g https://github.com/pauloborini/argus/releases/download/v2.1.0/argus-2.1.0.tgz
+gh release download v2.1.0 --repo pauloborini/argus --pattern 'argus-*.tgz' -D /tmp
+npm install -g /tmp/argus-2.1.0.tgz
 ```
 
 ## Conventions

@@ -54,20 +54,28 @@ recovered context never leaves the workspace.
 
 ## Install
 
-Argus is **not** on the public npm registry as `argus` (that name is another package). Install from the **GitHub Release** tarball:
+Argus is **not** on the public npm registry as `argus` (that name is another package). Install from the **GitHub Release** tarball.
+
+This repository is **private** — a bare `https://github.com/.../releases/download/...` URL returns 404 without GitHub authentication. Use the GitHub CLI (logged in with repo access):
 
 ```bash
-# Replace X.Y.Z with the latest tag from https://github.com/pauloborini/argus/releases
-npm install -g https://github.com/pauloborini/argus/releases/download/v2.1.0/argus-2.1.0.tgz
+gh release download v2.1.0 --repo pauloborini/argus --pattern 'argus-*.tgz' -D /tmp
+npm install -g /tmp/argus-2.1.0.tgz
 argus --version
 ```
 
-With the [GitHub CLI](https://cli.github.com/):
+Latest release:
 
 ```bash
 VERSION=$(gh release view --repo pauloborini/argus --json tagName -q .tagName | sed 's/^v//')
 gh release download "v${VERSION}" --repo pauloborini/argus --pattern 'argus-*.tgz' -D /tmp
 npm install -g "/tmp/argus-${VERSION}.tgz"
+```
+
+If the repository is public, you can use a direct URL instead:
+
+```bash
+npm install -g https://github.com/pauloborini/argus/releases/download/v2.1.0/argus-2.1.0.tgz
 ```
 
 Build from source (contributors):
@@ -84,7 +92,7 @@ cd your-repo
 argus install
 ```
 
-**Update:** `npm install -g` with the URL of the newer release.
+**Update:** download and `npm install -g` the newer tarball.
 
 **Uninstall:** `npm uninstall -g argus`
 
