@@ -54,14 +54,46 @@ recovered context never leaves the workspace.
 
 ## Install
 
-```bash
-# Global install — gives you the `argus` binary
-npm install -g argus
-argus --version
+Argus is **not** on the public npm registry as `argus` (that name is another package). Install from a **GitHub Release** tarball:
 
-# Or run without installing
-npx argus init
+```bash
+# One-liner — pick the latest tag from https://github.com/pauloborini/argus/releases
+npm install -g https://github.com/pauloborini/argus/releases/download/v2.1.0/argus-2.1.0.tgz
+argus --version
 ```
+
+With the [GitHub CLI](https://cli.github.com/):
+
+```bash
+VERSION=$(gh release view --repo pauloborini/argus --json tagName -q .tagName | sed 's/^v//')
+gh release download "v${VERSION}" --repo pauloborini/argus --pattern '*.tgz' -D /tmp
+npm install -g "/tmp/argus-${VERSION}.tgz"
+```
+
+Build from source (contributors):
+
+```bash
+git clone https://github.com/pauloborini/argus.git && cd argus
+npm ci && npm run build && npm link --workspace=argus
+```
+
+Then wire any project:
+
+```bash
+cd your-repo
+argus install
+```
+
+**Update:** install a newer release tarball over the global install (same `npm install -g` URL with the new version).
+
+**Uninstall:** `npm uninstall -g argus` (or `npm unlink -g argus` after a source link).
+
+| Do **not** use | Why |
+|---|---|
+| `npm install -g argus` | Wrong package on npmjs.org |
+| `npx argus …` | Same |
+
+If `argus` is not found after install, check `npm list -g argus` and ensure npm's global `bin` directory is on your PATH.
 
 ---
 
@@ -103,8 +135,8 @@ To wire it by hand, point your agent or IDE at the stdio MCP server:
 {
   "mcpServers": {
     "argus": {
-      "command": "npx",
-      "args": ["-y", "argus@latest", "serve", "--mcp"]
+      "command": "argus",
+      "args": ["serve", "--mcp"]
     }
   }
 }

@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   release:
@@ -18,7 +17,6 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: |
           cd node_modules/rolldown && npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock
@@ -26,18 +24,11 @@ jobs:
       - run: npm run validate
       - run: npm run smoke:package
       - run: npm run release:check
-      - run: npm install --global npm@latest
       - name: Build release assets
         run: |
           mkdir -p dist-release
           npm pack --workspace=argus --pack-destination dist-release
           (cd dist-release && shasum -a 256 *.tgz > SHA256SUMS)
-      # Provenance npm exige repositório-fonte público. Ao tornar o repo público,
-      # acrescentar --provenance ao comando (id-token: write deve estar habilitado).
-      - name: Publish npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --workspace=argus --access public
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

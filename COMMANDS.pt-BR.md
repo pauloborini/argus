@@ -5,8 +5,11 @@
 A lista completa e sem rodeios de comandos. Para *o que é* e *por quê*, leia o
 **[README](README.pt-BR.md)**.
 
-Todos os exemplos assumem o binário `argus` (de `npm install -g argus`).
-Sem instalação global, prefixe qualquer comando com `npx argus …`.
+Todos os exemplos assumem o binário `argus` no PATH. Instale pelo tarball do GitHub Release — **não** use `npm install -g argus` (pacote errado no npmjs.org). Veja **[README → Instalação](README.pt-BR.md#instalação)**.
+
+```bash
+npm install -g https://github.com/pauloborini/argus/releases/download/v2.1.0/argus-2.1.0.tgz
+```
 
 ## Convenções
 
@@ -491,9 +494,7 @@ Homologação exige pelo menos dois paths locais. Defina `ARGUS_HOMOLOGATION_REP
 
 Avaliação de release (S08) cobre retrieval/memória agregados, privacidade local-first, degradação sem embeddings/LLM, dream dry-run e superfície MCP de 12 tools (`remember`/`recall`). Performance registrada é orientativa, sem SLA. Veredito diferente de `passed` sai com código não-zero.
 
-Tags `v*` rodam CI, smoke do tarball, publicação npm com provenance e GitHub
-Release com `SHA256SUMS`. A versão da tag deve coincidir com root, runtime e
-plugin.
+Tags `v*` rodam CI, smoke do tarball e GitHub Release com `SHA256SUMS`. A versão da tag deve coincidir com root, runtime e plugin.
 
 ---
 
