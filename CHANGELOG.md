@@ -2,8 +2,8 @@
 
 ## 2.1.1 - 2026-07-04
 
-- pacote npm publicado como `@pauloborini/argus` (nome `argus` no registry é de terceiro); binário CLI continua `argus`
-- release CI republica no npmjs.org e no GitHub Release (`pauloborini-argus-*.tgz`)
+- pacote npm publicado como `@owerride/argus` (escopo do username npm `owerride`; nome `argus` sem escopo é de terceiro); binário CLI continua `argus`
+- release CI republica no npmjs.org e no GitHub Release (`owerride-argus-*.tgz`)
 
 ## 2.1.0 - 2026-07-03
 

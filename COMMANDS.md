@@ -5,10 +5,10 @@
 The complete, no-prose list of commands. For *what it is* and *why*, read the
 **[README](README.md)**.
 
-All examples assume the `argus` binary on your PATH (`npm install -g @pauloborini/argus`). See **[README → Install](README.md#install)**.
+All examples assume the `argus` binary on your PATH (`npm install -g @owerride/argus`). See **[README → Install](README.md#install)**.
 
 ```bash
-npm install -g @pauloborini/argus
+npm install -g @owerride/argus
 ```
 
 ## Conventions
@@ -494,7 +494,7 @@ Homologation needs at least two local repo paths. Set `ARGUS_HOMOLOGATION_REPOS=
 
 Release evaluation (S08) covers aggregated retrieval/memory, local-first privacy, degradation without embeddings/LLM, dream dry-run, and the 12-tool MCP surface (`remember`/`recall`). Recorded performance is indicative only — no SLA. A non-`passed` verdict exits non-zero.
 
-Tags `v*` run CI, tarball smoke, npm publish (`@pauloborini/argus`), and a GitHub Release with `SHA256SUMS`. The tag version must match root, runtime and plugin.
+Tags `v*` run CI, tarball smoke, npm publish (`@owerride/argus`), and a GitHub Release with `SHA256SUMS`. The tag version must match root, runtime and plugin.
 
 ---
 

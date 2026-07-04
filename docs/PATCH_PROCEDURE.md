@@ -10,7 +10,7 @@ Procedimento completo de ponta a ponta para publicar uma nova versao do `argus` 
 - [ ] npm `>=10` (gerenciador de dependencias do monorepo)
 - [ ] `gh` CLI autenticado (`gh auth status`)
 - [ ] Acesso de escrita ao repo GitHub `pauloborini/argus`
-- [ ] Secret `NPM_TOKEN` no GitHub (token npm **Automation** da conta/org `pauloborini`)
+- [ ] Secret `NPM_TOKEN` no GitHub (token npm **Automation** da conta `owerride`)
 - [ ] Branch `main` protegida exige PR e CI verde antes do merge
 
 ---
@@ -92,7 +92,7 @@ Sao **6 arquivos + lockfile** que precisam ser atualizados com a nova versao:
 ### 6.2 `packages/argus/package.json` (runtime distribuivel)
 
 ```json
-"name": "@pauloborini/argus",
+"name": "@owerride/argus",
 "version": "1.0.2",
 "publishConfig": { "access": "public" }
 ```
@@ -115,7 +115,7 @@ Plugin Codex via npx do pacote com escopo:
 
 ```json
 "command": "npx",
-"args": ["-y", "@pauloborini/argus", "serve", "--mcp"]
+"args": ["-y", "@owerride/argus", "serve", "--mcp"]
 ```
 
 Atencao: o `release:check` **nao** valida este arquivo atualmente — confira manualmente.
@@ -152,7 +152,7 @@ rg -n '"version":|ARGUS_VERSION|argus@[0-9]+\.[0-9]+\.[0-9]+' \
   plugins/argus/.mcp.json
 ```
 
-Regra: install publico e `npm install -g @pauloborini/argus` (nao `argus` sem escopo).
+Regra: install publico e `npm install -g @owerride/argus` (nao `argus` sem escopo).
 
 ---
 
@@ -163,7 +163,7 @@ npm ci
 npm run validate          # typecheck + test + lint + build
 npm run smoke:package     # instala tarball em dir limpo, testa CLI + MCP
 npm run release:check     # verifica 7 fontes de versao identicas
-npm pack --workspace=@pauloborini/argus --dry-run --json
+npm pack --workspace=@owerride/argus --dry-run --json
 ```
 
 Se `smoke:package` falhar localmente por `node-gyp` e path com espaco/parenteses:
