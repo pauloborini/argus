@@ -24,7 +24,7 @@ jobs:
           cache: npm
       - run: npm ci
       - if: runner.os == 'Linux'
-        run: rm -rf node_modules package-lock.json && npm install --legacy-peer-deps
+        run: cd node_modules/rolldown && npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock
       - run: npm run validate
 
   package-smoke:
