@@ -19,8 +19,7 @@ jobs:
           node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
-      - run: npm install @rolldown/binding-linux-x64-gnu --no-save
+      - run: rm -rf node_modules package-lock.json && npm install --legacy-peer-deps
       - run: npm run validate
       - run: npm run smoke:package
       - run: npm run release:check
