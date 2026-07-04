@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release (e.g. v2.1.0)"
+        description: "Existing tag to release (e.g. v2.1.1)"
         required: true
         type: string
 
@@ -25,6 +25,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: |
           cd node_modules/rolldown && npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock
@@ -35,8 +36,12 @@ jobs:
       - name: Build release assets
         run: |
           mkdir -p dist-release
-          npm pack --workspace=argus --pack-destination dist-release
+          npm pack --workspace=@pauloborini/argus --pack-destination dist-release
           (cd dist-release && shasum -a 256 *.tgz > SHA256SUMS)
+      - name: Publish npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --workspace=@pauloborini/argus --access public
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

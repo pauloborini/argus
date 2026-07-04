@@ -10,6 +10,7 @@ Procedimento completo de ponta a ponta para publicar uma nova versao do `argus` 
 - [ ] npm `>=10` (gerenciador de dependencias do monorepo)
 - [ ] `gh` CLI autenticado (`gh auth status`)
 - [ ] Acesso de escrita ao repo GitHub `pauloborini/argus`
+- [ ] Secret `NPM_TOKEN` no GitHub (token npm **Automation** da conta/org `pauloborini`)
 - [ ] Branch `main` protegida exige PR e CI verde antes do merge
 
 ---
@@ -91,7 +92,9 @@ Sao **6 arquivos + lockfile** que precisam ser atualizados com a nova versao:
 ### 6.2 `packages/argus/package.json` (runtime distribuivel)
 
 ```json
-"version": "1.0.2"
+"name": "@pauloborini/argus",
+"version": "1.0.2",
+"publishConfig": { "access": "public" }
 ```
 
 ### 6.3 `packages/argus/src/version.ts`
@@ -108,11 +111,11 @@ export const ARGUS_VERSION = "1.0.2";
 
 ### 6.5 `plugins/argus/.mcp.json`
 
-O plugin Codex deve apontar para o binario global instalado (nao usa registry npm):
+Plugin Codex via npx do pacote com escopo:
 
 ```json
-"command": "argus",
-"args": ["serve", "--mcp"]
+"command": "npx",
+"args": ["-y", "@pauloborini/argus", "serve", "--mcp"]
 ```
 
 Atencao: o `release:check` **nao** valida este arquivo atualmente — confira manualmente.
@@ -149,7 +152,7 @@ rg -n '"version":|ARGUS_VERSION|argus@[0-9]+\.[0-9]+\.[0-9]+' \
   plugins/argus/.mcp.json
 ```
 
-Regra: exemplos publicos em README e COMMANDS devem assumir o binario `argus` no PATH (instalado via tarball do GitHub Release ou build local), nao `npx argus` do registry npm.
+Regra: install publico e `npm install -g @pauloborini/argus` (nao `argus` sem escopo).
 
 ---
 
@@ -160,7 +163,7 @@ npm ci
 npm run validate          # typecheck + test + lint + build
 npm run smoke:package     # instala tarball em dir limpo, testa CLI + MCP
 npm run release:check     # verifica 7 fontes de versao identicas
-npm pack --workspace=argus --dry-run --json
+npm pack --workspace=@pauloborini/argus --dry-run --json
 ```
 
 Se `smoke:package` falhar localmente por `node-gyp` e path com espaco/parenteses:

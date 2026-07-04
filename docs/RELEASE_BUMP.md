@@ -1,15 +1,16 @@
 # Bump de versao e release CI
 
-Runbook para IA executar bump e liberar release sem drift entre codigo, tarball GitHub e GitHub Actions.
+Runbook para IA executar bump e liberar release sem drift entre codigo, npm (`@pauloborini/argus`), tarball GitHub e GitHub Actions.
 
 ## Objetivo
 
-Gerar uma nova versao com tag Git, release GitHub (tarball + `SHA256SUMS`), tarball verificavel e docs alinhadas.
+Gerar uma nova versao publicada em npm (`@pauloborini/argus`), com tag Git, release GitHub (`pauloborini-argus-*.tgz` + `SHA256SUMS`) e docs alinhadas.
 
 ## Pre-requisitos
 
 - Branch limpa ou com mudancas conhecidas.
 - `gh auth status` autenticado, se for preciso inspecionar Actions/release.
+- Secret `NPM_TOKEN` no GitHub (token npm **Automation** da conta/org `pauloborini`).
 - Node suportado pelo projeto (`>=20`); release CI usa Node 24.
 
 ## Passo a passo
@@ -19,7 +20,7 @@ Gerar uma nova versao com tag Git, release GitHub (tarball + `SHA256SUMS`), tarb
 ```bash
 rtk git status --short --branch
 rtk git log --oneline -5
-rtk gh release list --limit 5
+rtk npm view @pauloborini/argus version dist-tags --json
 ```
 
 2. Escolher a versao nova.
@@ -33,10 +34,10 @@ rtk gh release list --limit 5
 Arquivos obrigatorios:
 
 - `package.json`
-- `packages/argus/package.json`
+- `packages/argus/package.json` (`name`: `@pauloborini/argus`)
 - `packages/argus/src/version.ts`
 - `plugins/argus/.codex-plugin/plugin.json`
-- `plugins/argus/.mcp.json` (deve usar `command: argus`, nao `npx argus@…`)
+- `plugins/argus/.mcp.json` (`npx -y @pauloborini/argus serve --mcp`)
 - `CHANGELOG.md`
 - `package-lock.json`
 
@@ -49,108 +50,55 @@ rtk npm install --package-lock-only
 4. Procurar drift de versao.
 
 ```bash
-rtk rg -n '"version":|ARGUS_VERSION|argus@[0-9]+\.[0-9]+\.[0-9]+' package.json packages plugins README.md README.pt-BR.md COMMANDS.md COMMANDS.pt-BR.md CHANGELOG.md package-lock.json
+rtk rg -n '"version":|ARGUS_VERSION|@pauloborini/argus' package.json packages plugins README.md README.pt-BR.md COMMANDS.md COMMANDS.pt-BR.md CHANGELOG.md package-lock.json
 rtk npm run release:check
 ```
 
-Regra: exemplos publicos devem assumir o binario `argus` no PATH (tarball do GitHub Release ou build local), nao pacote do registry npm.
-
-Nota: `release:check` valida todos os pontos de versao (root, runtime, plugin, `version.ts`/`ARGUS_VERSION`, e as tres entradas do lockfile). A checagem de tag so dispara quando `GITHUB_REF_TYPE=tag`; em push/PR de branch (`GITHUB_REF_TYPE=branch`) o script roda sem exigir match de tag, entao a CI passa normalmente.
+Regra: install publico e `npm install -g @pauloborini/argus` (nao `argus` sem escopo).
 
 5. Validar codigo e pacote.
 
 ```bash
 rtk npm run validate
 rtk npm run smoke:package
-rtk npm pack --workspace=argus --dry-run --json
-```
-
-Se `smoke:package` falhar localmente por `node-gyp` e path com espaco/parênteses, repetir com cache fora do path problemático:
-
-```bash
-rtk env TMPDIR=/tmp npm_config_devdir=/tmp/node-gyp-cache npx -y -p node@24 -p npm@latest npm run smoke:package
+rtk npm pack --workspace=@pauloborini/argus --dry-run --json
 ```
 
 6. Conferir CI.
 
-CI deve cobrir:
-
-- `npm ci`
-- `npm run validate`
-- `npm run smoke:package`
-- `npm run release:check`
-- matriz minima Node 20/22/24, idealmente Ubuntu e macOS.
-
 Release por tag deve cobrir:
 
-- checkout
-- setup-node
-- `npm ci`
-- validate
-- smoke package
-- release check
-- `npm pack` em `dist-release/` com `SHA256SUMS`
+- `npm ci`, validate, smoke, release check
+- `npm pack --workspace=@pauloborini/argus` → `dist-release/pauloborini-argus-X.Y.Z.tgz`
+- `npm publish --workspace=@pauloborini/argus --access public`
 - GitHub release com assets `dist-release/*`
 
-7. Commitar bump.
+7. Commitar bump, criar tag `vX.Y.Z`, push.
+
+8. Acompanhar release CI.
+
+9. Confirmar publicacao.
 
 ```bash
-rtk git status --short
-rtk git diff --stat
-rtk git add package.json package-lock.json packages/argus/package.json packages/argus/src/version.ts plugins/argus/.codex-plugin/plugin.json plugins/argus/.mcp.json CHANGELOG.md README.md README.pt-BR.md COMMANDS.md COMMANDS.pt-BR.md .github/workflows/ci.yml .github/workflows/release.yml docs/RELEASE_BUMP.md .gitignore
-rtk git commit -m "chore(release): bump para X.Y.Z"
-```
-
-Ajustar lista de arquivos ao diff real. Nao adicionar artefatos gerados como `dist/`, `dist-release/`, `node_modules/` ou `.argus/`.
-
-8. Criar e enviar tag.
-
-```bash
-rtk git tag vX.Y.Z
-rtk git push origin HEAD
-rtk git push origin vX.Y.Z
-```
-
-Se a tag ja existir e apontar para commit errado, parar. Nao sobrescrever sem decisao explicita.
-
-9. Acompanhar release CI.
-
-```bash
-rtk gh run list --limit 10 --json databaseId,workflowName,status,conclusion,headBranch,headSha,event,createdAt,displayTitle
-rtk gh run view <run-id> --log-failed
-```
-
-10. Confirmar GitHub release e tarball.
-
-```bash
-rtk gh release view vX.Y.Z --json tagName,isDraft,isPrerelease,assets,url
-rtk gh release download vX.Y.Z --pattern '*.tgz' -D /tmp
-rtk npm install -g /tmp/argus-X.Y.Z.tgz
+rtk npm view @pauloborini/argus version dist-tags --json
+rtk npm install -g @pauloborini/argus@X.Y.Z
 rtk argus --version
-rtk argus init --help
+rtk gh release view vX.Y.Z --json assets
 ```
 
 ## Checklist de aceite
 
-- `package-lock.json` mostra a versao nova no root e em `packages/argus`.
 - `npm run release:check` passa.
-- `npm run validate` passa.
-- `smoke:package` passa em ambiente compativel.
-- `npm pack --dry-run` gera `argus-X.Y.Z.tgz`.
-- Tag `vX.Y.Z` aponta para o commit do bump.
-- GitHub release existe e contem tarball + `SHA256SUMS`.
-- `npm install -g` a partir do tarball do release retorna `argus --version` = `X.Y.Z`.
+- npm registry tem `@pauloborini/argus@X.Y.Z`.
+- `npm install -g @pauloborini/argus` → `argus --version` = `X.Y.Z`.
+- GitHub release com `pauloborini-argus-X.Y.Z.tgz` + `SHA256SUMS`.
 
 ## Falhas comuns
 
-- Lockfile esquecido: `package-lock.json` fica em versao antiga e gera drift.
-- README com `npm install -g argus` ou `npx argus`: usuario instala pacote de terceiro do registry npm.
-- `dist-release/` stale: tarball antigo aparece como untracked ou asset errado.
-- Tag enviada antes do commit certo: release roda com conteudo antigo.
-- `node-gyp` falha localmente por path com espaco/parênteses: validar com cache em `/tmp`.
-- `release:check` falhando na CI com "Tag main não corresponde": versao antiga do script comparava `GITHUB_REF_NAME` (nome da branch) com a tag. Corrigido para so checar quando `GITHUB_REF_TYPE=tag`.
-- `version.ts`/`ARGUS_VERSION` esquecido no bump: agora `release:check` pega o drift; antes so o `smoke:package` detectava.
+- `npm install -g argus` ou `npx argus`: pacote de terceiro no registry.
+- `NPM_TOKEN` ausente/expirado: npm nao publica, mas GitHub release pode subir.
+- Lockfile esquecido apos rename de pacote.
 
 ## Regra para IA
 
-Nao declarar release pronto so porque `git tag` existe. Release pronto exige evidencia externa: GitHub release concluida com tarball verificavel e `argus --version` correto apos install do asset.
+Release pronto exige `@pauloborini/argus@X.Y.Z` no npm **e** GitHub release concluida.

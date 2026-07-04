@@ -47,11 +47,11 @@ try {
   const { DreamEngine } = await import(dreamEngineUrl);
   const { value: dream, durationMs: dreamMs } = await timed(() => DreamEngine.run(workDir, { dryRun: true }));
 
-  execFileSync("npm", ["run", "test", "--workspace=argus", "--", "release-privacy"], {
+  execFileSync("npm", ["run", "test", "--workspace=@pauloborini/argus", "--", "release-privacy"], {
     cwd: repoRoot,
     stdio: "pipe",
   });
-  execFileSync("npm", ["run", "test", "--workspace=argus", "--", "memory/release-evaluation"], {
+  execFileSync("npm", ["run", "test", "--workspace=@pauloborini/argus", "--", "memory/release-evaluation"], {
     cwd: repoRoot,
     stdio: "pipe",
   });

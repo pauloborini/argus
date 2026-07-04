@@ -8,6 +8,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const packageDir = join(repoRoot, "packages", "argus");
+const packageJson = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+const packageInstallDir = join("node_modules", ...packageJson.name.split("/"));
 const safeTmpRoot = existsSync("/tmp") ? "/tmp" : tmpdir();
 const workDir = mkdtempSync(join(safeTmpRoot, "argus-smoke-"));
 const nodeGypCache = mkdtempSync(join(safeTmpRoot, "argus-node-gyp-"));
@@ -30,10 +32,10 @@ try {
 
   const version = execFileSync(
     process.execPath,
-    [join(workDir, "node_modules", "argus", "dist", "cli.js"), "--version"],
+    [join(workDir, packageInstallDir, "dist", "cli.js"), "--version"],
     { cwd: workDir, encoding: "utf8" },
   ).trim();
-  const expected = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")).version;
+  const expected = packageJson.version;
   if (version !== expected) {
     throw new Error(`Smoke version mismatch: ${version} != ${expected}`);
   }
@@ -49,7 +51,7 @@ try {
   }
 
   writeFileSync(join(workDir, "sample.ts"), "export function sample() { return 1; }\n");
-  const cli = join(workDir, "node_modules", "argus", "dist", "cli.js");
+  const cli = join(workDir, packageInstallDir, "dist", "cli.js");
   execFileSync(process.execPath, [cli, "init"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "index"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "memory", "init"], { cwd: workDir, stdio: "inherit" });
@@ -91,7 +93,7 @@ try {
   } finally {
     await client.close();
   }
-  console.log(`Smoke do tarball aprovado: argus@${version}`);
+  console.log(`Smoke do tarball aprovado: ${packageJson.name}@${version}`);
 } finally {
   rmSync(workDir, { recursive: true, force: true });
   rmSync(nodeGypCache, { recursive: true, force: true });
