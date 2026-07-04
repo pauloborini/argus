@@ -5,7 +5,7 @@
 A lista completa e sem rodeios de comandos. Para *o que é* e *por quê*, leia o
 **[README](README.pt-BR.md)**.
 
-Todos os exemplos assumem o binário `argus` no PATH. Instale pelo tarball do GitHub Release — **não** use `npm install -g argus` (pacote errado no npmjs.org). Veja **[README → Instalação](README.pt-BR.md#instalação)**.
+Todos os exemplos assumem o binário `argus` no PATH — **não** use `npm install -g argus` (pacote errado no npmjs.org). Veja **[README → Instalação](README.pt-BR.md#instalação)**.
 
 ```bash
 npm install -g https://github.com/pauloborini/argus/releases/download/v2.1.0/argus-2.1.0.tgz

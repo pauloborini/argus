@@ -57,7 +57,7 @@ recuperado nunca sai do workspace.
 O Argus **não** está no registry npm público como `argus` (esse nome é de outro pacote). Instale pelo tarball do **GitHub Release**:
 
 ```bash
-# Uma linha — use a tag mais recente em https://github.com/pauloborini/argus/releases
+# Troque X.Y.Z pela tag mais recente em https://github.com/pauloborini/argus/releases
 npm install -g https://github.com/pauloborini/argus/releases/download/v2.1.0/argus-2.1.0.tgz
 argus --version
 ```
@@ -66,7 +66,7 @@ Com a [GitHub CLI](https://cli.github.com/):
 
 ```bash
 VERSION=$(gh release view --repo pauloborini/argus --json tagName -q .tagName | sed 's/^v//')
-gh release download "v${VERSION}" --repo pauloborini/argus --pattern '*.tgz' -D /tmp
+gh release download "v${VERSION}" --repo pauloborini/argus --pattern 'argus-*.tgz' -D /tmp
 npm install -g "/tmp/argus-${VERSION}.tgz"
 ```
 
@@ -77,23 +77,21 @@ git clone https://github.com/pauloborini/argus.git && cd argus
 npm ci && npm run build && npm link --workspace=argus
 ```
 
-Depois fie qualquer projeto:
+Fiar um projeto:
 
 ```bash
 cd seu-repo
 argus install
 ```
 
-**Atualizar:** instale o tarball da nova release por cima (`npm install -g` com a URL da versão nova).
+**Atualizar:** `npm install -g` com a URL da release nova.
 
-**Desinstalar:** `npm uninstall -g argus` (ou `npm unlink -g argus` após link do fonte).
+**Desinstalar:** `npm uninstall -g argus`
 
 | **Não** use | Por quê |
 |---|---|
 | `npm install -g argus` | Pacote errado no npmjs.org |
 | `npx argus …` | Idem |
-
-Se `argus` não for encontrado após a instalação, confira `npm list -g argus` e se o `bin` global do npm está no PATH.
 
 ---
 
