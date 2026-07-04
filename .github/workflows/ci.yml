@@ -23,7 +23,8 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock 2>/dev/null || true
+      - if: runner.os == 'Linux'
+        run: npm install @rolldown/binding-linux-x64-gnu --no-save
       - run: npm run validate
 
   package-smoke:
