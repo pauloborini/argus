@@ -9,7 +9,7 @@ import { ARGUS_WORKSPACE_ROOT_ENV } from "../workspace/resolve-serve-root.js";
 /** Chave do servidor Argus nos configs MCP (idempotência por chave). */
 export const MCP_SERVER_KEY = "argus";
 
-export type McpHostId = "claude-code" | "cursor" | "codex" | "opencode" | "pi" | "antigravity" | "zcode";
+export type McpHostId = "claude-code" | "cursor" | "codex" | "opencode" | "pi" | "antigravity" | "zcode" | "vscode";
 
 export const SUPPORTED_HOSTS: McpHostId[] = [
   "claude-code",
@@ -19,6 +19,7 @@ export const SUPPORTED_HOSTS: McpHostId[] = [
   "pi",
   "antigravity",
   "zcode",
+  "vscode",
 ];
 
 /** Escopo de registro: por-repo (`local`) ou para todos os projetos (`global`). */
@@ -919,9 +920,9 @@ const ADAPTERS: Record<McpHostId, HostAdapter> = {
       const bases = process.env.ANTIGRAVITY_CONFIG_DIR
         ? [process.env.ANTIGRAVITY_CONFIG_DIR]
         : [
-            join(homedir(), ".gemini", "antigravity"),
-            join(homedir(), ".gemini", "antigravity-ide"),
-          ];
+          join(homedir(), ".gemini", "antigravity"),
+          join(homedir(), ".gemini", "antigravity-ide"),
+        ];
 
       let anyChanged = false;
       let allOk = true;
@@ -954,9 +955,9 @@ const ADAPTERS: Record<McpHostId, HostAdapter> = {
       const bases = process.env.ANTIGRAVITY_CONFIG_DIR
         ? [process.env.ANTIGRAVITY_CONFIG_DIR]
         : [
-            join(homedir(), ".gemini", "antigravity"),
-            join(homedir(), ".gemini", "antigravity-ide"),
-          ];
+          join(homedir(), ".gemini", "antigravity"),
+          join(homedir(), ".gemini", "antigravity-ide"),
+        ];
 
       let anyChanged = false;
       let allOk = true;
@@ -996,6 +997,18 @@ const ADAPTERS: Record<McpHostId, HostAdapter> = {
     },
   },
   zcode: zcodeAdapter,
+  // VS Code: local → .vscode/mcp.json no repo; global → ~/.vscode/mcp.json.
+  // Default = local (env ARGUS_WORKSPACE_ROOT com path absoluto do repo).
+  // VSCODE_CONFIG_HOME sobrescreve ~ (usado em testes para não tocar a máquina real).
+  vscode: makeMcpServersAdapter({
+    id: "vscode",
+    scopes: ["local", "global"],
+    configPath: (root, scope) =>
+      scope === "global"
+        ? join(process.env.VSCODE_CONFIG_HOME ?? homedir(), ".vscode", "mcp.json")
+        : join(root, ".vscode", "mcp.json"),
+    detectBinary: "code",
+  }),
 };
 
 /** Escopo efetivo de um host: o solicitado se suportado, senão o default dele. */
@@ -1009,12 +1022,12 @@ export function effectiveScope(host: McpHostId, requested?: McpScope): { scope: 
 
 /**
  * Hosts a fiar por default quando `--hosts` não é dado: claude-code e cursor
- * (file-based, idioma de projeto) sempre; codex/opencode/pi só quando
- * detectados nesta máquina (auto-detecção, evita criar config de host não usado).
+ * (file-based, idioma de projeto) sempre; codex/opencode/pi/antigravity/zcode/vscode
+ * só quando detectados nesta máquina (auto-detecção, evita criar config de host não usado).
  */
 export function resolveDefaultHosts(repoRoot: string, requested?: McpScope): McpHostId[] {
   const always: McpHostId[] = ["claude-code", "cursor"];
-  const detected = (["codex", "opencode", "pi", "antigravity", "zcode"] as McpHostId[]).filter((id) =>
+  const detected = (["codex", "opencode", "pi", "antigravity", "zcode", "vscode"] as McpHostId[]).filter((id) =>
     ADAPTERS[id].isPresent(repoRoot, effectiveScope(id, requested).scope),
   );
   return [...always, ...detected];
@@ -1063,6 +1076,10 @@ function resolveConfigPath(id: McpHostId, repoRoot: string, scope: McpScope): st
       );
     case "zcode":
       return zcodeMarketplaceJsonPath();
+    case "vscode":
+      return scope === "global"
+        ? join(process.env.VSCODE_CONFIG_HOME ?? homedir(), ".vscode", "mcp.json")
+        : join(repoRoot, ".vscode", "mcp.json");
     case "codex":
       return undefined; // delega ao CLI, sem arquivo direto
   }

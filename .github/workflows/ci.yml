@@ -23,6 +23,10 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - if: runner.os == 'Linux'
+        run: |
+          cd node_modules/rolldown && npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock
+          cd "$GITHUB_WORKSPACE/node_modules/@parcel/watcher" && npm install @parcel/watcher-linux-x64-glibc --no-save --no-package-lock
       - run: npm run validate
 
   package-smoke:
