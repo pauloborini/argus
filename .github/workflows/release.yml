@@ -20,7 +20,9 @@ jobs:
           cache: npm
           registry-url: https://registry.npmjs.org
       - run: npm ci
-      - run: cd node_modules/rolldown && npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock
+      - run: |
+          cd node_modules/rolldown && npm install @rolldown/binding-linux-x64-gnu --no-save --no-package-lock
+          cd "$GITHUB_WORKSPACE/node_modules/@parcel/watcher" && npm install @parcel/watcher-linux-x64-glibc --no-save --no-package-lock
       - run: npm run validate
       - run: npm run smoke:package
       - run: npm run release:check
