@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.0 - 2026-07-03
+
+- novo host MCP: VS Code (`vscode`) com suporte a escopos local (`.vscode/mcp.json`) e global (`~/.vscode/mcp.json`), auto-detecção via binário `code` no PATH e integração completa com `argus install`/`argus uninstall`
+
 ## 2.0.1 - 2026-07-03
 
 - correção: compatibilidade do plugin ZCode e registro MCP em hosts codex/opencode/pi/antigravity/zcode.
