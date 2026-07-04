@@ -1,17 +1,17 @@
 {
   "name": "argus",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "description": "Argus — motor local de code retrieval e context packing para agentes",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=argus",
-    "benchmark:mvp": "npm run benchmark:mvp --workspace=argus",
-    "test": "npm run test --workspace=argus",
-    "lint": "npm run lint --workspace=argus",
-    "typecheck": "npm run typecheck --workspace=argus",
+    "build": "npm run build --workspace=@pauloborini/argus",
+    "benchmark:mvp": "npm run benchmark:mvp --workspace=@pauloborini/argus",
+    "test": "npm run test --workspace=@pauloborini/argus",
+    "lint": "npm run lint --workspace=@pauloborini/argus",
+    "typecheck": "npm run typecheck --workspace=@pauloborini/argus",
     "validate": "npm run typecheck && npm test && npm run lint && npm run build",
     "smoke:package": "node scripts/smoke-package.mjs",
     "homologate": "npm run build && node scripts/homologate.mjs",

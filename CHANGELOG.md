@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1 - 2026-07-04
+
+- pacote npm publicado como `@pauloborini/argus` (nome `argus` no registry é de terceiro); binário CLI continua `argus`
+- release CI republica no npmjs.org e no GitHub Release (`pauloborini-argus-*.tgz`)
+
 ## 2.1.0 - 2026-07-03
 
 - novo host MCP: VS Code (`vscode`) com suporte a escopos local (`.vscode/mcp.json`) e global (`~/.vscode/mcp.json`), auto-detecção via binário `code` no PATH e integração completa com `argus install`/`argus uninstall`
