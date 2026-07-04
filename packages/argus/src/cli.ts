@@ -421,8 +421,9 @@ program
   .command("status")
   .description("Saúde e staleness do manifest local")
   .option("--path <path>", "Subpath ou workspace a inspecionar")
-  .action((opts: { path?: string }) => {
-    finish(runStatus(opts.path));
+  .option("--json", "Saída JSON (para scripts e pipes)")
+  .action((opts: { path?: string; json?: boolean }) => {
+    finish(runStatus({ path: opts.path, json: opts.json }));
   });
 
 program
@@ -477,8 +478,9 @@ daemon
 daemon
   .command("status")
   .description("Saúde do daemon e workspaces observados")
-  .action(() => {
-    finish(runDaemonStatus());
+  .option("--all", "Listar todos os workspaces observados (default: só o repositório atual)")
+  .action((opts: { all?: boolean }) => {
+    finish(runDaemonStatus({ all: opts.all }));
   });
 daemon
   .command("reload")
