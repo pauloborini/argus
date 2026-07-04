@@ -1,18 +1,15 @@
 # Procedimento de Release (Patch / Minor / Major)
 
-Procedimento completo de ponta a ponta para publicar uma nova versao do `argus` no npm, com tag Git, release no GitHub e CI verde.
+Procedimento completo de ponta a ponta para publicar uma nova versao do `argus` com tag Git, release no GitHub (tarball + checksums) e CI verde.
 
 ---
 
 ## 1. Pre-requisitos
 
 - [ ] Node.js `>=20` instalado (CI de release usa Node 24)
-- [ ] npm `>=10` (release CI atualiza para `npm@latest`)
+- [ ] npm `>=10` (gerenciador de dependencias do monorepo)
 - [ ] `gh` CLI autenticado (`gh auth status`)
 - [ ] Acesso de escrita ao repo GitHub `pauloborini/argus`
-- [ ] Secret `NPM_TOKEN` configurado no repo GitHub (token npm Automation, nao Publish)
-- [ ] Workflow `.github/workflows/release.yml` usa `registry-url: https://registry.npmjs.org`
-- [ ] Repo privado: publish **sem** `--provenance` (so adicionar quando o repo for publico)
 - [ ] Branch `main` protegida exige PR e CI verde antes do merge
 
 ---
@@ -64,16 +61,9 @@ gh run list --branch develop --limit 5 --json status,conclusion,displayTitle,hea
 Verifique a versao atual publicada:
 
 ```bash
-npm view argus version dist-tags --json
-```
-
-Exemplo de saida:
-
-```json
-{
-  "version": "1.0.1",
-  "dist-tags": { "latest": "1.0.1" }
-}
+gh release list --limit 5
+# ou, no repo local:
+node -p "require('./package.json').version"
 ```
 
 ---
@@ -98,7 +88,7 @@ Sao **6 arquivos + lockfile** que precisam ser atualizados com a nova versao:
 "version": "1.0.2"
 ```
 
-### 6.2 `packages/argus/package.json` (pacote publicavel)
+### 6.2 `packages/argus/package.json` (runtime distribuivel)
 
 ```json
 "version": "1.0.2"
@@ -118,10 +108,11 @@ export const ARGUS_VERSION = "1.0.2";
 
 ### 6.5 `plugins/argus/.mcp.json`
 
-Atualizar a referencia de versao no argumento `npx`:
+O plugin Codex deve apontar para o binario global instalado (nao usa registry npm):
 
 ```json
-"args": ["-y", "argus@1.0.2", "serve", "--mcp"]
+"command": "argus",
+"args": ["serve", "--mcp"]
 ```
 
 Atencao: o `release:check` **nao** valida este arquivo atualmente — confira manualmente.
@@ -158,7 +149,7 @@ rg -n '"version":|ARGUS_VERSION|argus@[0-9]+\.[0-9]+\.[0-9]+' \
   plugins/argus/.mcp.json
 ```
 
-Regra: exemplos publicos em README e COMMANDS devem usar `argus@latest`, exceto quando a doc ensina pinagem explicita.
+Regra: exemplos publicos em README e COMMANDS devem assumir o binario `argus` no PATH (instalado via tarball do GitHub Release ou build local), nao `npx argus` do registry npm.
 
 ---
 
@@ -317,30 +308,11 @@ A release CI executa nesta ordem:
 3. `npm run smoke:package` (tarball em dir limpo, CLI + MCP)
 4. `npm run release:check` (7 fontes de versao identicas + tag match)
 5. `npm pack` em `dist-release/` com `SHA256SUMS`
-6. **`npm publish --workspace=argus --access public`**
-7. **`gh release create`** com assets e `--generate-notes`
+6. **`gh release create`** com assets e `--generate-notes`
 
 ---
 
-## 15. Confirmar publicacao no npm
-
-```bash
-npm view argus version dist-tags --json
-npm view argus@1.0.2 version dist.integrity --json
-npx -y argus@1.0.2 --version
-```
-
-Deve retornar `1.0.2` nos tres comandos.
-
-`latest` deve apontar para `1.0.2`:
-
-```json
-{ "version": "1.0.2", "dist-tags": { "latest": "1.0.2" } }
-```
-
----
-
-## 16. Confirmar GitHub Release
+## 15. Confirmar GitHub Release
 
 ```bash
 gh release view v1.0.2 --json tagName,isDraft,isPrerelease,assets,url
@@ -348,12 +320,22 @@ gh release view v1.0.2 --json tagName,isDraft,isPrerelease,assets,url
 
 Assets esperados:
 
-- `argus-1.0.2.tgz` (tarball npm)
+- `argus-1.0.2.tgz` (tarball instalavel)
 - `SHA256SUMS` (checksums SHA-256)
+
+Validar instalacao a partir do asset:
+
+```bash
+gh release download v1.0.2 --pattern '*.tgz' -D /tmp
+npm install -g /tmp/argus-1.0.2.tgz
+argus --version
+```
+
+Deve retornar `1.0.2`.
 
 ---
 
-## 17. Sync de volta para `develop`
+## 16. Sync de volta para `develop`
 
 ```bash
 git checkout develop
@@ -366,7 +348,7 @@ Se houver conflito (raro, pois so o bump foi mergeado na main), resolver manualm
 
 ---
 
-## 18. Limpeza pos-release
+## 17. Limpeza pos-release
 
 Remover branches locais/remotas da release:
 
@@ -383,22 +365,20 @@ git status --short
 
 ---
 
-## 19. Checklist de aceite final
+## 18. Checklist de aceite final
 
 - [ ] `package.json` (root) = `1.0.2`
 - [ ] `packages/argus/package.json` = `1.0.2`
 - [ ] `packages/argus/src/version.ts` (`ARGUS_VERSION`) = `"1.0.2"`
 - [ ] `plugins/argus/.codex-plugin/plugin.json` = `1.0.2`
-- [ ] `plugins/argus/.mcp.json` referencia `argus@1.0.2`
+- [ ] `plugins/argus/.mcp.json` usa `command: argus`
 - [ ] `package-lock.json` root e `packages/argus` = `1.0.2`
 - [ ] `npm run release:check` passa
 - [ ] `npm run validate` passa
 - [ ] `smoke:package` passa
 - [ ] Tag `v1.0.2` existe e aponta para o commit do merge na `main`
-- [ ] npm registry tem `argus@1.0.2`
-- [ ] `latest` dist-tag aponta para `1.0.2`
-- [ ] `npx -y argus@1.0.2 --version` retorna `1.0.2`
 - [ ] GitHub Release `v1.0.2` existe com tarball + `SHA256SUMS`
+- [ ] `npm install -g` a partir do tarball do release retorna `argus --version` = `1.0.2`
 - [ ] `develop` sincronizada com `main` (merge de volta feito)
 
 ---
@@ -411,11 +391,11 @@ git status --short
 
 **Solucao:** Rodar `npm install --package-lock-only` e commitar novamente.
 
-### README com versao pinada antiga
+### README com instrucao de install desatualizada
 
-**Sintoma:** Usuario instala versao velha ao seguir doc.
+**Sintoma:** Usuario tenta `npm install -g argus` ou `npx argus` e instala pacote de terceiro do registry npm.
 
-**Solucao:** Substituir `argus@X.Y.Z` por `argus@latest` nos READMEs e COMMANDS, exceto onde a doc ensina pinagem.
+**Solucao:** Atualizar README/COMMANDS para instalar via tarball do GitHub Release ou build local.
 
 ### Tag enviada antes do merge na main
 
@@ -430,18 +410,6 @@ git pull origin main
 git tag v1.0.2
 git push origin v1.0.2
 ```
-
-### `NPM_TOKEN` ausente ou expirado
-
-**Sintoma:** Release CI falha no step `Publish npm` com `E401` ou `ENEEDAUTH`.
-
-**Solucao:** Regenerar token em `https://www.npmjs.com/settings/<user>/tokens` (tipo **Automation**, nao Publish). Atualizar o secret `NPM_TOKEN` em `https://github.com/pauloborini/argus/settings/secrets/actions`.
-
-### `--provenance` em repositorio privado
-
-**Sintoma:** npm retorna `E422` no publish.
-
-**Solucao:** Remover `--provenance` do comando `npm publish` no workflow `release.yml`. So usar quando o repo for publico.
 
 ### `release:check` falha com "Tag main nao corresponde"
 
