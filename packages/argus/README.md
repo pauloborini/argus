@@ -4,7 +4,7 @@ Local code retrieval and context packing for coding agents. Local-first, no UI,
 CLI + MCP. · *Runtime local de code retrieval e context packing para agentes.*
 
 ```bash
-npm install -g @pauloborini/argus
+npm install -g @owerride/argus
 argus init
 argus index
 argus search "calculateTotal"

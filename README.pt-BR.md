@@ -55,23 +55,23 @@ recuperado nunca sai do workspace.
 ## Instalação
 
 ```bash
-npm install -g @pauloborini/argus
+npm install -g @owerride/argus
 argus --version
 ```
 
-O nome sem escopo `argus` no npmjs.org é um **pacote de terceiro** — use sempre `@pauloborini/argus`.
+O nome sem escopo `argus` no npmjs.org é um **pacote de terceiro** — use sempre `@owerride/argus` (escopo npm da conta publicadora `owerride`).
 
 Sem instalação global:
 
 ```bash
-npx @pauloborini/argus init
+npx @owerride/argus init
 ```
 
 Build a partir do fonte (contribuidores):
 
 ```bash
 git clone https://github.com/pauloborini/argus.git && cd argus
-npm ci && npm run build && npm link --workspace=@pauloborini/argus
+npm ci && npm run build && npm link --workspace=@owerride/argus
 ```
 
 Fiar um projeto:
@@ -81,9 +81,9 @@ cd seu-repo
 argus install
 ```
 
-**Atualizar:** `npm install -g @pauloborini/argus@latest`
+**Atualizar:** `npm install -g @owerride/argus@latest`
 
-**Desinstalar:** `npm uninstall -g @pauloborini/argus`
+**Desinstalar:** `npm uninstall -g @owerride/argus`
 
 | **Não** use | Por quê |
 |---|---|

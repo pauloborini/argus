@@ -7,6 +7,7 @@ import {
 } from "../workspace/user-paths.js";
 import { runDaemonForeground, type DaemonStatusSnapshot } from "../daemon/runtime.js";
 import { installService, uninstallService } from "../daemon/service.js";
+import { formatDaemonStatusHuman } from "./format-status.js";
 
 function cliEntry(): string {
   return fileURLToPath(new URL("../cli.js", import.meta.url));
@@ -113,42 +114,28 @@ export function runDaemonReload(): number {
   }
 }
 
+export interface DaemonStatusCommandOptions {
+  all?: boolean;
+}
+
 /** Imprime saúde do daemon (pid + último status publicado). */
-export function runDaemonStatus(): number {
+export function runDaemonStatus(opts?: DaemonStatusCommandOptions): number {
   const pid = runningPid();
-  if (pid === null) {
-    console.log("Daemon: parado.");
-    return 0;
-  }
-  console.log(`Daemon: rodando (pid ${pid}).`);
   const statusPath = daemonStatusPath();
-  if (!existsSync(statusPath)) {
-    console.log("Sem status publicado ainda.");
-    return 0;
-  }
-  try {
-    const status = JSON.parse(readFileSync(statusPath, "utf-8")) as DaemonStatusSnapshot;
-    console.log(`Iniciado: ${status.started_at}`);
-    console.log(`Workspaces observados: ${status.workspaces.length}`);
-    for (const ws of status.workspaces) {
-      const watch = ws.watching ? "watching" : "OFF";
-      const ok =
-        ws.last_sync_ok === null ? "?" : ws.last_sync_ok ? "OK" : "ERRO";
-      const duration =
-        ws.last_sync_duration_ms === null ? "" : `, ${ws.last_sync_duration_ms}ms`;
-      const event = ws.last_event_at ? `, último evento ${ws.last_event_at}` : "";
-      const backend = ws.watch_backend ? `, backend ${ws.watch_backend}` : "";
-      const last = ws.last_sync_at
-        ? `último sync ${ws.last_sync_at} (${ws.last_sync_paths} paths, ${ok}${duration}${event}${backend})`
-        : `sem sync${backend}`;
-      const err = ws.last_error ? ` | erro: ${ws.last_error}` : "";
-      console.log(`- ${ws.root} [${watch}] ${last}${err}`);
+  let status: DaemonStatusSnapshot | null = null;
+
+  if (pid !== null && existsSync(statusPath)) {
+    try {
+      status = JSON.parse(readFileSync(statusPath, "utf-8")) as DaemonStatusSnapshot;
+    } catch {
+      console.log(formatDaemonStatusHuman(pid, null));
+      console.log("Status ilegível.");
+      return 0;
     }
-    return 0;
-  } catch {
-    console.log("Status ilegível.");
-    return 0;
   }
+
+  console.log(formatDaemonStatusHuman(pid, status, { all: opts?.all === true }));
+  return 0;
 }
 
 /** Instala o serviço de usuário (launchd/systemd) e sobe o daemon. */

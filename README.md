@@ -55,23 +55,23 @@ recovered context never leaves the workspace.
 ## Install
 
 ```bash
-npm install -g @pauloborini/argus
+npm install -g @owerride/argus
 argus --version
 ```
 
-The unscoped name `argus` on npmjs.org is a **different package** — always use `@pauloborini/argus`.
+The unscoped name `argus` on npmjs.org is a **different package** — always use `@owerride/argus` (npm scope matches the publisher account `owerride`).
 
 Without a global install:
 
 ```bash
-npx @pauloborini/argus init
+npx @owerride/argus init
 ```
 
 Build from source (contributors):
 
 ```bash
 git clone https://github.com/pauloborini/argus.git && cd argus
-npm ci && npm run build && npm link --workspace=@pauloborini/argus
+npm ci && npm run build && npm link --workspace=@owerride/argus
 ```
 
 Wire any project:
@@ -81,9 +81,9 @@ cd your-repo
 argus install
 ```
 
-**Update:** `npm install -g @pauloborini/argus@latest`
+**Update:** `npm install -g @owerride/argus@latest`
 
-**Uninstall:** `npm uninstall -g @pauloborini/argus`
+**Uninstall:** `npm uninstall -g @owerride/argus`
 
 | Do **not** use | Why |
 |---|---|

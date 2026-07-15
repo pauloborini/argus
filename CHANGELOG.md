@@ -1,9 +1,14 @@
 # Changelog
 
+## 2.1.2 - 2026-07-14
+
+- correção: `argus status` (sem `--json`) agora exibe saída formatada legível (seções: repositório, índice estrutural, cobertura por linguagem, memória) em vez de JSON cru; o dist publicado 2.1.1 estava dessincronizado do fonte e não incluía o módulo `format-status`
+- remoção de variável não utilizada em `formatCoverageLine` que bloqueava o build
+
 ## 2.1.1 - 2026-07-04
 
-- pacote npm publicado como `@pauloborini/argus` (nome `argus` no registry é de terceiro); binário CLI continua `argus`
-- release CI republica no npmjs.org e no GitHub Release (`pauloborini-argus-*.tgz`)
+- pacote npm publicado como `@owerride/argus` (escopo do username npm `owerride`; nome `argus` sem escopo é de terceiro); binário CLI continua `argus`
+- release CI republica no npmjs.org e no GitHub Release (`owerride-argus-*.tgz`)
 
 ## 2.1.0 - 2026-07-03
 
