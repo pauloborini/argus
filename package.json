@@ -1,6 +1,6 @@
 {
   "name": "argus",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "private": true,
   "description": "Argus — motor local de code retrieval e context packing para agentes",
   "workspaces": [
