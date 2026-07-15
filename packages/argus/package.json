@@ -1,6 +1,6 @@
 {
-  "name": "@pauloborini/argus",
-  "version": "2.1.1",
+  "name": "@owerride/argus",
+  "version": "2.1.2",
   "publishConfig": {
     "access": "public"
   },
