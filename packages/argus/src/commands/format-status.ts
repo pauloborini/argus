@@ -126,11 +126,6 @@ function formatCoverageLine(language: string, coverage: LanguageCoverage): strin
     coverage.files_parsed === coverage.files_eligible
       ? `${coverage.files_parsed} arquivos indexados`
       : `${coverage.files_parsed} de ${coverage.files_eligible} arquivos indexados`;
-  const level = describeCoverageLevel(
-    coverage.coverage_level,
-    coverage.files_parsed,
-    coverage.files_eligible,
-  );
   return `  ${padEnd(language, 12)} ${padEnd(files, 28)} ${String(coverage.symbols).padStart(7)} símbolos`;
 }
 
