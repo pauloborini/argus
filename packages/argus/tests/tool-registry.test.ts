@@ -1,10 +1,22 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { MCP_SERVER_NAME, MCP_TOOL_NAMES, TOOL_INPUT_JSON_SCHEMAS } from "../src/mcp/tool-registry.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+  ARGUS_MCP_TOOLS_ENV,
+  DEFAULT_LISTED_MCP_TOOLS,
+  MCP_SERVER_NAME,
+  MCP_TOOL_NAMES,
+  TOOL_DESCRIPTIONS,
+  TOOL_INPUT_JSON_SCHEMAS,
+  resolveListedTools,
+} from "../src/mcp/tool-registry.js";
+import { createMcpServer } from "../src/mcp/server.js";
 import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
+import { runIndex } from "../src/commands/index-cmd.js";
 
 describe("tool-registry", () => {
   let tempDir: string | undefined;
@@ -46,12 +58,67 @@ describe("tool-registry", () => {
     ]);
   });
 
+  it("default listed é o path feliz de quatro tools", () => {
+    expect(DEFAULT_LISTED_MCP_TOOLS).toEqual(["explore", "pack_context", "recall", "status"]);
+  });
+
+  describe("resolveListedTools", () => {
+    it("sem env retorna default slim", () => {
+      const r = resolveListedTools(undefined, { emitDiagnostic: false });
+      expect(r.mode).toBe("default");
+      expect(r.listed).toEqual(DEFAULT_LISTED_MCP_TOOLS);
+      expect(r.usedFallback).toBe(false);
+    });
+
+    it("all retorna as 12 registradas na ordem canônica", () => {
+      const r = resolveListedTools("all", { emitDiagnostic: false });
+      expect(r.mode).toBe("all");
+      expect(r.listed).toEqual(MCP_TOOL_NAMES);
+      expect(r.usedFallback).toBe(false);
+    });
+
+    it("CSV válido deduplica e preserva ordem estável", () => {
+      const r = resolveListedTools("status,explore,status,recall", { emitDiagnostic: false });
+      expect(r.mode).toBe("explicit");
+      expect(r.listed).toEqual(["status", "explore", "recall"]);
+      expect(r.usedFallback).toBe(false);
+    });
+
+    it("entrada inválida diagnostica e cai no default (não abre 12)", () => {
+      const errors: string[] = [];
+      const spy = vi.spyOn(console, "error").mockImplementation((m) => {
+        errors.push(String(m));
+      });
+      const r = resolveListedTools("impact,nao_existe", { emitDiagnostic: true });
+      spy.mockRestore();
+      expect(r.mode).toBe("default");
+      expect(r.listed).toEqual(DEFAULT_LISTED_MCP_TOOLS);
+      expect(r.usedFallback).toBe(true);
+      expect(r.warning).toMatch(/E_MCP_TOOLS_INVALID/);
+      expect(errors.some((e) => e.includes("E_MCP_TOOLS_INVALID"))).toBe(true);
+    });
+
+    it("lista vazia cai no default com warning", () => {
+      const r = resolveListedTools("   ", { emitDiagnostic: false });
+      expect(r.usedFallback).toBe(true);
+      expect(r.listed).toEqual(DEFAULT_LISTED_MCP_TOOLS);
+      expect(r.warning).toMatch(/E_MCP_TOOLS_INVALID/);
+    });
+  });
+
   it("retrieve aceita handles de código e memória no JSON Schema", () => {
     expect(TOOL_INPUT_JSON_SCHEMAS.retrieve.properties.handle.pattern).toBe("^(rh|mh)_[a-f0-9]{16}$");
   });
 
   it("servidor MCP identificado como argus", () => {
     expect(MCP_SERVER_NAME).toBe("argus");
+  });
+
+  it("descrições do path feliz orientam intenção", () => {
+    expect(TOOL_DESCRIPTIONS.explore).toMatch(/Path feliz|entendimento|refactor/i);
+    expect(TOOL_DESCRIPTIONS.pack_context).toMatch(/budget|múltiplas|fontes/i);
+    expect(TOOL_DESCRIPTIONS.recall).toMatch(/decisões|cofre/i);
+    expect(TOOL_DESCRIPTIONS.status).toMatch(/slim|ARGUS_MCP_TOOLS=all/i);
   });
 
   it("cada stub declara state explícito parcial ou falha", () => {
@@ -151,5 +218,123 @@ describe("tool-registry", () => {
       removed_or_summarized: [],
       reversibility: "none",
     });
+  });
+});
+
+/**
+ * S1 — prova ancorada: Client MCP real ↔ Server real via InMemoryTransport.
+ * Não mocka registry/server; isola política via `listedToolsEnv` no boot.
+ */
+describe("S1 MCP surface slim (ListTools vs CallTool)", () => {
+  let tempDir: string | undefined;
+  let originalCwd: string | undefined;
+
+  afterEach(() => {
+    if (originalCwd) {
+      process.chdir(originalCwd);
+    }
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+      tempDir = undefined;
+    }
+    originalCwd = undefined;
+  });
+
+  function useIndexedWorkspace(): string {
+    originalCwd = process.cwd();
+    tempDir = mkdtempSync(join(tmpdir(), "argus-mcp-slim-"));
+    writeFileSync(join(tempDir, "lib.ts"), "export function alpha() { return 1; }\n", "utf-8");
+    initWorkspace(tempDir);
+    process.chdir(tempDir);
+    return tempDir;
+  }
+
+  async function connectClient(listedToolsEnv: string | undefined) {
+    // Sempre passa listedToolsEnv: undefined = default slim (sem ler process.env do host).
+    const server = createMcpServer({
+      autoSync: false,
+      listedToolsEnv,
+    });
+    const client = new Client({ name: "test-slim", version: "0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    return client;
+  }
+
+  it("AC-1.1.1 ListTools sem env retorna exatamente as quatro default", async () => {
+    useIndexedWorkspace();
+    const client = await connectClient(undefined);
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toEqual([...DEFAULT_LISTED_MCP_TOOLS]);
+    expect(tools).toHaveLength(4);
+    await client.close();
+  });
+
+  it("AC-1.1.2 ARGUS_MCP_TOOLS=all retorna as 12 registradas", async () => {
+    useIndexedWorkspace();
+    const client = await connectClient("all");
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).toEqual([...MCP_TOOL_NAMES]);
+    expect(tools).toHaveLength(12);
+    await client.close();
+  });
+
+  it("AC-1.1.3 CSV válido filtra; inválido diagnostica e usa default", async () => {
+    useIndexedWorkspace();
+    const clientOk = await connectClient("recall,status");
+    const listed = await clientOk.listTools();
+    expect(listed.tools.map((t) => t.name)).toEqual(["recall", "status"]);
+    await clientOk.close();
+
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((m) => {
+      errors.push(String(m));
+    });
+    const clientBad = await connectClient("bogus_tool");
+    const fallback = await clientBad.listTools();
+    spy.mockRestore();
+    expect(fallback.tools.map((t) => t.name)).toEqual([...DEFAULT_LISTED_MCP_TOOLS]);
+    expect(errors.some((e) => e.includes("E_MCP_TOOLS_INVALID"))).toBe(true);
+    await clientBad.close();
+  });
+
+  it("AC-1.2.1 CallTool de impact funciona quando impact não está em ListTools", async () => {
+    useIndexedWorkspace();
+    expect(await runIndex()).toBe(0);
+    const client = await connectClient(undefined);
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).not.toContain("impact");
+
+    const res = await client.callTool({ name: "impact", arguments: { target: "alpha" } });
+    expect(res.isError).not.toBe(true);
+    const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+    const payload = JSON.parse(text) as { state: string; message?: string };
+    expect(payload.state).not.toBe("falha");
+    expect(payload.message ?? "").not.toMatch(/Tool desconhecida/);
+    expect(text).toMatch(/direct_affected|risk_summary|alpha|parcial|sucesso/);
+    await client.close();
+  });
+
+  it("AC-1.2.3 nenhuma chamada MCP escreve em stdout fora do protocolo", async () => {
+    useIndexedWorkspace();
+    const stdoutChunks: string[] = [];
+    const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+
+    const client = await connectClient(undefined);
+    await client.listTools();
+    await client.callTool({ name: "status", arguments: {} });
+    await client.callTool({ name: "impact", arguments: { target: "alpha" } });
+    await client.close();
+    writeSpy.mockRestore();
+
+    // InMemoryTransport não usa stdout; qualquer write espúrio de handlers é regressão.
+    expect(stdoutChunks).toEqual([]);
+  });
+
+  it("env var name documentada bate com constante", () => {
+    expect(ARGUS_MCP_TOOLS_ENV).toBe("ARGUS_MCP_TOOLS");
   });
 });
