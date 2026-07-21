@@ -28,12 +28,23 @@ function emptyOptional(value: string | undefined): string | null {
   return trimmed || null;
 }
 
+/**
+ * Confidence de captura direta (D7 hardening):
+ * `decision` → confirmed; inbox/outros sem marcador de decisão → presumed.
+ */
+export function confidenceForDirectCapture(type: string | undefined): MemoryV2Confidence {
+  return type === "decision" ? "confirmed" : MEMORY_V2_DEFAULT_CONFIDENCE;
+}
+
 /** Defaults D1 para captura nova via remember/sync. */
-export function defaultDirectCaptureV2(observedAt: string): MemoryV2NoteExtension {
+export function defaultDirectCaptureV2(
+  observedAt: string,
+  options?: { confidence?: MemoryV2Confidence },
+): MemoryV2NoteExtension {
   return {
     scope: "project",
     source: "direct_capture",
-    confidence: MEMORY_V2_DEFAULT_CONFIDENCE,
+    confidence: options?.confidence ?? MEMORY_V2_DEFAULT_CONFIDENCE,
     observed_at: observedAt,
     valid_from: null,
     valid_until: null,

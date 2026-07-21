@@ -55,6 +55,8 @@ Obrigatória no contrato; ausência assume o nível **mais conservador** (`presu
 | `inferred` | Inferido |
 | `presumed` | Presumido (default conservador) |
 
+**Captura via `remember` (D7):** `type=decision` grava `confidence: confirmed` (hot path MCP/CLI). Inbox e demais tipos sem marcador de decisão permanecem `presumed`. Frontmatter explícito no sync continua podendo sobrescrever.
+
 ---
 
 ## 4. Temporalidade

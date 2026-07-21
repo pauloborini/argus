@@ -168,6 +168,95 @@ describe("memory v2 write path (S03)", () => {
     }
   });
 
+  it("AC-5.1.1 remember de decisão persiste confidence=confirmed no SQLite (hot path)", async () => {
+    const cwd = root();
+    const result = await VaultEngine.remember("Decisão: usar ranking confirmed no remember", {
+      type: "decision",
+    }, cwd);
+    expect(result.state).toBe("sucesso");
+    expect(result.note_path).toMatch(/^decision\//);
+
+    const decisionDir = join(cwd, ".argus", "memory", "vault", "decision");
+    const file = readdirSync(decisionDir).find((f) => f.endsWith(".md"));
+    expect(file).toBeTruthy();
+    const mdFile = readFileSync(join(decisionDir, file!), "utf-8");
+    expect(mdFile).toMatch(/confidence: confirmed/);
+    expect(mdFile).toMatch(/type: decision/);
+
+    // Sem sync: projeção quente já deve ter confiado no frontmatter.
+    const db = openMemoryDb(cwd, { readonly: true });
+    try {
+      const row = db
+        .prepare("SELECT type, confidence, source FROM notes WHERE id = ?")
+        .get(result.note_id) as { type: string; confidence: string; source: string };
+      expect(row.type).toBe("decision");
+      expect(row.confidence).toBe("confirmed");
+      expect(row.source).toBe("direct_capture");
+    } finally {
+      closeMemoryDb(db);
+    }
+  });
+
+  it("AC-5.1.3 inbox presumed permanece recallável e filtros de vigência intactos", async () => {
+    const cwd = root();
+    const unique = `inboxvigencia_${Date.now()}`;
+    const remembered = await VaultEngine.remember(`${unique} corpo inbox presumed`, { type: "inbox" }, cwd);
+    expect(remembered.state).toBe("sucesso");
+
+    const db = openMemoryDb(cwd, { readonly: true });
+    try {
+      const row = db
+        .prepare("SELECT confidence, valid_from, valid_until, superseded_by FROM notes WHERE id = ?")
+        .get(remembered.note_id) as {
+        confidence: string;
+        valid_from: string | null;
+        valid_until: string | null;
+        superseded_by: string | null;
+      };
+      expect(row.confidence).toBe("presumed");
+      expect(row.valid_from).toBeNull();
+      expect(row.valid_until).toBeNull();
+      expect(row.superseded_by).toBeNull();
+    } finally {
+      closeMemoryDb(db);
+    }
+
+    const recalled = await VaultEngine.recall(unique, { limit: 5 }, cwd);
+    expect(recalled.chunks.some((c) => c.note_id === remembered.note_id)).toBe(true);
+    const hit = recalled.chunks.find((c) => c.note_id === remembered.note_id);
+    expect(hit?.confidence).toBe("presumed");
+
+    // Nota futura (valid_from) não deve vazar no filtro default de vigência.
+    const futurePath = join(cwd, ".argus", "memory", "vault", "inbox", "future-vigencia.md");
+    writeFileSync(
+      futurePath,
+      [
+        "---",
+        'title: "Future vigencia"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: presumed",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        "valid_from: 2099-01-01T00:00:00.000Z",
+        "---",
+        "",
+        `${unique} future only`,
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    const hot = hotUpdateNoteProjection(cwd, {
+      absolutePath: futurePath,
+      rawContent: readFileSync(futurePath, "utf-8"),
+      vaultRelativePath: "inbox/future-vigencia.md",
+    });
+    expect(hot.ok).toBe(true);
+    const afterFuture = await VaultEngine.recall(unique, { limit: 10 }, cwd);
+    expect(afterFuture.chunks.some((c) => c.title === "Future vigencia")).toBe(false);
+    expect(afterFuture.chunks.some((c) => c.note_id === remembered.note_id)).toBe(true);
+  });
+
   it("frontmatter v2 valido sobrescreve defaults no sync", () => {
     const cwd = root();
     VaultEngine.init(cwd);
