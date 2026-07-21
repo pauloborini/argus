@@ -388,8 +388,8 @@ argus retrieve rh_0123456789abcdef
 ## MCP server
 
 ### `argus serve --mcp`
-Start the stdio MCP server. **ListTools** defaults to four happy-path tools:
-`explore`, `pack_context`, `recall`, `status`. All **twelve** registered tools
+Start the stdio MCP server. **ListTools** defaults to five happy-path tools:
+`explore`, `pack_context`, `recall`, `remember`, `status`. All **twelve** registered tools
 (`search`, `explore`, `trace`, `impact`, `diff_impact`, `files`, `pack_context`,
 `retrieve`, `status`, `semantic_search`, `remember`, `recall`) remain callable
 via CallTool. Control discovery with `ARGUS_MCP_TOOLS` (`all` or CSV); requires

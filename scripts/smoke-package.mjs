@@ -63,7 +63,7 @@ try {
     stdio: "inherit",
   });
 
-  // Default slim: ListTools ≤4. CallTool continua aceitando o catálogo completo.
+  // Default slim: ListTools ≤5 (inclui remember). CallTool continua aceitando o catálogo completo.
   const smokeEnv = Object.fromEntries(
     Object.entries({ ...process.env }).filter((entry) => typeof entry[1] === "string"),
   );
@@ -84,23 +84,32 @@ try {
     await client.connect(transport);
     const tools = await client.listTools();
     const listed = tools.tools.map((tool) => tool.name);
-    const expectedListed = ["explore", "pack_context", "recall", "status"];
+    const expectedListed = ["explore", "pack_context", "recall", "remember", "status"];
     if (
-      listed.length !== 4 ||
-      expectedListed.some((name) => !listed.includes(name))
+      listed.length !== 5 ||
+      expectedListed.some((name, i) => listed[i] !== name)
     ) {
       throw new Error(
-        `Smoke MCP esperava ListTools slim (${expectedListed.join(",")}): got ${listed.join(",")}`,
+        `Smoke MCP esperava ListTools slim na ordem (${expectedListed.join(",")}): got ${listed.join(",")}`,
       );
     }
-    // Unlisted continua invocável (remember não aparece em ListTools).
+    // Path feliz listed: remember é discoverável e invocável.
     const remember = await client.callTool({
       name: "remember",
-      arguments: { content: "Smoke package remember unlisted", type: "inbox" },
+      arguments: { content: "Smoke package remember listed", type: "inbox" },
     });
     const rememberText = remember.content.find((item) => item.type === "text");
     if (!rememberText || /Tool desconhecida|Unknown tool/i.test(rememberText.text ?? "")) {
-      throw new Error("Smoke MCP não conseguiu CallTool remember (unlisted).");
+      throw new Error("Smoke MCP não conseguiu CallTool remember (listed).");
+    }
+    // Regressão: CallTool das 12 permanece (tool unlisted ≠ desconhecida).
+    const search = await client.callTool({
+      name: "search",
+      arguments: { query: "sample" },
+    });
+    const searchText = search.content.find((item) => item.type === "text");
+    if (!searchText || /Tool desconhecida|Unknown tool/i.test(searchText.text ?? "")) {
+      throw new Error("Smoke MCP não conseguiu CallTool search (unlisted).");
     }
     const status = await client.callTool({ name: "status", arguments: {} });
     const statusText = status.content.find((item) => item.type === "text");

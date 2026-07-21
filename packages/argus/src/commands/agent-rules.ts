@@ -10,7 +10,7 @@ export const BLOCK_END = "<!-- <<< argus <<< -->";
  * Versão do corpo gerado (independente do semver do pacote).
  * Bump quando o texto/contrato do path feliz mudar — `install --refresh` detecta drift.
  */
-export const AGENT_RULES_VERSION = 1;
+export const AGENT_RULES_VERSION = 2;
 
 /** Marcador parseável dentro do bloco (ex.: `<!-- argus-agent-rules-version: 1 -->`). */
 export const AGENT_RULES_VERSION_MARKER_RE =
@@ -23,8 +23,8 @@ function happyPathToolsLine(): string {
 }
 
 /**
- * Corpo versionado alinhado ao ListTools slim (INV10 / D2).
- * Path feliz = explore → pack_context → recall → status; CLI como fallback.
+ * Corpo versionado alinhado ao ListTools slim (D1 / INV-H2).
+ * Path feliz = explore → pack_context → recall → remember → status; CLI como fallback.
  */
 export function buildRulesBody(version: number = AGENT_RULES_VERSION): string {
   const listed = happyPathToolsLine();
@@ -41,20 +41,21 @@ Decisão operacional:
 1. \`explore\` — primeira escolha para entender símbolo, arquivo ou tema.
 2. \`pack_context\` — reunir múltiplas fontes (código + memória) sob budget.
 3. \`recall\` — recuperar decisões/regras já capturadas; use antes de inventar regra de projeto.
-4. \`status\` — saúde, staleness e modo slim da surface MCP.
+4. \`remember\` — ao fechar uma decisão ou insight, capture no cofre
+   (MCP \`remember\` ou CLI \`argus memory remember\`).
+5. \`status\` — saúde, staleness e modo slim da surface MCP.
 
 Fallback CLI (quando o MCP não estiver disponível): \`argus explore\`,
-\`argus pack-context\`, \`argus memory search\` (equiv. recall), \`argus status\`.
+\`argus pack-context\`, \`argus memory search\` (equiv. recall),
+\`argus memory remember\`, \`argus status\`.
 
 Memória local no mesmo estado \`.argus/\`:
 
-- \`remember\` — ao fechar uma decisão ou insight, capture no cofre
-  (MCP \`remember\` ou CLI \`argus memory remember\`).
-- \`recall\` — busque no cofre sem LLM antes de assumir regra.
+- \`remember\` / \`recall\` — captura e busca no cofre sem LLM.
 - \`pack_context\` aceita código + memória; prefira um pacote a várias leituras.
 
 Tools avançadas (\`search\`, \`trace\`, \`impact\`, \`diff_impact\`, \`files\`,
-\`retrieve\`, \`semantic_search\`, \`remember\`) continuam invocáveis via CallTool
+\`retrieve\`, \`semantic_search\`) continuam invocáveis via CallTool
 ou CLI mesmo quando não listadas. Para ListTools completo:
 \`ARGUS_MCP_TOOLS=all\` (exige restart do MCP).
 

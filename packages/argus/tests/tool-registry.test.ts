@@ -58,8 +58,14 @@ describe("tool-registry", () => {
     ]);
   });
 
-  it("default listed é o path feliz de quatro tools", () => {
-    expect(DEFAULT_LISTED_MCP_TOOLS).toEqual(["explore", "pack_context", "recall", "status"]);
+  it("default listed é o path feliz de cinco tools (inclui remember)", () => {
+    expect(DEFAULT_LISTED_MCP_TOOLS).toEqual([
+      "explore",
+      "pack_context",
+      "recall",
+      "remember",
+      "status",
+    ]);
   });
 
   describe("resolveListedTools", () => {
@@ -130,6 +136,8 @@ describe("tool-registry", () => {
     expect(TOOL_DESCRIPTIONS.explore).toMatch(/Path feliz|entendimento|refactor/i);
     expect(TOOL_DESCRIPTIONS.pack_context).toMatch(/budget|múltiplas|fontes/i);
     expect(TOOL_DESCRIPTIONS.recall).toMatch(/decisões|cofre/i);
+    expect(TOOL_DESCRIPTIONS.remember).toMatch(/Path feliz|captura|cofre/i);
+    expect(TOOL_DESCRIPTIONS.remember).not.toMatch(/unlisted/i);
     expect(TOOL_DESCRIPTIONS.status).toMatch(/slim|ARGUS_MCP_TOOLS=all/i);
   });
 
@@ -273,12 +281,14 @@ describe("S1 MCP surface slim (ListTools vs CallTool)", () => {
     return client;
   }
 
-  it("AC-1.1.1 ListTools sem env retorna exatamente as quatro default", async () => {
+  it("AC-2.1.1 ListTools sem env retorna exatamente as cinco default", async () => {
     useIndexedWorkspace();
     const client = await connectClient(undefined);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toEqual([...DEFAULT_LISTED_MCP_TOOLS]);
-    expect(tools).toHaveLength(4);
+    expect(tools).toHaveLength(5);
+    expect(tools.map((t) => t.name)).toContain("remember");
+    expect(tools.map((t) => t.name)).not.toContain("retrieve");
     await client.close();
   });
 
@@ -308,6 +318,36 @@ describe("S1 MCP surface slim (ListTools vs CallTool)", () => {
     expect(fallback.tools.map((t) => t.name)).toEqual([...DEFAULT_LISTED_MCP_TOOLS]);
     expect(errors.some((e) => e.includes("E_MCP_TOOLS_INVALID"))).toBe(true);
     await clientBad.close();
+  });
+
+  it("AC-2.1.3 retrieve ausente do default e invocável via CallTool", async () => {
+    const root = useIndexedWorkspace();
+    expect(await runIndex()).toBe(0);
+    const client = await connectClient(undefined);
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).not.toContain("retrieve");
+
+    // Pack gera handle; CallTool retrieve funciona mesmo unlisted.
+    const packed = buildToolResponse("pack_context", root, {
+      sources: ["lib.ts"],
+      goal: "AC-2.1.3 retrieve unlisted",
+      token_budget: 60,
+      style: "deep",
+      response_format: "detailed",
+    });
+    const handle = String(packed.retrieve_handle);
+    expect(handle).toMatch(/^rh_[a-f0-9]{16}$/);
+
+    const res = await client.callTool({
+      name: "retrieve",
+      arguments: { handle },
+    });
+    expect(res.isError).not.toBe(true);
+    const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+    const payload = JSON.parse(text) as { state: string; content?: string };
+    expect(["sucesso", "parcial"]).toContain(payload.state);
+    expect(String(payload.content)).toContain("alpha");
+    await client.close();
   });
 
   it("AC-1.2.1 CallTool de impact funciona quando impact não está em ListTools", async () => {

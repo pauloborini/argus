@@ -2,11 +2,12 @@
 
 ## Unreleased
 
-- surface MCP slim por default: ListTools anuncia no máximo quatro tools
-  (`explore`, `pack_context`, `recall`, `status`); as 12 registradas continuam
-  invocáveis via CallTool/CLI. Override: `ARGUS_MCP_TOOLS=all` (ou CSV).
+- surface MCP slim por default: ListTools anuncia no máximo cinco tools
+  (`explore`, `pack_context`, `recall`, `remember`, `status`); as 12 registradas
+  continuam invocáveis via CallTool/CLI. Override: `ARGUS_MCP_TOOLS=all` (ou CSV).
   **Compatibilidade:** hosts que cacheiam ListTools precisam **reiniciar** o
   processo MCP após o upgrade; unlisted não significa desabilitada.
+  (`retrieve` permanece unlisted — handle já vem do payload.)
 - `argus install --refresh` regenera o bloco de agent-rules versionado e
   reconverge entradas MCP; opt-out: `ARGUS_NO_INSTALL_REFRESH=1`.
 - explore/pack balanced entregam trechos verbatim acionáveis; `retrieve`

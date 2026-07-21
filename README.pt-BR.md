@@ -135,11 +135,11 @@ Para fiar à mão, aponte seu agente ou IDE para o servidor MCP stdio:
 }
 ```
 
-**ListTools (slim por default):** só quatro tools são anunciadas —
-`explore`, `pack_context`, `recall`, `status` — o path feliz do agente.
+**ListTools (slim por default):** só cinco tools são anunciadas —
+`explore`, `pack_context`, `recall`, `remember`, `status` — o path feliz do agente.
 As **doze** tools registradas continuam invocáveis via CallTool / CLI
 (`search`, `trace`, `impact`, `diff_impact`, `files`, `retrieve`,
-`semantic_search`, `remember`, além das quatro listadas). Override de
+`semantic_search`, além das cinco listadas). Override de
 descoberta: `ARGUS_MCP_TOOLS=all` (ou CSV); mudar a env exige **restart** do
 MCP (hosts costumam cachear ListTools). Quebra suave: hosts que assumiam
 doze tools listadas precisam reiniciar após o upgrade.
@@ -226,7 +226,7 @@ Gates de release no monorepo (sem SLA de performance — valores orientativos):
 | Comando | Função |
 |---|---|
 | `npm run validate` | typecheck + testes + lint + build |
-| `npm run smoke:package` | tarball instalável + MCP ListTools slim (4) + CallTool unlisted |
+| `npm run smoke:package` | tarball instalável + MCP ListTools slim (5) + CallTool unlisted |
 | `npm run homologate` | ≥2 corpora (fixtures por default) + golden S8 agent-facing MCP |
 | `npm run release:check` | consistência de versão |
 | `npm run release:eval` | evidência agregada memória/privacidade/performance com veredito bloqueante → `.argus/release-evaluation/latest.json` |

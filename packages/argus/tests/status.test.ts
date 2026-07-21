@@ -64,7 +64,7 @@ describe("status stub e staleness", () => {
       expect(surface.slim).toBe(true);
       expect(surface.mode).toBe("default");
       expect(surface.listed_tools).toEqual([...DEFAULT_LISTED_MCP_TOOLS]);
-      expect(surface.listed_count).toBe(4);
+      expect(surface.listed_count).toBe(DEFAULT_LISTED_MCP_TOOLS.length);
       expect(surface.registered_count).toBe(MCP_TOOL_NAMES.length);
       expect(surface.restore_all).toBe(`${ARGUS_MCP_TOOLS_ENV}=all`);
     } finally {

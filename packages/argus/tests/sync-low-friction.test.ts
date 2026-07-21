@@ -371,14 +371,19 @@ describe("S28 — sync de baixo atrito", () => {
       expect(claude).toContain("explore");
       expect(claude).toContain("pack_context");
       expect(claude).toContain("recall");
+      expect(claude).toContain("remember");
       expect(claude).toContain("status");
       expect(claude).toContain("argus explore");
       expect(claude).toContain("argus pack-context");
       expect(claude).toContain("argus memory search");
+      expect(claude).toContain("argus memory remember");
       expect(claude).toContain("antes de inventar regra");
       expect(claude).toContain("ao fechar uma decisão");
       // Path feliz ≠ menu das 12: search não é primeira recomendação operacional.
       expect(claude).toMatch(/1\.\s+`explore`/);
+      expect(claude).toMatch(/4\.\s+`remember`/);
+      // remember listed: não deve aparecer só como "avançada".
+      expect(claude).not.toMatch(/Tools avançadas[\s\S]*`remember`/);
     });
 
     it("AC-2.1.2: install repetido não duplica e preserva bytes fora dos marcadores", () => {
