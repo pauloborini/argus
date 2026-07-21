@@ -137,7 +137,9 @@ function buildToolResponseInner(
       case "status":
         return buildStatusResponse(cwd);
       case "remember":
-        return buildRememberResponse(cwd, args as RememberArgs | undefined);
+        throw new Error(
+          "remember exige buildToolResponseAsync (hot embed assíncrono).",
+        );
       case "recall":
         return buildRecallResponse(cwd, args as RecallArgs | undefined);
     }
@@ -188,9 +190,9 @@ function buildToolResponseInner(
 }
 
 /**
- * Variante assíncrona do dispatcher. Só `semantic_search` precisa de await (embed
- * da query); as outras 9 tools delegam ao caminho síncrono. Usada pelo servidor
- * MCP e pelo comando CLI `semantic-search`.
+ * Variante assíncrona do dispatcher. `semantic_search`, `remember` (hot embed) e
+ * `recall` híbrido precisam de await; as demais tools delegam ao caminho síncrono.
+ * Usada pelo servidor MCP e pelo comando CLI `semantic-search`.
  */
 export async function buildToolResponseAsync(
   tool: McpToolName,
@@ -218,7 +220,7 @@ export async function buildToolResponseAsync(
   }
   if (tool === "remember") {
     return applyResponseFormat(
-      buildRememberResponse(cwd, args as RememberArgs | undefined),
+      await buildRememberResponse(cwd, args as RememberArgs | undefined, deps?.embedder),
       resolveResponseFormat(args),
       tool,
     );

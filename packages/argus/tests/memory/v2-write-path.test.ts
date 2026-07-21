@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MCP_TOOL_NAMES } from "../../src/mcp/tool-registry.js";
 import { RememberArgs } from "../../src/mcp/tools/remember.js";
+import { FakeEmbedder } from "../../src/embeddings/embedder.js";
 import {
   countNoteEmbeddings,
   hotUpdateNoteProjection,
@@ -141,9 +142,9 @@ describe("memory v2 write path (S03)", () => {
     }
   });
 
-  it("remember grava defaults v2 sem novos parametros obrigatorios", () => {
+  it("remember grava defaults v2 sem novos parametros obrigatorios", async () => {
     const cwd = root();
-    const result = VaultEngine.remember("Conteudo simples de captura", {}, cwd);
+    const result = await VaultEngine.remember("Conteudo simples de captura", {}, cwd);
     expect(result.state).toBe("sucesso");
     const inboxDir = join(cwd, ".argus", "memory", "vault", "inbox");
     const file = readdirSync(inboxDir).find((f) => f.endsWith(".md"));
@@ -257,9 +258,9 @@ describe("memory v2 write path (S03)", () => {
     expect(existsSync(dbPath)).toBe(true);
   });
 
-  it("segunda sync nao duplica notas", () => {
+  it("segunda sync nao duplica notas", async () => {
     const cwd = root();
-    VaultEngine.remember("Nota duplicacao", {}, cwd);
+    await VaultEngine.remember("Nota duplicacao", {}, cwd);
     VaultEngine.sync(cwd);
     VaultEngine.sync(cwd);
     const db = openMemoryDb(cwd, { readonly: true });
@@ -374,13 +375,18 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     return tempDir;
   }
 
-  it("AC-4.1.1 remember→recall same-process sem sync encontra o fato", async () => {
+  it("AC-3.1.1/AC-4.1.1 remember→recall FTS same-process; embedding pending sem inject", async () => {
     const cwd = root();
     const syncSpy = vi.spyOn(VaultEngine, "sync");
     const unique = `hotfact-${Date.now()}-xyzzy`;
-    const remembered = VaultEngine.remember(`Decisão quente: ${unique}`, { type: "decision" }, cwd);
+    // Vitest seta ARGUS_HOT_EMBED=0 → sem FakeEmbedder o status fica pending (coerente).
+    const remembered = await VaultEngine.remember(`Decisão quente: ${unique}`, { type: "decision" }, cwd);
     expect(remembered.state).toBe("sucesso");
     expect(remembered.fts_indexed).toBe(true);
+    expect(remembered.embedding_status).toBe("pending");
+    expect(["updated", "pending", "failed"]).toContain(remembered.embedding_status);
+    expect(JSON.stringify(remembered.limitations ?? [])).toMatch(/memory embed/i);
+    expect(JSON.stringify(remembered)).not.toMatch(/memory sync/i);
     expect(syncSpy).not.toHaveBeenCalled();
 
     const recalled = await VaultEngine.recall(unique, { limit: 5 }, cwd);
@@ -414,9 +420,10 @@ describe("memory hot-update (S5 / Plano 4)", () => {
       expect(rememberRes.isError).not.toBe(true);
       const rememberPayload = JSON.parse(
         (rememberRes.content as Array<{ type: string; text: string }>)[0]!.text,
-      ) as { state: string; fts_indexed?: boolean };
+      ) as { state: string; fts_indexed?: boolean; embedding_status?: string };
       expect(rememberPayload.state).toBe("sucesso");
       expect(rememberPayload.fts_indexed).toBe(true);
+      expect(["updated", "pending", "failed"]).toContain(rememberPayload.embedding_status);
 
       const recallRes = await client.callTool({
         name: "recall",
@@ -441,7 +448,7 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     }
   });
 
-  it("AC-4.1.2 hot-update não faz wipe global nem remove embeddings alheios", () => {
+  it("AC-4.1.2 hot-update não faz wipe global nem remove embeddings alheios", async () => {
     const cwd = root();
     VaultEngine.init(cwd);
     const inbox = join(cwd, ".argus", "memory", "vault", "inbox");
@@ -498,7 +505,7 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     const beforeCount = countNoteEmbeddings(cwd);
 
     const syncSpy = vi.spyOn(VaultEngine, "sync");
-    const third = VaultEngine.remember("Nota gamma hot only xyzzyunique", { type: "decision" }, cwd);
+    const third = await VaultEngine.remember("Nota gamma hot only xyzzyunique", { type: "decision" }, cwd);
     expect(third.state).toBe("sucesso");
     expect(syncSpy).not.toHaveBeenCalled();
     syncSpy.mockRestore();
@@ -518,7 +525,7 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     }
   });
 
-  it("AC-4.1.3 falha de projeção é acionável; retry converge sem duplicar FTS", () => {
+  it("AC-4.1.3 falha de projeção é acionável; retry converge sem duplicar FTS", async () => {
     const cwd = root();
     const missing = hotUpdateNoteProjection(cwd, {
       absolutePath: join(cwd, ".argus", "memory", "vault", "inbox", "missing-note.md"),
@@ -527,7 +534,7 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     expect(missing.code).toBe("E_MEMORY_HOT_NOTE_MISSING");
     expect(missing.error).toMatch(/E_MEMORY_HOT_NOTE_MISSING|Retry/i);
 
-    const remembered = VaultEngine.remember("Retry idempotente token-zzz", { type: "inbox" }, cwd);
+    const remembered = await VaultEngine.remember("Retry idempotente token-zzz", { type: "inbox" }, cwd);
     expect(remembered.state).toBe("sucesso");
     const notePath = join(cwd, ".argus", "memory", "vault", (remembered.note_path as string));
     const raw = readFileSync(notePath, "utf-8");
@@ -557,7 +564,7 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     }
   });
 
-  it("AC-4.1.3 remember→parcial quando projeção falha; retry real indexa sem duplicar", () => {
+  it("AC-4.1.3 remember→parcial quando projeção falha; retry real indexa sem duplicar", async () => {
     const cwd = root();
     // Stub só a 1ª projeção para exercitar o wire de remember; Markdown já foi gravado.
     // Retry seguinte usa hotUpdateNoteProjection real (S5) — sem mock do seam no retry.
@@ -572,7 +579,7 @@ describe("memory hot-update (S5 / Plano 4)", () => {
       error: "E_MEMORY_HOT_INDEX_FAILED: falha simulada para prova de wire. Retry idempotente.",
     });
     try {
-      const remembered = VaultEngine.remember("Parcial hot wire token-aaa", { type: "inbox" }, cwd);
+      const remembered = await VaultEngine.remember("Parcial hot wire token-aaa", { type: "inbox" }, cwd);
       expect(remembered.state).toBe("parcial");
       expect(remembered.fts_indexed).toBe(false);
       expect(remembered.hot_index_code).toBe("E_MEMORY_HOT_INDEX_FAILED");
@@ -612,5 +619,181 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("AC-3.1.1/3.1.2 remember+FakeEmbedder → embedding updated e hybrid sem sync", async () => {
+    const cwd = root();
+    const syncSpy = vi.spyOn(VaultEngine, "sync");
+    const unique = `hotembed-${Date.now()}-quux`;
+    const remembered = await VaultEngine.remember(`Fato densavel ${unique}`, {
+      type: "decision",
+      embedder: new FakeEmbedder(),
+    }, cwd);
+    expect(remembered.state).toBe("sucesso");
+    expect(remembered.fts_indexed).toBe(true);
+    expect(["updated", "unchanged"]).toContain(remembered.embedding_status);
+    expect(JSON.stringify(remembered)).not.toMatch(/memory sync/i);
+    expect(syncSpy).not.toHaveBeenCalled();
+
+    const recalled = await VaultEngine.recall(unique, { limit: 5 }, cwd, new FakeEmbedder());
+    expect(recalled.chunks.some((c) => (c.content ?? c.snippet ?? "").includes(unique) || c.title.includes("Fato"))).toBe(
+      true,
+    );
+    expect(recalled.mechanism).toBe("hybrid-rrf");
+    expect(syncSpy).not.toHaveBeenCalled();
+    syncSpy.mockRestore();
+  });
+
+  it("AC-3.1.3 remember+hot embed preserva IDs de embeddings pré-existentes", async () => {
+    const cwd = root();
+    VaultEngine.init(cwd);
+    const inbox = join(cwd, ".argus", "memory", "vault", "inbox");
+    mkdirSync(inbox, { recursive: true });
+    for (const [name, body] of [
+      ["alpha.md", "alpha keep body"],
+      ["beta.md", "beta keep body"],
+    ] as const) {
+      writeFileSync(
+        join(inbox, name),
+        [
+          "---",
+          `title: "${name}"`,
+          "type: inbox",
+          "scope: project",
+          "source: direct_capture",
+          "confidence: presumed",
+          "observed_at: 2026-01-01T00:00:00.000Z",
+          "---",
+          "",
+          body,
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+    expect(VaultEngine.sync(cwd).state).toBe("sucesso");
+    expect((await VaultEngine.embed(cwd, new FakeEmbedder())).state).toBe("sucesso");
+    const beforeIds = readEmbeddingNoteIds(cwd);
+    expect(beforeIds.length).toBe(2);
+
+    const syncSpy = vi.spyOn(VaultEngine, "sync");
+    const third = await VaultEngine.remember("Nota gamma densavel xyzzyunique", {
+      type: "decision",
+      embedder: new FakeEmbedder(),
+    }, cwd);
+    expect(third.state).toBe("sucesso");
+    expect(third.embedding_status).toBe("updated");
+    expect(syncSpy).not.toHaveBeenCalled();
+    syncSpy.mockRestore();
+
+    const afterIds = readEmbeddingNoteIds(cwd);
+    for (const id of beforeIds) {
+      expect(afterIds).toContain(id);
+    }
+    expect(afterIds.length).toBeGreaterThanOrEqual(beforeIds.length);
+  });
+
+  it("AC-3.2.1 remember parcial/sucesso nunca sugere memory sync", async () => {
+    const cwd = root();
+    const ok = await VaultEngine.remember("Sem sync no hint", { type: "inbox" }, cwd);
+    expect(ok.state).toBe("sucesso");
+    expect(JSON.stringify(ok.limitations ?? [])).not.toMatch(/memory sync/i);
+    expect(String(ok.message ?? "")).not.toMatch(/memory sync/i);
+
+    const spy = vi.spyOn(HotUpdater, "hotUpdateNoteProjection").mockReturnValueOnce({
+      ok: false,
+      note_id: "",
+      path: "inbox/stub.md",
+      fts_indexed: false,
+      embedding_status: "skipped",
+      warnings: [],
+      code: "E_MEMORY_HOT_INDEX_FAILED",
+      error: "E_MEMORY_HOT_INDEX_FAILED: falha simulada.",
+    });
+    try {
+      const parcial = await VaultEngine.remember("Parcial sem sync hint", { type: "inbox" }, cwd);
+      expect(parcial.state).toBe("parcial");
+      expect(JSON.stringify(parcial.limitations ?? [])).not.toMatch(/memory sync/i);
+      expect(JSON.stringify(parcial.limitations ?? [])).toMatch(/memory embed/i);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("AC-3.2 embed incremental preserva IDs e não chama sync/wipe", async () => {
+    const cwd = root();
+    VaultEngine.init(cwd);
+    const inbox = join(cwd, ".argus", "memory", "vault", "inbox");
+    mkdirSync(inbox, { recursive: true });
+    for (const [name, body] of [
+      ["keep-a.md", "alpha embed keep"],
+      ["keep-b.md", "beta embed keep"],
+    ] as const) {
+      writeFileSync(
+        join(inbox, name),
+        [
+          "---",
+          `title: "${name}"`,
+          "type: inbox",
+          "scope: project",
+          "source: direct_capture",
+          "confidence: presumed",
+          "observed_at: 2026-01-01T00:00:00.000Z",
+          "---",
+          "",
+          body,
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+    }
+    expect(VaultEngine.sync(cwd).state).toBe("sucesso");
+    expect((await VaultEngine.embed(cwd, new FakeEmbedder())).state).toBe("sucesso");
+    const beforeIds = readEmbeddingNoteIds(cwd);
+    expect(beforeIds.length).toBe(2);
+
+    const syncSpy = vi.spyOn(VaultEngine, "sync");
+    const second = await VaultEngine.embed(cwd, new FakeEmbedder());
+    expect(second.state).toBe("sucesso");
+    expect(second.embedded_count).toBe(0);
+    expect(syncSpy).not.toHaveBeenCalled();
+    expect(readEmbeddingNoteIds(cwd)).toEqual(beforeIds);
+
+    writeFileSync(
+      join(inbox, "keep-c.md"),
+      [
+        "---",
+        'title: "keep-c.md"',
+        "type: inbox",
+        "scope: project",
+        "source: direct_capture",
+        "confidence: presumed",
+        "observed_at: 2026-01-01T00:00:00.000Z",
+        "---",
+        "",
+        "gamma embed keep",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    // Hot projection coloca a 3ª nota no SQLite sem sync (que wipearia embeddings).
+    const notePath = join(inbox, "keep-c.md");
+    const hot = hotUpdateNoteProjection(cwd, {
+      absolutePath: notePath,
+      rawContent: readFileSync(notePath, "utf-8"),
+      vaultRelativePath: "inbox/keep-c.md",
+    });
+    expect(hot.ok).toBe(true);
+
+    const third = await VaultEngine.embed(cwd, new FakeEmbedder());
+    expect(third.state).toBe("sucesso");
+    expect(third.embedded_count).toBe(1);
+    expect(syncSpy).not.toHaveBeenCalled();
+    const afterIds = readEmbeddingNoteIds(cwd);
+    for (const id of beforeIds) {
+      expect(afterIds).toContain(id);
+    }
+    expect(afterIds.length).toBe(3);
+    syncSpy.mockRestore();
   });
 });

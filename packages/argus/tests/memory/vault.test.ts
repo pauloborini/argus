@@ -29,7 +29,7 @@ describe("memory vault", () => {
 
   it("recall usa hybrid-rrf somente após embeddings reais no cofre", async () => {
     const cwd = root();
-    const remembered = VaultEngine.remember("# Billing\n\ninvoice payment flow", { type: "decision" }, cwd);
+    const remembered = await VaultEngine.remember("# Billing\n\ninvoice payment flow", { type: "decision" }, cwd);
     expect(remembered.state).toBe("sucesso");
     expect(VaultEngine.sync(cwd).state).toBe("sucesso");
 
@@ -57,7 +57,7 @@ describe("memory vault", () => {
 
   it("semantic_search domain=memory funciona sem index.db de código", async () => {
     const cwd = root();
-    VaultEngine.remember("# Nota\n\nmemoria isolada", {}, cwd);
+    await VaultEngine.remember("# Nota\n\nmemoria isolada", {}, cwd);
     VaultEngine.sync(cwd);
 
     const payload = await buildToolResponseAsync("semantic_search", cwd, {
@@ -121,7 +121,7 @@ describe("memory vault", () => {
 
   it("think dry-run monta prompt com citações e gaps", async () => {
     const cwd = root();
-    VaultEngine.remember("# Arquitetura\n\ndecisão de memória local", { type: "decision" }, cwd);
+    await VaultEngine.remember("# Arquitetura\n\ndecisão de memória local", { type: "decision" }, cwd);
     VaultEngine.sync(cwd);
 
     const result = await ThinkEngine.think("memória local", { cwd, dryRun: true });

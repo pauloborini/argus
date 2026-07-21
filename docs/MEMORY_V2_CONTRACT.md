@@ -150,25 +150,28 @@ Wire de auditoria: `rank_factors` (componentes) e `rank_reason` (ex.: `confirmed
 
 | Caminho | Owner | O que faz | O que **não** faz |
 |---------|-------|-----------|-------------------|
-| `VaultEngine.sync` | vault-engine | Rebuild completo notes/FTS/grafo a partir do vault Markdown | Não regenera embeddings (os apaga no rebuild; exige `embed` depois) |
-| `VaultEngine.embed` | vault-engine | Rebuild de `note_embeddings` para todas as notas | Chama `sync` antes (caminho frio/batch) |
+| `VaultEngine.sync` | vault-engine | Rebuild completo notes/FTS/grafo a partir do vault Markdown | **Destrutivo:** apaga `note_embeddings` (e notes/FTS) no rebuild; exige `embed` depois se quiser denso de novo |
+| `VaultEngine.embed` | vault-engine | Upsert incremental de `note_embeddings` para notas já no SQLite; remove órfãos | **Não** chama `sync`; **não** faz `DELETE` global de embeddings válidos |
 | `hotUpdateNoteProjection` | `hot-updater.ts` | Upsert **de uma nota** + FTS em transação; atualiza `memory_meta` | Não chama `sync`; não `DELETE` global; não remove embeddings de outras notas |
+| `hotUpdateNoteEmbedding` | `hot-updater.ts` | Embed **de uma nota** sob `HOT_EMBED_MAX_CHARS` | Não wipe; preserva embeddings alheios |
 
 ### 9.1 Hot path de `remember`
 
 1. Grava Markdown v2 no vault.
 2. Chama `hotUpdateNoteProjection` (transação SQLite: upsert `notes` + `notes_fts`).
-3. Embedding da nota fica `pending` por default (budget `HOT_EMBED_MAX_CHARS`); FTS fica imediatamente disponível para `recall`.
-4. `hotUpdateNoteEmbedding` pode atualizar **só** aquela nota sem wipe.
-5. Se a projeção falhar após o Markdown existir → `state: parcial`, código `E_MEMORY_HOT_INDEX_FAILED` / `E_MEMORY_HOT_NOTE_MISSING`, retry idempotente (mesmo path não duplica FTS).
+3. Se corpo ≤ `HOT_EMBED_MAX_CHARS` e embedder disponível (`options.embedder` ou `createEmbedder()`), chama `hotUpdateNoteEmbedding` no mesmo request → `embedding_status: updated|unchanged|failed|pending`.
+4. Se embedder indisponível, corpo acima do budget, ou `ARGUS_HOT_EMBED=0` sem inject → `pending` + hint **`argus memory embed`** (nunca `memory sync` como retry de indexação quente).
+5. FTS fica imediatamente disponível para `recall`/`search` mesmo com embedding pendente.
+6. Se a projeção falhar após o Markdown existir → `state: parcial`, código `E_MEMORY_HOT_INDEX_FAILED` / `E_MEMORY_HOT_NOTE_MISSING`, retry idempotente (mesmo path não duplica FTS).
 
-O request MCP/CLI de `remember` **nunca** deve chamar `VaultEngine.sync`.
+O request MCP/CLI de `remember` **nunca** deve chamar `VaultEngine.sync`. Hints pós-remember apontam `argus memory embed`, não sync.
 
 ### 9.2 Degradação de embedding
 
 - Sem embeddings → `recall`/`search` usam FTS (`mechanism: fts-only`), estado honesto com limitation.
 - Hot path não bloqueia captura por falha/custo de embed.
-- `sync` full continua apagando embeddings (rebuild estrutural); não usar sync no hot path.
+- `sync` full continua **destrutivo** para embeddings (rebuild estrutural do vault); operação explícita frio — **não** usar sync no hot path nem como ritual pós-remember.
+- `embed` batch é incremental (upsert + limpeza de órfãos); não depende de wipe via sync.
 
 ---
 
