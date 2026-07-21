@@ -124,6 +124,28 @@ export function healRootPathIfNeeded(
 }
 
 /**
+ * Root de estado a partir do diretório que já contém `.argus` (sem walk-up — Plano 4).
+ * Aplica heal D4. Retorna null se não houver metadata válida em `startCwd`.
+ * Usado por sync/status/memória/handles no hot path local.
+ */
+export function resolveLocalStateRoot(startCwd: string): {
+  rootPath: string;
+  metadata: WorkspaceMetadata;
+  healed: boolean;
+} | null {
+  const metadata = readWorkspaceMetadata(startCwd);
+  if (!metadata) {
+    return null;
+  }
+  const { metadata: healedMeta, healed } = healRootPathIfNeeded(startCwd, metadata);
+  return {
+    rootPath: healedMeta.root_path,
+    metadata: healedMeta,
+    healed,
+  };
+}
+
+/**
  * Resolve a raiz canônica do workspace Argus.
  *
  * Ordem de candidatos (primeiro com `.argus/workspace.json` válido vence):

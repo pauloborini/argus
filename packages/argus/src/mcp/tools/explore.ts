@@ -11,7 +11,8 @@ import {
   readImportersMap,
   searchFtsInternal,
 } from "../../storage/sqlite-index-store.js";
-import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { getIndexDbPath } from "../../workspace/workspace.js";
+import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
 import { existsSync } from "node:fs";
 import { VaultEngine } from "../../memory/vault-engine.js";
 import { getMemoryDbPath } from "../../memory/paths.js";
@@ -312,8 +313,8 @@ export function buildExploreResponse(
   let targetSymbol: ExtractedSymbol | null = null;
   let ambiguityCandidates: ExploreRef[] = [];
 
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata) {
+  const resolved = resolveLocalStateRoot(cwd);
+  if (!resolved) {
     return {
       summary: "",
       central_symbols: [],
@@ -326,8 +327,9 @@ export function buildExploreResponse(
       ...stubResponse("falha", WORKSPACE_MISSING),
     };
   }
+  const { rootPath } = resolved;
 
-  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  const db = openIndexDb(getIndexDbPath(rootPath), { readonly: true });
   try {
     if (mode === "file") {
       const selection = selectFileTarget(db, target, includeTests);
@@ -416,7 +418,7 @@ export function buildExploreResponse(
     const relevantFiles = collectFileRelevantFiles(db, entry, includeTests, budget);
     const imports = entry.imports.slice(0, budget);
     const { callers, callees } = collectCallersAndCallees(db, entry, targetSymbol, includeTests, budget);
-    const snippets = buildSnippetRefs(cwd, entry, centralSymbols, budget);
+    const snippets = buildSnippetRefs(rootPath, entry, centralSymbols, budget);
 
     const partialCoverage = index.coverage_by_language[entry.language]?.coverage_level === "partial";
     const state =
@@ -436,7 +438,7 @@ export function buildExploreResponse(
     ];
 
     const targetLabel = targetSymbol ? `Símbolo ${targetSymbol.name}` : `Arquivo ${entry.relative_path}`;
-    const memoryRefs = findMemoryRefs(cwd, target, mode, entry.relative_path);
+    const memoryRefs = findMemoryRefs(rootPath, target, mode, entry.relative_path);
 
     const truncatedSnippets = snippets.filter((snippet) => snippet.truncated === true);
     let retrieveHandle: string | undefined;
@@ -444,7 +446,7 @@ export function buildExploreResponse(
       const segments: PackSegment[] = [];
       for (const snippet of truncatedSnippets) {
         const fullBody =
-          readFullSymbolBody(cwd, snippet.path, snippet.start_line, snippet.end_line) ??
+          readFullSymbolBody(rootPath, snippet.path, snippet.start_line, snippet.end_line) ??
           snippet.body ??
           "";
         if (!fullBody.trim()) {
@@ -472,7 +474,7 @@ export function buildExploreResponse(
 
       if (segments.length > 0) {
         retrieveHandle = createRetrieveHandleId("rh");
-        const stored = writeStoredPackHandle(cwd, {
+        const stored = writeStoredPackHandle(rootPath, {
           handle: retrieveHandle,
           created_at: new Date().toISOString(),
           goal: `explore:${target}`,
@@ -519,7 +521,7 @@ export function buildExploreResponse(
         end_line: symbol.end_line,
         exported: symbol.exported ?? false,
         signature:
-          readSymbolSignature(cwd, entry!.relative_path, symbol.start_line, symbol.end_line) ??
+          readSymbolSignature(rootPath, entry!.relative_path, symbol.start_line, symbol.end_line) ??
           undefined,
       })),
       relevant_files: relevantFiles,

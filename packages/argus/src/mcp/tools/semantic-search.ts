@@ -21,7 +21,8 @@ import {
   readIndexMeta,
   searchFtsInternal,
 } from "../../storage/sqlite-index-store.js";
-import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { getIndexDbPath } from "../../workspace/workspace.js";
+import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
 import { VaultEngine } from "../../memory/vault-engine.js";
 import { WORKSPACE_MISSING, STALE_RUN_EMBED } from "./common.js";
 import type { IndexEnvelope, SearchCandidate, ToolResponsePayload } from "./common.js";
@@ -177,12 +178,12 @@ export function buildSemanticSearchDegraded(
     };
   }
 
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata) {
+  const resolved = resolveLocalStateRoot(cwd);
+  if (!resolved) {
     return invalidWorkspace(envelope);
   }
 
-  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  const db = openIndexDb(getIndexDbPath(resolved.rootPath), { readonly: true });
   try {
     const limit = args?.limit ?? 20;
     const filters = { scope: args?.scope?.trim().toLowerCase(), kind: args?.kind?.trim().toLowerCase() };
@@ -222,13 +223,14 @@ export async function buildSemanticSearchResponse(
       ...stubResponse("falha", "Input inválido para a tool"),
     };
   }
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata) {
+  const resolved = resolveLocalStateRoot(cwd);
+  if (!resolved) {
     return invalidWorkspace(envelope);
   }
+  const { rootPath } = resolved;
 
   if (domain === "memory") {
-    const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, metadata.root_path, deps?.embedder);
+    const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, rootPath, deps?.embedder);
     return {
       candidates: mapMemoryCandidates(memory.chunks as MemoryCandidateChunk[] | undefined),
       storage_backend: envelope.storage_backend,
@@ -241,7 +243,7 @@ export async function buildSemanticSearchResponse(
   }
 
   if (codeEnvelopeUnavailable(envelope) && domain === "all") {
-    const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, metadata.root_path, deps?.embedder);
+    const memory = await VaultEngine.recall(query, { limit: args?.limit ?? 20 }, rootPath, deps?.embedder);
     return {
       candidates: mapMemoryCandidates(memory.chunks as MemoryCandidateChunk[] | undefined),
       storage_backend: envelope.storage_backend,
@@ -266,7 +268,7 @@ export async function buildSemanticSearchResponse(
     };
   }
 
-  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  const db = openIndexDb(getIndexDbPath(rootPath), { readonly: true });
   try {
     const limit = args?.limit ?? 20;
     const mode = args?.mode ?? "hybrid";
@@ -275,7 +277,7 @@ export async function buildSemanticSearchResponse(
     if (!hasEmbeddings(db)) {
       const codeCandidates = lexicalCandidates(db, query, limit, filters);
       if (domain === "all") {
-        const memoryState = await VaultEngine.recall(query, { limit }, metadata.root_path, deps?.embedder);
+        const memoryState = await VaultEngine.recall(query, { limit }, rootPath, deps?.embedder);
         const memoryCandidates = mapMemoryCandidates(memoryState.chunks as MemoryCandidateChunk[] | undefined);
         const fused = fuseCodeAndMemoryCandidates(codeCandidates, memoryCandidates, limit);
         return {
@@ -315,7 +317,7 @@ export async function buildSemanticSearchResponse(
       if (err instanceof EmbeddingsUnavailableError) {
         const codeCandidates = lexicalCandidates(db, query, limit, filters);
         if (domain === "all") {
-          const memoryState = await VaultEngine.recall(query, { limit }, metadata.root_path, deps?.embedder);
+          const memoryState = await VaultEngine.recall(query, { limit }, rootPath, deps?.embedder);
           const memoryCandidates = mapMemoryCandidates(memoryState.chunks as MemoryCandidateChunk[] | undefined);
           const fused = fuseCodeAndMemoryCandidates(codeCandidates, memoryCandidates, limit);
           return {
@@ -396,7 +398,7 @@ export async function buildSemanticSearchResponse(
       ? ["Embeddings defasados; refresque com argus embed."]
       : [];
     if (domain === "all") {
-      memoryState = await VaultEngine.recall(query, { limit }, metadata.root_path, deps?.embedder);
+      memoryState = await VaultEngine.recall(query, { limit }, rootPath, deps?.embedder);
       const memoryCandidates = mapMemoryCandidates(memoryState.chunks as MemoryCandidateChunk[] | undefined);
       finalCandidates = fuseCodeAndMemoryCandidates(candidates, memoryCandidates, limit);
       if (memoryState.state === "parcial") {

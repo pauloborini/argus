@@ -38,6 +38,7 @@ export {
   ARGUS_WORKSPACE_ROOT_ENV,
   W_WORKSPACE_ROOT_HEALED,
   healRootPathIfNeeded,
+  resolveLocalStateRoot,
   resolveWorkspaceRoot,
 } from "./workspace/resolve-workspace.js";
 export type { WorkspaceHandle } from "./workspace/resolve-workspace.js";
