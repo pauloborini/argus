@@ -18,15 +18,31 @@ import { getMemoryDbPath } from "../../memory/paths.js";
 import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
 import { queryMemoryGraphForExplore } from "../../memory/memory-graph-query.js";
 import { WORKSPACE_MISSING, uniqueByKey, fileMatchesTests } from "./common.js";
-import type { ToolResponsePayload, ExploreArgs, IndexEnvelope, ExploreSnippetRef, ExploreRef } from "./common.js";
-import { buildActionableSnippet, readSymbolSignature } from "./snippet-builder.js";
+import type {
+  ToolResponsePayload,
+  ExploreArgs,
+  IndexEnvelope,
+  ExploreRef,
+  PackSegment,
+} from "./common.js";
+import {
+  buildActionableSnippet,
+  formatSnippetBlock,
+  readFullSymbolBody,
+  readSymbolSignature,
+  type BuiltSnippet,
+} from "./snippet-builder.js";
+import {
+  createRetrieveHandleId,
+  writeStoredPackHandle,
+} from "./retrieve-handle-store.js";
 
 function buildSnippetRefs(
   cwd: string,
   entry: FileStructuralEntry,
   symbols: ExtractedSymbol[],
   limit: number,
-): ExploreSnippetRef[] {
+): BuiltSnippet[] {
   // Explore default = balanced acionável (trecho verbatim + signature).
   return symbols.slice(0, limit).map((symbol) =>
     buildActionableSnippet(
@@ -422,6 +438,70 @@ export function buildExploreResponse(
     const targetLabel = targetSymbol ? `Símbolo ${targetSymbol.name}` : `Arquivo ${entry.relative_path}`;
     const memoryRefs = findMemoryRefs(cwd, target, mode, entry.relative_path);
 
+    const truncatedSnippets = snippets.filter((snippet) => snippet.truncated === true);
+    let retrieveHandle: string | undefined;
+    if (truncatedSnippets.length > 0) {
+      const segments: PackSegment[] = [];
+      for (const snippet of truncatedSnippets) {
+        const fullBody =
+          readFullSymbolBody(cwd, snippet.path, snippet.start_line, snippet.end_line) ??
+          snippet.body ??
+          "";
+        if (!fullBody.trim()) {
+          continue;
+        }
+        const recoverable = {
+          ...snippet,
+          body: fullBody,
+          truncated: false,
+        };
+        segments.push({
+          ref: snippet.symbol ?? snippet.path,
+          text: formatSnippetBlock(recoverable, "deep"),
+          originRefs: [
+            {
+              ref: target,
+              path: snippet.path,
+              start_line: snippet.start_line,
+              end_line: snippet.end_line,
+              symbol: snippet.symbol,
+            },
+          ],
+        });
+      }
+
+      if (segments.length > 0) {
+        retrieveHandle = createRetrieveHandleId("rh");
+        const stored = writeStoredPackHandle(cwd, {
+          handle: retrieveHandle,
+          created_at: new Date().toISOString(),
+          goal: `explore:${target}`,
+          style: "balanced",
+          token_budget: 0,
+          manifest_hash: index.manifest_hash ?? null,
+          schema_version: envelope.schema_version,
+          segments,
+        });
+        if (stored === "none") {
+          retrieveHandle = undefined;
+          limitations.push(
+            "Truncamento detectado, mas storage do retrieve_handle ficou indisponível.",
+          );
+        } else {
+          limitations.push(
+            "Snippet(s) truncados pelos caps balanced; use retrieve com o retrieve_handle para o corpo completo.",
+          );
+        }
+      }
+    }
+
+    const exploreState =
+      retrieveHandle && state === "sucesso" ? "parcial" : state;
+
+    const suggestedNextAction = retrieveHandle
+      ? `Use \`retrieve\` com handle ${retrieveHandle} para reidratar o corpo completo, ou \`pack_context\` para empacotar fontes.`
+      : "Use `pack_context` para empacotar este alvo e fontes relacionadas sob budget.";
+
     return {
       summary: buildExploreSummary(
         targetLabel,
@@ -448,10 +528,9 @@ export function buildExploreResponse(
       callees,
       snippets,
       memory_refs: memoryRefs,
-      suggested_next_action: targetSymbol
-        ? "Use `trace` para fluxo ou `impact` para blast radius do símbolo."
-        : "Refine para um símbolo com `search` se precisar entendimento mais específico dentro do arquivo.",
-      ...stubResponse(state, "Exploração estrutural composta concluída.", {
+      ...(retrieveHandle ? { retrieve_handle: retrieveHandle } : {}),
+      suggested_next_action: suggestedNextAction,
+      ...stubResponse(exploreState, "Exploração estrutural composta concluída.", {
         limitations,
         staleness_hint: envelope.staleness_hint,
       }),
