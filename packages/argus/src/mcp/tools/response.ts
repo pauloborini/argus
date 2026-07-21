@@ -121,15 +121,37 @@ function buildToolResponseInner(
     };
   }
 
-  // search/files/trace/impact não precisam do grafo materializado: carregam
-  // meta-only e resolvem cobertura/tree/grafo por query alvo (trace/impact via
-  // LazyTraceGraph), matando o full-load no caminho quente.
+  // Tools quentes usam meta-only + SQL/LazyTraceGraph por alvo. Full-load só
+  // permanece para caminhos que ainda materializam o grafo inteiro (nenhum no
+  // path feliz explore/pack/diff/retrieve/status).
+  const needsIndex =
+    tool !== "retrieve" &&
+    tool !== "status" &&
+    tool !== "remember" &&
+    tool !== "recall";
+
+  if (!needsIndex) {
+    switch (tool) {
+      case "retrieve":
+        return buildRetrieveResponse(cwd, args as RetrieveArgs | undefined);
+      case "status":
+        return buildStatusResponse(cwd);
+      case "remember":
+        return buildRememberResponse(cwd, args as RememberArgs | undefined);
+      case "recall":
+        return buildRecallResponse(cwd, args as RecallArgs | undefined);
+    }
+  }
+
   const mode: StructuralLoadMode =
     tool === "search" ||
     tool === "files" ||
     tool === "trace" ||
     tool === "impact" ||
-    tool === "semantic_search"
+    tool === "semantic_search" ||
+    tool === "explore" ||
+    tool === "pack_context" ||
+    tool === "diff_impact"
       ? "lite"
       : "full";
   const envelope = buildIndexEnvelope(cwd, mode);
@@ -158,18 +180,10 @@ function buildToolResponseInner(
       }
     case "pack_context":
       return buildPackContextResponse(cwd, envelope, args as PackContextArgs | undefined);
-    case "retrieve":
-      return buildRetrieveResponse(cwd, args as RetrieveArgs | undefined);
-    case "status":
-      return buildStatusResponse(cwd);
     case "semantic_search":
       // Caminho síncrono: degrada para fallback lexical (sem embeddar a query).
       // A busca densa real exige embed assíncrono → buildToolResponseAsync.
       return buildSemanticSearchDegraded(cwd, envelope, args as SemanticSearchArgs | undefined);
-    case "remember":
-      return buildRememberResponse(cwd, args as RememberArgs | undefined);
-    case "recall":
-      return buildRecallResponse(cwd, args as RecallArgs | undefined);
   }
 }
 
@@ -217,7 +231,7 @@ export async function buildToolResponseAsync(
     );
   }
   if (tool === "pack_context" && (args as PackContextArgs | undefined)?.synthesize === true) {
-    const envelope = buildIndexEnvelope(cwd, "full");
+    const envelope = buildIndexEnvelope(cwd, "lite");
     const pack = buildPackContextResponse(cwd, envelope, args as PackContextArgs | undefined);
     if (pack.state !== "falha" && typeof pack.packed_context === "string") {
       pack.synthesis = await ThinkEngine.think(String((args as PackContextArgs | undefined)?.goal ?? ""), {
