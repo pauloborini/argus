@@ -28,10 +28,22 @@ export interface DiscoverFilesOptions {
   respect_gitignore?: boolean;
 }
 
+/** Contador de walks completos de discovery (S7 / sync delta). */
+let discoverWalkCount = 0;
+
+export function getDiscoverWalkCount(): number {
+  return discoverWalkCount;
+}
+
+export function resetDiscoverWalkCount(): void {
+  discoverWalkCount = 0;
+}
+
 export function discoverFiles(
   rootPath: string,
   options: DiscoverFilesOptions = {},
 ): DiscoverFilesResult {
+  discoverWalkCount += 1;
   const maxFileSize = options.max_file_size_bytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
   const maxFileCount = options.max_file_count ?? DEFAULT_MAX_FILE_COUNT;
   const ignoreContext = buildIgnoreContext(rootPath, {

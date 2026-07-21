@@ -17,6 +17,27 @@ import { tryBootstrapIndexFromLegacyJson } from "./sqlite-migration.js";
 
 export { IndexDbCorruptedError, IndexDbSchemaError };
 
+/** Contador de full-load estrutural (S7). Só incrementa em `loadStructuralIndexForRead`. */
+let fullStructuralLoadCount = 0;
+/** Contador de meta-load (`files: []`). Distingue retrieve sem envelope de envelope lite. */
+let structuralMetaLoadCount = 0;
+
+export function getFullStructuralLoadCount(): number {
+  return fullStructuralLoadCount;
+}
+
+export function getStructuralMetaLoadCount(): number {
+  return structuralMetaLoadCount;
+}
+
+export function resetFullStructuralLoadCount(): void {
+  fullStructuralLoadCount = 0;
+}
+
+export function resetStructuralMetaLoadCount(): void {
+  structuralMetaLoadCount = 0;
+}
+
 export function indexDbExists(rootPath: string): boolean {
   return existsSync(getIndexDbPath(rootPath));
 }
@@ -30,16 +51,26 @@ export function persistFullStructuralIndex(rootPath: string, index: StructuralIn
   }
 }
 
-export function persistStructuralIndexDelta(rootPath: string, delta: IndexDelta): void {
+export function persistStructuralIndexDelta(
+  rootPath: string,
+  delta: IndexDelta,
+  options?: {
+    resolveMeta?: (db: import("./sqlite-db.js").Database) => {
+      coverage: IndexDelta["coverage"];
+      extractionLimitations: string[];
+    };
+  },
+): void {
   const db = openIndexDb(getIndexDbPath(rootPath));
   try {
-    applyDelta(db, delta);
+    applyDelta(db, delta, options);
   } finally {
     closeIndexDb(db);
   }
 }
 
 export function loadStructuralIndexForRead(rootPath: string): StructuralIndex | null {
+  fullStructuralLoadCount += 1;
   const dbPath = getIndexDbPath(rootPath);
   if (!existsSync(dbPath)) {
     tryBootstrapIndexFromLegacyJson(rootPath);
@@ -66,6 +97,7 @@ export function loadStructuralIndexForRead(rootPath: string): StructuralIndex | 
  * tree por query alvo em vez do full-load.
  */
 export function loadStructuralMetaForRead(rootPath: string): StructuralIndex | null {
+  structuralMetaLoadCount += 1;
   const dbPath = getIndexDbPath(rootPath);
   if (!existsSync(dbPath)) {
     tryBootstrapIndexFromLegacyJson(rootPath);

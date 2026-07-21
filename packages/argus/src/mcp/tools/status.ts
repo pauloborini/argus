@@ -109,7 +109,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
 
   let structural: StructuralIndex | null = null;
   try {
-    structural = loadStructuralIndex(metadata.root_path);
+    structural = loadStructuralIndex(metadata.root_path, "lite");
   } catch (err) {
     if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
       return withMcpSurface({

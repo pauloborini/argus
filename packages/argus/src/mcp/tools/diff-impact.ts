@@ -3,7 +3,13 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { stubResponse } from "../../contracts/response-state.js";
-import type { StructuralIndex } from "../../extraction/types.js";
+import {
+  closeIndexDb,
+  openIndexDb,
+  readFileEntryByPath,
+  readLanguagesForPaths,
+} from "../../storage/sqlite-index-store.js";
+import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
 import { uniqueByKey, fileMatchesTests, normalizeRelativePath } from "./common.js";
 import type { ToolResponsePayload, DiffImpactArgs, IndexEnvelope, DiffImpactSymbol, DiffChangedHunk } from "./common.js";
 import { buildImpactResponse } from "./impact.js";
@@ -198,7 +204,7 @@ function readChangedFilesFromGit(
 }
 
 function extractChangedSymbols(
-  index: StructuralIndex,
+  cwd: string,
   changedFiles: string[],
   changedHunks: DiffChangedHunk[],
 ): DiffImpactSymbol[] {
@@ -210,28 +216,38 @@ function extractChangedSymbols(
     hunksByPath.set(hunk.path, current);
   }
   const symbols: DiffImpactSymbol[] = [];
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return [];
+  }
 
-  for (const file of index.files) {
-    if (!byPath.has(file.relative_path)) {
-      continue;
-    }
-    const hunks = hunksByPath.get(file.relative_path) ?? [];
-    for (const symbol of file.symbols) {
-      if (
-        hunks.length > 0 &&
-        !hunks.some((hunk) => {
-          const hunkEnd = hunk.start_line + hunk.line_count - 1;
-          return symbol.start_line <= hunkEnd && symbol.end_line >= hunk.start_line;
-        })
-      ) {
+  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  try {
+    for (const path of byPath) {
+      const file = readFileEntryByPath(db, path);
+      if (!file) {
         continue;
       }
-      symbols.push({
-        name: symbol.name,
-        path: file.relative_path,
-        kind: symbol.kind,
-      });
+      const hunks = hunksByPath.get(file.relative_path) ?? [];
+      for (const symbol of file.symbols) {
+        if (
+          hunks.length > 0 &&
+          !hunks.some((hunk) => {
+            const hunkEnd = hunk.start_line + hunk.line_count - 1;
+            return symbol.start_line <= hunkEnd && symbol.end_line >= hunk.start_line;
+          })
+        ) {
+          continue;
+        }
+        symbols.push({
+          name: symbol.name,
+          path: file.relative_path,
+          kind: symbol.kind,
+        });
+      }
     }
+  } finally {
+    closeIndexDb(db);
   }
 
   return uniqueByKey(symbols, (item) => `${item.path}:${item.kind ?? ""}:${item.name}`);
@@ -286,13 +302,16 @@ export function buildDiffImpactResponse(
   }
 
   const index = envelope.structuralIndex;
-  const changedSymbols = extractChangedSymbols(index, changedFiles, diffResult.changedHunks);
+  const changedSymbols = extractChangedSymbols(cwd, changedFiles, diffResult.changedHunks);
   const affectedPaths = new Set<string>(changedFiles);
   const affectedTests = new Set<string>();
   const limitations = new Set<string>();
   let unresolvedFiles = 0;
   let uncertaintyCount = 0;
   let partialCoverage = false;
+
+  const metadata = readWorkspaceMetadata(cwd);
+  const languageByPath = new Map<string, string>();
 
   for (const changedFile of changedFiles) {
     const impactPayload = buildImpactResponse(cwd, envelope, {
@@ -307,12 +326,24 @@ export function buildDiffImpactResponse(
       continue;
     }
 
-    for (const pathValue of (impactPayload.files as string[] | undefined) ?? []) {
+    const impactFiles = (impactPayload.files as string[] | undefined) ?? [];
+    if (metadata && impactFiles.length > 0) {
+      const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+      try {
+        for (const [path, language] of readLanguagesForPaths(db, impactFiles)) {
+          languageByPath.set(path, language);
+        }
+      } finally {
+        closeIndexDb(db);
+      }
+    }
+
+    for (const pathValue of impactFiles) {
       affectedPaths.add(pathValue);
       if (fileMatchesTests(pathValue)) {
         affectedTests.add(pathValue);
       }
-      const language = index.files.find((entry) => entry.relative_path === pathValue)?.language;
+      const language = languageByPath.get(pathValue);
       if (language ? index.coverage_by_language[language]?.coverage_level === "partial" : false) {
         partialCoverage = true;
       }

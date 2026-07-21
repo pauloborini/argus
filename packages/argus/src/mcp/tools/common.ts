@@ -272,8 +272,8 @@ export function loadStructuralIndex(
   rootPath: string,
   mode: StructuralLoadMode = "full",
 ): StructuralIndex | null {
-  // `lite`: meta-only (files: []) para search/files, que resolvem cobertura e
-  // tree por query alvo — evita o full-load (N+1 de símbolos/edges por arquivo).
+  // `lite`: meta-only (files: []) para tools quentes que resolvem cobertura,
+  // tree e grafo por query alvo (SQL / LazyTraceGraph) — evita full-load.
   return mode === "lite"
     ? loadStructuralMetaForRead(rootPath)
     : loadStructuralIndexForRead(rootPath);

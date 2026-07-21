@@ -130,7 +130,16 @@ export function replaceFullIndex(
   tx();
 }
 
-export function applyDelta(db: Database, delta: IndexDelta): void {
+export function applyDelta(
+  db: Database,
+  delta: IndexDelta,
+  options?: {
+    resolveMeta?: (db: Database) => {
+      coverage: Record<string, LanguageCoverage>;
+      extractionLimitations: string[];
+    };
+  },
+): void {
   const tx = db.transaction(() => {
     for (const removedPath of delta.removedPaths) {
       deleteFileByPath(db, removedPath);
@@ -149,14 +158,16 @@ export function applyDelta(db: Database, delta: IndexDelta): void {
       db.prepare("SELECT COUNT(*) AS count FROM symbols").get() as { count: number }
     ).count;
 
+    const resolved = options?.resolveMeta?.(db);
+
     writeIndexMeta(db, {
       schema_version: meta?.schema_version ?? SQLITE_SCHEMA_VERSION,
       generated_at: delta.generatedAt,
       manifest_hash: delta.manifestHash,
       file_count: fileCount,
       symbol_count: symbolCount,
-      coverage_by_language: delta.coverage,
-      extraction_limitations: delta.extractionLimitations,
+      coverage_by_language: resolved?.coverage ?? delta.coverage,
+      extraction_limitations: resolved?.extractionLimitations ?? delta.extractionLimitations,
       migration_source: delta.migrationSource ?? meta?.migration_source,
     });
   });
@@ -587,6 +598,73 @@ export function readLanguagesForPaths(db: Database, paths: string[]): Map<string
     out.set(row.relative_path, row.language);
   }
   return out;
+}
+
+/** True se o path existe na tabela files (pack/source resolution sem full-load). */
+export function filePathExistsInIndex(db: Database, relativePath: string): boolean {
+  const row = db
+    .prepare("SELECT 1 AS ok FROM files WHERE relative_path = ? LIMIT 1")
+    .get(relativePath) as { ok: number } | undefined;
+  return Boolean(row);
+}
+
+/**
+ * Agregados de cobertura a partir do SQLite (sem hidratar symbols/edges).
+ * Usado no sync delta após upsert — evita materializar o índice anterior.
+ */
+export function readCoverageAggregatesFromDb(db: Database): {
+  byLanguage: Record<string, { files_parsed: number; symbols: number }>;
+  parseErrorFileCount: number;
+} {
+  const parsedRows = db
+    .prepare(
+      `SELECT language,
+              SUM(CASE WHEN parse_errors_json = '[]' OR parse_errors_json = '' OR parse_errors_json IS NULL THEN 1 ELSE 0 END) AS files_parsed
+       FROM files
+       GROUP BY language`,
+    )
+    .all() as Array<{ language: string; files_parsed: number }>;
+
+  const symbolRows = db
+    .prepare(
+      `SELECT f.language AS language, COUNT(s.id) AS symbols
+       FROM files f
+       LEFT JOIN symbols s ON s.file_id = f.id
+       GROUP BY f.language`,
+    )
+    .all() as Array<{ language: string; symbols: number }>;
+
+  const byLanguage: Record<string, { files_parsed: number; symbols: number }> = {};
+  for (const row of parsedRows) {
+    if (row.language === "unsupported") {
+      continue;
+    }
+    byLanguage[row.language] = {
+      files_parsed: Number(row.files_parsed),
+      symbols: 0,
+    };
+  }
+  for (const row of symbolRows) {
+    if (row.language === "unsupported") {
+      continue;
+    }
+    const current = byLanguage[row.language] ?? { files_parsed: 0, symbols: 0 };
+    current.symbols = Number(row.symbols);
+    byLanguage[row.language] = current;
+  }
+
+  const parseErrorFileCount = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM files
+         WHERE parse_errors_json IS NOT NULL
+           AND parse_errors_json != '[]'
+           AND parse_errors_json != ''`,
+      )
+      .get() as { count: number }
+  ).count;
+
+  return { byLanguage, parseErrorFileCount };
 }
 
 export function searchFtsInternal(

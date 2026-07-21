@@ -3,8 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { stubResponse } from "../../contracts/response-state.js";
-import type { StructuralIndex } from "../../extraction/types.js";
-import { closeIndexDb, openIndexDb } from "../../storage/sqlite-index-store.js";
+import { closeIndexDb, filePathExistsInIndex, openIndexDb } from "../../storage/sqlite-index-store.js";
 import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
 import { getVaultDir } from "../../memory/paths.js";
 import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
@@ -416,8 +415,17 @@ function uniqueOriginRefs(refs: PackOriginRef[]): PackOriginRef[] {
   );
 }
 
-function sourceLooksLikeIndexedFile(index: StructuralIndex, source: string): boolean {
-  return index.files.some((entry) => entry.relative_path === source);
+function sourceLooksLikeIndexedFile(cwd: string, source: string): boolean {
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return false;
+  }
+  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  try {
+    return filePathExistsInIndex(db, source);
+  } finally {
+    closeIndexDb(db);
+  }
 }
 
 function buildPackSegmentsFromSource(
@@ -475,7 +483,7 @@ function buildPackSegmentsFromSource(
   }
 
   const config = getPackStyleConfig(style);
-  const mode = sourceLooksLikeIndexedFile(envelope.structuralIndex, trimmed) ? "file" : "symbol";
+  const mode = sourceLooksLikeIndexedFile(cwd, trimmed) ? "file" : "symbol";
   const payload = buildExploreResponse(cwd, envelope, {
     target: trimmed,
     mode,
