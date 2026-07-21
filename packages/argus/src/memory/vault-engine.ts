@@ -26,6 +26,7 @@ import {
   type MemoryReadFilter,
   type MemoryRetrievalChunk,
 } from "./memory-retrieval.js";
+import * as HotUpdater from "./hot-updater.js";
 import { defaultDirectCaptureV2, isLegacyV1Note, normalizeV2Metadata } from "./v2-metadata.js";
 
 const VALID_TYPES = new Set(["inbox", "decision", "meeting", "entity", "project", "reference"]);
@@ -127,15 +128,20 @@ function ftsRows(
        LIMIT ?`,
     )
     .all(escapeFts(query), ...params, limit) as Array<MemoryNoteV2Row & { rank: number; snippet: string }>;
-  return rows.map((row, index) =>
+  // Score-base a partir de BM25 (mais negativo = melhor); normaliza para (0,1].
+  // Fatores v2 reranqueiam depois — relevância lexical controlada não depende só da posição.
+  const positives = rows.map((row) => Math.max(1e-9, -row.rank));
+  const maxPositive = Math.max(...positives, 1e-9);
+  const chunks = rows.map((row, index) =>
     normalizeMemoryChunk(
       row,
-      1 / (index + 1),
+      positives[index]! / maxPositive,
       "fts-only",
       row.snippet || row.content.slice(0, 240),
       true,
     ),
   );
+  return chunks.sort((a, b) => b.score - a.score || a.note_id.localeCompare(b.note_id));
 }
 
 function readAllNoteEmbeddings(db: Database): EmbeddingRow[] {
@@ -184,7 +190,7 @@ function buildMemoryResultsByPseudoIds(
   filter: MemoryReadFilter = defaultMemoryReadFilter(),
 ): MemorySearchResult[] {
   const notes = readNotesByPseudoIds(db, ordered, filter);
-  return ordered
+  const chunks = ordered
     .map((id, index) => {
       const note = notes.get(id);
       return note
@@ -198,6 +204,7 @@ function buildMemoryResultsByPseudoIds(
         : null;
     })
     .filter((item): item is MemorySearchResult => item !== null);
+  return chunks.sort((a, b) => b.score - a.score || a.note_id.localeCompare(b.note_id));
 }
 
 async function hybridRows(
@@ -290,11 +297,46 @@ export class VaultEngine {
       "",
     ].join("\n");
     writeFileSync(notePath, finalContent, "utf-8");
-    const noteId = hashText(`${relative(getVaultDir(cwd), notePath)}\n${finalContent}`).slice(0, 16);
+    const vaultRel = relative(getVaultDir(cwd), notePath);
+    const noteId = hashText(`${vaultRel}\n${finalContent}`).slice(0, 16);
+    // Namespace import permite prova de wire parcial (spy) sem mockar o seam no retry.
+    const hot = HotUpdater.hotUpdateNoteProjection(cwd, {
+      absolutePath: notePath,
+      rawContent: finalContent,
+      vaultRelativePath: vaultRel,
+    });
+    if (!hot.ok) {
+      return {
+        note_path: vaultRel,
+        note_id: noteId,
+        fts_indexed: false,
+        embedding_status: hot.embedding_status,
+        hot_index_code: hot.code,
+        ...stubResponse("parcial", "Nota persistida; indexação quente pendente.", {
+          limitations: [
+            hot.error ?? "E_MEMORY_HOT_INDEX_FAILED",
+            "Retry idempotente: repita remember ou rode argus memory sync.",
+          ],
+        }),
+      };
+    }
+    const limitations: string[] = [];
+    if (hot.embedding_status === "pending") {
+      limitations.push("Embedding pendente; FTS disponível. Opcional: argus memory embed.");
+    }
+    if (hot.warnings.length) {
+      limitations.push(...hot.warnings);
+    }
     return {
-      note_path: relative(getVaultDir(cwd), notePath),
-      note_id: noteId,
-      ...stubResponse("sucesso", "Nota capturada no cofre de memória."),
+      note_path: vaultRel,
+      note_id: hot.note_id || noteId,
+      fts_indexed: hot.fts_indexed,
+      embedding_status: hot.embedding_status,
+      ...stubResponse(
+        "sucesso",
+        "Nota capturada e indexada no cofre de memória.",
+        limitations.length ? { limitations } : undefined,
+      ),
     };
   }
 
