@@ -18,17 +18,24 @@ import { normalizeRelativePath } from "../discovery/ignores.js";
 import { withSyncLock } from "../concurrency/sync-lock.js";
 import type { DiscoveryLimitation } from "../discovery/walk.js";
 import {
-  buildStructuralIndex,
-  updateStructuralIndexDelta,
-} from "../extraction/pipeline.js";
-import {
   IndexDbCorruptedError,
   IndexDbSchemaError,
-  loadStructuralIndexForRead,
+  indexDbExists,
   persistFullStructuralIndex,
   persistStructuralIndexDelta,
 } from "../storage/index-persistence.js";
 import {
+  closeIndexDb,
+  isIndexDbPopulated,
+  openIndexDb,
+} from "../storage/sqlite-index-store.js";
+import {
+  buildStructuralIndex,
+  computeStructuralMetaAfterDelta,
+  extractChangedStructuralFiles,
+} from "../extraction/pipeline.js";
+import {
+  getIndexDbPath,
   getManifestPath,
   requireWorkspace,
   resolveRespectGitignore,
@@ -248,9 +255,16 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
       const nextManifest = buildDiscoveryManifest(rootPath, nextFingerprints);
       writeManifestAtomic(manifestPath, nextManifest);
 
-      let previousStructural = null;
+      let previousPopulated = false;
       try {
-        previousStructural = loadStructuralIndexForRead(rootPath);
+        if (indexDbExists(rootPath)) {
+          const db = openIndexDb(getIndexDbPath(rootPath), { readonly: true });
+          try {
+            previousPopulated = isIndexDbPopulated(db);
+          } finally {
+            closeIndexDb(db);
+          }
+        }
       } catch (err) {
         if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
           console.error(err.message);
@@ -261,7 +275,7 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
 
       const viaLabel = `via ${resolved.syncedVia}`;
 
-      if (!previousStructural) {
+      if (!previousPopulated) {
         const { index, summary } = await buildStructuralIndex(nextManifest, rootPath);
         persistFullStructuralIndex(rootPath, index);
 
@@ -277,23 +291,34 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
           ...delta.changed.map((file) => file.relative_path),
         ];
         const removedPaths = delta.removed.map((file) => file.relative_path);
-        const { index, summary } = await updateStructuralIndexDelta(
+        // Delta sem materializar o índice anterior: extrai só paths mudados e
+        // recalcula coverage/limitations via agregados SQL após o upsert.
+        const { upsertedFiles, manifestHash, summary } = await extractChangedStructuralFiles(
           nextManifest,
           rootPath,
-          previousStructural,
           changedPaths,
-          removedPaths,
         );
-
-        const changedSet = new Set(changedPaths);
-        persistStructuralIndexDelta(rootPath, {
-          manifestHash: index.manifest_hash,
-          generatedAt: index.generated_at,
-          coverage: index.coverage_by_language,
-          extractionLimitations: index.extraction_limitations,
-          upsertedFiles: index.files.filter((file) => changedSet.has(file.relative_path)),
-          removedPaths,
-        });
+        const generatedAt = new Date().toISOString();
+        persistStructuralIndexDelta(
+          rootPath,
+          {
+            manifestHash,
+            generatedAt,
+            coverage: {},
+            extractionLimitations: [],
+            upsertedFiles,
+            removedPaths,
+          },
+          {
+            resolveMeta: (db) => {
+              const computed = computeStructuralMetaAfterDelta(db, nextManifest);
+              return {
+                coverage: computed.coverage,
+                extractionLimitations: computed.extractionLimitations,
+              };
+            },
+          },
+        );
 
         emitInfo(
           `Sync concluído (${viaLabel}): +${delta.added.length} / ~${delta.changed.length} / -${delta.removed.length}.`,

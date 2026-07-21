@@ -30,6 +30,14 @@ export interface MemoryNoteV2Row {
   contradiction_reason: string | null;
 }
 
+export interface MemoryRankFactors {
+  base: number;
+  confidence: number;
+  recency: number;
+  stale: number;
+  contradiction: number;
+}
+
 export interface MemoryRetrievalChunk {
   note_id: string;
   path: string;
@@ -42,10 +50,34 @@ export interface MemoryRetrievalChunk {
   scope?: string;
   source?: string;
   confidence?: string;
+  observed_at?: string;
   stale_reason?: string;
   contradiction_reason?: string;
   superseded_by?: string;
+  /** Componentes do score após fatores v2 (auditoria). */
+  rank_factors?: MemoryRankFactors;
+  /** Motivo curto suficiente para auditoria (sinais + confidence). */
+  rank_reason?: string;
 }
+
+/**
+ * Pesos default P5 do guide — centralizados, monotônicos e documentados.
+ * confirmed > inferred > presumed; stale/contradiction penalizam; recência suave com piso.
+ */
+export const MEMORY_V2_RANKING_WEIGHTS = {
+  confidence: {
+    confirmed: 1.2,
+    inferred: 1.05,
+    presumed: 1.0,
+  },
+  stale: 0.5,
+  contradiction: 0.35,
+  /** Meia-vida da recência em dias; piso evita apagar decisões antigas confirmadas. */
+  recency: {
+    halfLifeDays: 90,
+    floor: 0.7,
+  },
+} as const;
 
 export const DEFAULT_READ_SCOPES: MemoryV2ActiveScope[] = [...MEMORY_V2_ACTIVE_SCOPES];
 
@@ -115,26 +147,119 @@ export function deriveReadState(chunks: MemoryRetrievalChunk[]): "sucesso" | "pa
   return "sucesso";
 }
 
+function confidenceMultiplier(confidence: string | undefined): number {
+  const key = (confidence ?? "presumed") as keyof typeof MEMORY_V2_RANKING_WEIGHTS.confidence;
+  return MEMORY_V2_RANKING_WEIGHTS.confidence[key] ?? MEMORY_V2_RANKING_WEIGHTS.confidence.presumed;
+}
+
+function recencyMultiplier(observedAt: string | null | undefined, asOf: Date): number {
+  if (!observedAt) {
+    return MEMORY_V2_RANKING_WEIGHTS.recency.floor;
+  }
+  const observed = new Date(observedAt);
+  if (Number.isNaN(observed.getTime())) {
+    return MEMORY_V2_RANKING_WEIGHTS.recency.floor;
+  }
+  const ageMs = Math.max(0, asOf.getTime() - observed.getTime());
+  const halfLifeMs = MEMORY_V2_RANKING_WEIGHTS.recency.halfLifeDays * 24 * 60 * 60 * 1000;
+  const decay = Math.pow(0.5, ageMs / halfLifeMs);
+  return Math.max(MEMORY_V2_RANKING_WEIGHTS.recency.floor, decay);
+}
+
+/**
+ * Ajusta score-base (FTS/RRF já normalizado) pelos fatores v2.
+ * Monotônico: confirmed ≥ inferred ≥ presumed; stale/contradiction ≤ saudável.
+ */
+export function applyV2RankingFactors(
+  baseScore: number,
+  row: Pick<
+    MemoryNoteV2Row,
+    "confidence" | "observed_at" | "stale_reason" | "contradiction_reason"
+  >,
+  asOf: Date = new Date(),
+): { score: number; factors: MemoryRankFactors; rank_reason: string } {
+  const confidence = confidenceMultiplier(row.confidence);
+  const recency = recencyMultiplier(row.observed_at, asOf);
+  const stale = row.stale_reason?.trim() ? MEMORY_V2_RANKING_WEIGHTS.stale : 1;
+  const contradiction = row.contradiction_reason?.trim()
+    ? MEMORY_V2_RANKING_WEIGHTS.contradiction
+    : 1;
+  const score = baseScore * confidence * recency * stale * contradiction;
+  const parts: string[] = [row.confidence?.trim() || "presumed"];
+  if (row.stale_reason?.trim()) {
+    parts.push(`stale:${row.stale_reason.trim()}`);
+  }
+  if (row.contradiction_reason?.trim()) {
+    parts.push(`contradiction:${row.contradiction_reason.trim()}`);
+  }
+  if (recency <= MEMORY_V2_RANKING_WEIGHTS.recency.floor + 1e-9) {
+    parts.push("recency:floor");
+  } else if (recency < 0.95) {
+    parts.push("recency:decay");
+  } else {
+    parts.push("recency:fresh");
+  }
+  return {
+    score,
+    factors: { base: baseScore, confidence, recency, stale, contradiction },
+    rank_reason: parts.join(";"),
+  };
+}
+
+/** Reordena chunks pelo score v2 (após score-base). */
+export function rerankChunksWithV2Factors(
+  chunks: MemoryRetrievalChunk[],
+  asOf: Date = new Date(),
+): MemoryRetrievalChunk[] {
+  return chunks
+    .map((chunk) => {
+      const ranked = applyV2RankingFactors(
+        chunk.score,
+        {
+          confidence: chunk.confidence ?? "presumed",
+          observed_at: chunk.observed_at ?? null,
+          stale_reason: chunk.stale_reason ?? null,
+          contradiction_reason: chunk.contradiction_reason ?? null,
+        },
+        asOf,
+      );
+      return {
+        ...chunk,
+        score: Number(ranked.score.toFixed(4)),
+        rank_factors: ranked.factors,
+        rank_reason: ranked.rank_reason,
+      };
+    })
+    .sort((a, b) => b.score - a.score || a.note_id.localeCompare(b.note_id));
+}
+
 export function normalizeMemoryChunk(
   row: MemoryNoteV2Row,
   score: number,
   mechanism: MemoryMatchMechanism,
   snippet: string,
   includeContent?: boolean,
+  asOf: Date = new Date(),
 ): MemoryRetrievalChunk {
-  const enriched = enrichTemporalSignals(row, new Date());
+  const enriched = enrichTemporalSignals(row, asOf);
+  const ranked = applyV2RankingFactors(score, enriched, asOf);
   const chunk: MemoryRetrievalChunk = {
     note_id: enriched.note_id,
     path: enriched.path,
     title: enriched.title,
     type: enriched.type,
-    score: Number(score.toFixed(4)),
+    score: Number(ranked.score.toFixed(4)),
     snippet,
     mechanism,
     scope: enriched.scope,
     source: enriched.source,
     confidence: enriched.confidence,
+    rank_factors: ranked.factors,
+    rank_reason: ranked.rank_reason,
   };
+  if (enriched.observed_at) {
+    chunk.observed_at = enriched.observed_at;
+  }
   if (enriched.stale_reason) {
     chunk.stale_reason = enriched.stale_reason;
   }

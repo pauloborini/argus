@@ -58,7 +58,29 @@ describe("pack context tool", () => {
     expect(payload.reversibility).toBe("full");
   });
 
-  it("overview-first: balanced empacota assinatura sem inlinar o corpo", async () => {
+  it("AC-3.1.2 pack balanced com budget apertado preserva trecho útil e emite handle", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "entender refactor com contexto estrutural",
+      token_budget: 90,
+      style: "balanced",
+      response_format: "detailed",
+    });
+    expect(["parcial", "stale"]).toContain(payload.state);
+    expect(typeof payload.retrieve_handle).toBe("string");
+    expect(String(payload.retrieve_handle)).toMatch(/^rh_[a-f0-9]{16}$/);
+    // Trecho útil = corpo verbatim + bloco Snippet, não só scaffolding Fonte:/Fontes:.
+    const packed = String(payload.packed_context);
+    expect(packed).toContain("return 1");
+    expect(packed).toMatch(/Snippet utils\.ts:/);
+    expect(packed).toContain("calculateTotal");
+    expect(payload.reversibility).toBe("full");
+  });
+
+  it("balanced acionável: empacota trecho verbatim e respeita budget (S3)", async () => {
     const root = setupWorkspace();
     expect(await runIndex()).toBe(0);
 
@@ -70,11 +92,37 @@ describe("pack context tool", () => {
     });
     const packed = String(payload.packed_context);
     expect(packed).toContain("calculateTotal");
-    // Assinatura presente, corpo (`helper(); return 1`) ausente.
-    expect(packed).not.toContain("return 1");
+    // Balanced agora inclui corpo mínimo acionável (D4).
+    expect(packed).toContain("return 1");
+    expect(packed).toMatch(/Snippet utils\.ts:/);
+    expect((payload.origin_refs as unknown[]).length).toBeGreaterThan(0);
   });
 
-  it("overview-first: balanced corta corpos expression-bodied e inline", async () => {
+  it("brief continua sem corpo; deep preserva conteúdo ampliado (AC-3.1.3)", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    const brief = buildToolResponse("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "overview",
+      token_budget: 400,
+      style: "brief",
+    });
+    expect(String(brief.packed_context)).toContain("calculateTotal");
+    expect(String(brief.packed_context)).not.toContain("return 1");
+    expect(String(brief.packed_context)).not.toMatch(/^Snippet /m);
+
+    const deep = buildToolResponse("pack_context", root, {
+      sources: ["utils.ts"],
+      goal: "ver código",
+      token_budget: 4000,
+      style: "deep",
+    });
+    expect(String(deep.packed_context)).toContain("return 1");
+    expect(String(deep.packed_context)).toMatch(/Snippet utils\.ts:/);
+  });
+
+  it("balanced inclui corpos expression-bodied e inline úteis", async () => {
     const root = setupWorkspace();
     writeFileSync(join(root, "inline.dart"), "int load() => secret();\n", "utf-8");
     writeFileSync(join(root, "inline.py"), "def load(): return secret()\n", "utf-8");
@@ -95,12 +143,9 @@ describe("pack context tool", () => {
       sources: ["typed.ts"], goal: "assinatura", token_budget: 400, style: "balanced",
     });
 
-    expect(String(dart.packed_context)).toContain("int load()");
-    expect(String(dart.packed_context)).not.toContain("secret()");
-    expect(String(python.packed_context)).toContain("def load():");
-    expect(String(python.packed_context)).not.toContain("return secret()");
-    expect(String(typed.packed_context)).toContain("typed(): Promise<string>");
-    expect(String(typed.packed_context)).not.toContain("return Promise.resolve");
+    expect(String(dart.packed_context)).toContain("secret()");
+    expect(String(python.packed_context)).toContain("return secret()");
+    expect(String(typed.packed_context)).toContain("return Promise.resolve");
   });
 
   it("deep inlina corpo completo (escape hatch)", async () => {

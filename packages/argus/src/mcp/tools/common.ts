@@ -78,7 +78,8 @@ export const WORKSPACE_MISSING =
 export const STRUCTURAL_INDEX_MISSING =
   "E_INDEX_MISSING: Manifest disponível; índice estrutural ausente — execute argus index ou argus sync.";
 
-// Códigos de staleness_hint — prefixam a prosa em `detailed`; `concise` já dropa o campo.
+// Códigos de staleness_hint — prefixam a prosa em `detailed`; `concise` dropa o
+// campo (não são E_*/W_*). Sinais acionáveis concise: state + códigos E_*/W_* + domínio.
 export const STALE_RUN_SYNC = "STALE_RUN_SYNC";
 export const STALE_RUN_INDEX = "STALE_RUN_INDEX";
 export const STALE_RUN_EMBED = "STALE_RUN_EMBED";
@@ -137,9 +138,12 @@ export interface ExploreSnippetRef {
   start_line: number;
   end_line: number;
   symbol?: string;
-  // Overview-first: assinatura (linha de declaração) sem o corpo. Deixa o
-  // agente ver a forma do símbolo e decidir se vale expandir via FS/retrieve.
+  // Assinatura (linha de declaração) sem o corpo — sempre presente quando legível.
   signature?: string;
+  // Trecho verbatim limitado (balanced/deep). Ausente em brief.
+  body?: string;
+  // true quando o corpo do símbolo foi cortado pelos caps do style.
+  truncated?: boolean;
 }
 
 export interface ExploreRef {
@@ -269,8 +273,8 @@ export function loadStructuralIndex(
   rootPath: string,
   mode: StructuralLoadMode = "full",
 ): StructuralIndex | null {
-  // `lite`: meta-only (files: []) para search/files, que resolvem cobertura e
-  // tree por query alvo — evita o full-load (N+1 de símbolos/edges por arquivo).
+  // `lite`: meta-only (files: []) para tools quentes que resolvem cobertura,
+  // tree e grafo por query alvo (SQL / LazyTraceGraph) — evita full-load.
   return mode === "lite"
     ? loadStructuralMetaForRead(rootPath)
     : loadStructuralIndexForRead(rootPath);

@@ -1,7 +1,16 @@
-// Tool `explore`: contexto composto (callers/callees/snippets).
+// Tool `explore`: contexto composto (callers/callees/snippets) via SQL lazy.
 import { stubResponse } from "../../contracts/response-state.js";
-import type { StructuralIndex, ExtractedSymbol, FileStructuralEntry } from "../../extraction/types.js";
-import { closeIndexDb, openIndexDb, searchFtsInternal } from "../../storage/sqlite-index-store.js";
+import type { ExtractedSymbol, FileStructuralEntry } from "../../extraction/types.js";
+import type { Database } from "../../storage/sqlite-db.js";
+import {
+  closeIndexDb,
+  openIndexDb,
+  readEdgesByTargetName,
+  readFileEntryByPath,
+  readFilePathMatches,
+  readImportersMap,
+  searchFtsInternal,
+} from "../../storage/sqlite-index-store.js";
 import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
 import { existsSync } from "node:fs";
 import { VaultEngine } from "../../memory/vault-engine.js";
@@ -9,27 +18,46 @@ import { getMemoryDbPath } from "../../memory/paths.js";
 import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
 import { queryMemoryGraphForExplore } from "../../memory/memory-graph-query.js";
 import { WORKSPACE_MISSING, uniqueByKey, fileMatchesTests } from "./common.js";
-import type { ToolResponsePayload, ExploreArgs, IndexEnvelope, ExploreSnippetRef, ExploreRef } from "./common.js";
-import { readSymbolSignature } from "./pack.js";
+import type {
+  ToolResponsePayload,
+  ExploreArgs,
+  IndexEnvelope,
+  ExploreRef,
+  PackSegment,
+} from "./common.js";
+import {
+  buildActionableSnippet,
+  formatSnippetBlock,
+  readFullSymbolBody,
+  readSymbolSignature,
+  type BuiltSnippet,
+} from "./snippet-builder.js";
+import {
+  createRetrieveHandleId,
+  writeStoredPackHandle,
+} from "./retrieve-handle-store.js";
 
 function buildSnippetRefs(
   cwd: string,
   entry: FileStructuralEntry,
   symbols: ExtractedSymbol[],
   limit: number,
-): ExploreSnippetRef[] {
-  return symbols.slice(0, limit).map((symbol) => ({
-    path: entry.relative_path,
-    start_line: symbol.start_line,
-    end_line: symbol.end_line,
-    symbol: symbol.name,
-    signature:
-      readSymbolSignature(cwd, entry.relative_path, symbol.start_line, symbol.end_line) ?? undefined,
-  }));
+): BuiltSnippet[] {
+  // Explore default = balanced acionável (trecho verbatim + signature).
+  return symbols.slice(0, limit).map((symbol) =>
+    buildActionableSnippet(
+      cwd,
+      entry.relative_path,
+      symbol.start_line,
+      symbol.end_line,
+      symbol.name,
+      "balanced",
+    ),
+  );
 }
 
 function collectFileRelevantFiles(
-  index: StructuralIndex,
+  db: Database,
   entry: FileStructuralEntry,
   includeTests: boolean,
   budget: number,
@@ -47,26 +75,23 @@ function collectFileRelevantFiles(
     }
   }
 
-  for (const candidate of index.files) {
-    if (candidate.relative_path === entry.relative_path) {
+  // Scan leve de imports_json (sem symbols/edges) — não é full-load estrutural.
+  const importers = readImportersMap(db).get(entry.relative_path) ?? [];
+  for (const importerPath of importers) {
+    if (!includeTests && fileMatchesTests(importerPath)) {
       continue;
     }
-    if (!includeTests && fileMatchesTests(candidate.relative_path)) {
-      continue;
-    }
-    if (candidate.imports.some((item) => item.resolved_path === entry.relative_path)) {
-      refs.push({
-        path: candidate.relative_path,
-        reason: "importer_file",
-      });
-    }
+    refs.push({
+      path: importerPath,
+      reason: "importer_file",
+    });
   }
 
   return uniqueByKey(refs, (item) => `${item.path}:${item.reason ?? ""}`).slice(0, budget);
 }
 
 function collectCallersAndCallees(
-  index: StructuralIndex,
+  db: Database,
   entry: FileStructuralEntry,
   targetSymbol: ExtractedSymbol | null,
   includeTests: boolean,
@@ -88,23 +113,22 @@ function collectCallersAndCallees(
   }
 
   if (targetName) {
-    for (const candidate of index.files) {
-      if (!includeTests && fileMatchesTests(candidate.relative_path)) {
+    for (const row of readEdgesByTargetName(db, targetName)) {
+      if (row.kind !== "calls") {
         continue;
       }
-      for (const edge of candidate.edges) {
-        if (edge.kind === "calls" && edge.to === targetName) {
-          callers.push({
-            name: targetName,
-            path: candidate.relative_path,
-            kind: "calls",
-            reason:
-              candidate.relative_path === entry.relative_path
-                ? "same_file_call_match"
-                : "cross_file_call_match",
-          });
-        }
+      if (!includeTests && fileMatchesTests(row.relative_path)) {
+        continue;
       }
+      callers.push({
+        name: targetName,
+        path: row.relative_path,
+        kind: "calls",
+        reason:
+          row.relative_path === entry.relative_path
+            ? "same_file_call_match"
+            : "cross_file_call_match",
+      });
     }
   }
 
@@ -121,30 +145,28 @@ function collectCallersAndCallees(
 }
 
 function selectFileTarget(
-  index: StructuralIndex,
+  db: Database,
   target: string,
   includeTests: boolean,
 ): { entry: FileStructuralEntry | null; candidates: ExploreRef[] } {
   const normalized = target.trim().toLowerCase();
-  const exact = index.files.filter(
-    (file) =>
-      file.relative_path.toLowerCase() === normalized &&
-      (includeTests || !fileMatchesTests(file.relative_path)),
+  const matches = readFilePathMatches(db, normalized);
+  const exactPaths = matches.exact.filter(
+    (path) => includeTests || !fileMatchesTests(path),
   );
-  if (exact.length === 1) {
-    return { entry: exact[0]!, candidates: [] };
+  if (exactPaths.length === 1) {
+    return { entry: readFileEntryByPath(db, exactPaths[0]!), candidates: [] };
   }
-  const partial = index.files
-    .filter(
-      (file) =>
-        file.relative_path.toLowerCase().includes(normalized) &&
-        (includeTests || !fileMatchesTests(file.relative_path)),
-    )
-    .sort((a, b) => a.relative_path.localeCompare(b.relative_path));
+  const partialPaths = matches.partial.filter(
+    (path) => includeTests || !fileMatchesTests(path),
+  );
+  if (partialPaths.length === 1) {
+    return { entry: readFileEntryByPath(db, partialPaths[0]!), candidates: [] };
+  }
   return {
-    entry: partial.length === 1 ? partial[0]! : null,
-    candidates: partial.slice(0, 10).map((file) => ({
-      path: file.relative_path,
+    entry: null,
+    candidates: partialPaths.slice(0, 10).map((path) => ({
+      path,
       reason: "file_match",
     })),
   };
@@ -290,33 +312,38 @@ export function buildExploreResponse(
   let targetSymbol: ExtractedSymbol | null = null;
   let ambiguityCandidates: ExploreRef[] = [];
 
-  if (mode === "file") {
-    const selection = selectFileTarget(index, target, includeTests);
-    entry = selection.entry;
-    ambiguityCandidates = selection.candidates;
-  } else {
-    const metadata = readWorkspaceMetadata(cwd);
-    if (!metadata) {
-      return {
-        summary: "",
-        central_symbols: [],
-        relevant_files: [],
-        imports: [],
-        callers: [],
-        callees: [],
-        snippets: [],
-        suggested_next_action: "",
-        ...stubResponse("falha", WORKSPACE_MISSING),
-      };
-    }
-    const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
-    try {
+  const metadata = readWorkspaceMetadata(cwd);
+  if (!metadata) {
+    return {
+      summary: "",
+      central_symbols: [],
+      relevant_files: [],
+      imports: [],
+      callers: [],
+      callees: [],
+      snippets: [],
+      suggested_next_action: "",
+      ...stubResponse("falha", WORKSPACE_MISSING),
+    };
+  }
+
+  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  try {
+    if (mode === "file") {
+      const selection = selectFileTarget(db, target, includeTests);
+      entry = selection.entry;
+      ambiguityCandidates = selection.candidates;
+    } else {
       const hits = searchFtsInternal(db, target, budget);
       const exactHits = hits.filter((hit) => hit.name.toLowerCase() === target.toLowerCase());
       if (mode === "topic") {
-        const topicFiles = hits
-          .map((hit) => index.files.find((file) => file.relative_path === hit.relative_path))
-          .filter((file): file is FileStructuralEntry => Boolean(file));
+        const topicFiles: FileStructuralEntry[] = [];
+        for (const hit of hits) {
+          const file = readFileEntryByPath(db, hit.relative_path);
+          if (file) {
+            topicFiles.push(file);
+          }
+        }
         const uniqueFiles = uniqueByKey(topicFiles, (file) => file.relative_path);
         if (uniqueFiles.length === 1) {
           entry = uniqueFiles[0]!;
@@ -328,7 +355,7 @@ export function buildExploreResponse(
         }
       } else if (exactHits.length === 1) {
         const hit = exactHits[0]!;
-        entry = index.files.find((file) => file.relative_path === hit.relative_path) ?? null;
+        entry = readFileEntryByPath(db, hit.relative_path);
         targetSymbol = entry?.symbols.find((symbol) => symbol.name === hit.name) ?? null;
       } else if (exactHits.length > 1) {
         ambiguityCandidates = exactHits.slice(0, 10).map((hit) => ({
@@ -339,7 +366,7 @@ export function buildExploreResponse(
         }));
       } else if (hits.length === 1) {
         const hit = hits[0]!;
-        entry = index.files.find((file) => file.relative_path === hit.relative_path) ?? null;
+        entry = readFileEntryByPath(db, hit.relative_path);
         targetSymbol = entry?.symbols.find((symbol) => symbol.name === hit.name) ?? null;
       } else if (hits.length > 1) {
         ambiguityCandidates = hits.slice(0, 10).map((hit) => ({
@@ -349,102 +376,166 @@ export function buildExploreResponse(
           reason: "fts_candidate",
         }));
       }
-    } finally {
-      closeIndexDb(db);
     }
-  }
 
-  if (!entry) {
-    const state = ambiguityCandidates.length > 1 ? "ambigua" : "falha";
+    if (!entry) {
+      const state = ambiguityCandidates.length > 1 ? "ambigua" : "falha";
+      return {
+        summary: "",
+        central_symbols: [],
+        relevant_files: [],
+        imports: [],
+        callers: [],
+        callees: [],
+        snippets: [],
+        suggested_next_action:
+          ambiguityCandidates.length > 1
+            ? "Refine a query com path, nome exato ou use `argus search` para desambiguar."
+            : "Use `argus search` ou `argus files` para localizar um alvo indexado válido.",
+        candidates: ambiguityCandidates,
+        ...stubResponse(
+          state,
+          ambiguityCandidates.length > 1
+            ? "Múltiplos alvos possíveis para explore; refine o target."
+            : "E_INSUFFICIENT_EVIDENCE: Alvo não resolvido no índice atual.",
+          {
+            limitations:
+              state === "ambigua"
+                ? ["Explore v1 exige um alvo resolvido de forma suficientemente específica."]
+                : undefined,
+            staleness_hint: envelope.staleness_hint,
+          },
+        ),
+      };
+    }
+
+    const centralSymbolPool = targetSymbol
+      ? [targetSymbol, ...entry.symbols.filter((symbol) => symbol.name !== targetSymbol!.name)]
+      : entry.symbols;
+    const centralSymbols = centralSymbolPool.slice(0, Math.max(1, Math.min(args?.depth ?? 3, 5)));
+    const relevantFiles = collectFileRelevantFiles(db, entry, includeTests, budget);
+    const imports = entry.imports.slice(0, budget);
+    const { callers, callees } = collectCallersAndCallees(db, entry, targetSymbol, includeTests, budget);
+    const snippets = buildSnippetRefs(cwd, entry, centralSymbols, budget);
+
+    const partialCoverage = index.coverage_by_language[entry.language]?.coverage_level === "partial";
+    const state =
+      envelope.state === "stale"
+        ? "stale"
+        : partialCoverage || mode === "topic"
+          ? "parcial"
+          : "sucesso";
+    const limitations = [
+      ...(envelope.limitations ?? []),
+      ...(partialCoverage
+        ? [`Cobertura ${entry.language} é parcial para explore v1; callers/callees podem estar incompletos.`]
+        : []),
+      ...(targetSymbol
+        ? ["Chamadas sem import resolvido podem degradar para correspondência global por nome."]
+        : ["Exploração de arquivo combina símbolos, imports e relações estruturais indexadas."]),
+    ];
+
+    const targetLabel = targetSymbol ? `Símbolo ${targetSymbol.name}` : `Arquivo ${entry.relative_path}`;
+    const memoryRefs = findMemoryRefs(cwd, target, mode, entry.relative_path);
+
+    const truncatedSnippets = snippets.filter((snippet) => snippet.truncated === true);
+    let retrieveHandle: string | undefined;
+    if (truncatedSnippets.length > 0) {
+      const segments: PackSegment[] = [];
+      for (const snippet of truncatedSnippets) {
+        const fullBody =
+          readFullSymbolBody(cwd, snippet.path, snippet.start_line, snippet.end_line) ??
+          snippet.body ??
+          "";
+        if (!fullBody.trim()) {
+          continue;
+        }
+        const recoverable = {
+          ...snippet,
+          body: fullBody,
+          truncated: false,
+        };
+        segments.push({
+          ref: snippet.symbol ?? snippet.path,
+          text: formatSnippetBlock(recoverable, "deep"),
+          originRefs: [
+            {
+              ref: target,
+              path: snippet.path,
+              start_line: snippet.start_line,
+              end_line: snippet.end_line,
+              symbol: snippet.symbol,
+            },
+          ],
+        });
+      }
+
+      if (segments.length > 0) {
+        retrieveHandle = createRetrieveHandleId("rh");
+        const stored = writeStoredPackHandle(cwd, {
+          handle: retrieveHandle,
+          created_at: new Date().toISOString(),
+          goal: `explore:${target}`,
+          style: "balanced",
+          token_budget: 0,
+          manifest_hash: index.manifest_hash ?? null,
+          schema_version: envelope.schema_version,
+          segments,
+        });
+        if (stored === "none") {
+          retrieveHandle = undefined;
+          limitations.push(
+            "Truncamento detectado, mas storage do retrieve_handle ficou indisponível.",
+          );
+        } else {
+          limitations.push(
+            "Snippet(s) truncados pelos caps balanced; use retrieve com o retrieve_handle para o corpo completo.",
+          );
+        }
+      }
+    }
+
+    const exploreState =
+      retrieveHandle && state === "sucesso" ? "parcial" : state;
+
+    const suggestedNextAction = retrieveHandle
+      ? `Use \`retrieve\` com handle ${retrieveHandle} para reidratar o corpo completo, ou \`pack_context\` para empacotar fontes.`
+      : "Use `pack_context` para empacotar este alvo e fontes relacionadas sob budget.";
+
     return {
-      summary: "",
-      central_symbols: [],
-      relevant_files: [],
-      imports: [],
-      callers: [],
-      callees: [],
-      snippets: [],
-      suggested_next_action:
-        ambiguityCandidates.length > 1
-          ? "Refine a query com path, nome exato ou use `argus search` para desambiguar."
-          : "Use `argus search` ou `argus files` para localizar um alvo indexado válido.",
-      candidates: ambiguityCandidates,
-      ...stubResponse(
-        state,
-        ambiguityCandidates.length > 1
-          ? "Múltiplos alvos possíveis para explore; refine o target."
-          : "E_INSUFFICIENT_EVIDENCE: Alvo não resolvido no índice atual.",
-        {
-          limitations:
-            state === "ambigua" ? ["Explore v1 exige um alvo resolvido de forma suficientemente específica."] : undefined,
-          staleness_hint: envelope.staleness_hint,
-        },
+      summary: buildExploreSummary(
+        targetLabel,
+        entry,
+        centralSymbols,
+        imports.length,
+        callers.length,
+        callees.length,
       ),
+      central_symbols: centralSymbols.map((symbol) => ({
+        name: symbol.name,
+        kind: symbol.kind,
+        path: entry!.relative_path,
+        start_line: symbol.start_line,
+        end_line: symbol.end_line,
+        exported: symbol.exported ?? false,
+        signature:
+          readSymbolSignature(cwd, entry!.relative_path, symbol.start_line, symbol.end_line) ??
+          undefined,
+      })),
+      relevant_files: relevantFiles,
+      imports,
+      callers,
+      callees,
+      snippets,
+      memory_refs: memoryRefs,
+      ...(retrieveHandle ? { retrieve_handle: retrieveHandle } : {}),
+      suggested_next_action: suggestedNextAction,
+      ...stubResponse(exploreState, "Exploração estrutural composta concluída.", {
+        limitations,
+        staleness_hint: envelope.staleness_hint,
+      }),
     };
+  } finally {
+    closeIndexDb(db);
   }
-
-  const centralSymbolPool = targetSymbol
-    ? [targetSymbol, ...entry.symbols.filter((symbol) => symbol.name !== targetSymbol.name)]
-    : entry.symbols;
-  const centralSymbols = centralSymbolPool.slice(0, Math.max(1, Math.min(args?.depth ?? 3, 5)));
-  const relevantFiles = collectFileRelevantFiles(index, entry, includeTests, budget);
-  const imports = entry.imports.slice(0, budget);
-  const { callers, callees } = collectCallersAndCallees(index, entry, targetSymbol, includeTests, budget);
-  const snippets = buildSnippetRefs(cwd, entry, centralSymbols, budget);
-
-  const partialCoverage = index.coverage_by_language[entry.language]?.coverage_level === "partial";
-  const state =
-    envelope.state === "stale"
-      ? "stale"
-      : partialCoverage || mode === "topic"
-        ? "parcial"
-        : "sucesso";
-  const limitations = [
-    ...(envelope.limitations ?? []),
-    ...(partialCoverage
-      ? [`Cobertura ${entry.language} é parcial para explore v1; callers/callees podem estar incompletos.`]
-      : []),
-    ...(targetSymbol
-      ? ["Chamadas sem import resolvido podem degradar para correspondência global por nome."]
-      : ["Exploração de arquivo combina símbolos, imports e relações estruturais indexadas."]),
-  ];
-
-  const targetLabel = targetSymbol ? `Símbolo ${targetSymbol.name}` : `Arquivo ${entry.relative_path}`;
-  const memoryRefs = findMemoryRefs(cwd, target, mode, entry.relative_path);
-
-  return {
-    summary: buildExploreSummary(
-      targetLabel,
-      entry,
-      centralSymbols,
-      imports.length,
-      callers.length,
-      callees.length,
-    ),
-    central_symbols: centralSymbols.map((symbol) => ({
-      name: symbol.name,
-      kind: symbol.kind,
-      path: entry!.relative_path,
-      start_line: symbol.start_line,
-      end_line: symbol.end_line,
-      exported: symbol.exported ?? false,
-      // Overview-first: forma do símbolo sem o corpo (body-on-demand via FS).
-      signature:
-        readSymbolSignature(cwd, entry!.relative_path, symbol.start_line, symbol.end_line) ??
-        undefined,
-    })),
-    relevant_files: relevantFiles,
-    imports,
-    callers,
-    callees,
-    snippets,
-    memory_refs: memoryRefs,
-    suggested_next_action: targetSymbol
-      ? "Use `trace` para fluxo ou `impact` para blast radius do símbolo."
-      : "Refine para um símbolo com `search` se precisar entendimento mais específico dentro do arquivo.",
-    ...stubResponse(state, "Exploração estrutural composta concluída.", {
-      limitations,
-      staleness_hint: envelope.staleness_hint,
-    }),
-  };
 }

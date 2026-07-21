@@ -1,0 +1,124 @@
+{
+  "provenance": {
+    "id": "homologate-agent-v2",
+    "captured": "2026-07-21",
+    "command": "npm exec --workspace=@owerride/argus -- vitest run tests/homologate-agent.test.ts",
+    "runtime_version": "2.1.2",
+    "seam": "H6 Client+Server InMemoryTransport → explore/retrieve/remember/recall/status",
+    "level": "ancorada + golden replay (jornada MCP in-process; NÃO mede churn LLM Read/Grep)",
+    "corpora": [
+      {
+        "id": "corpus-small",
+        "size": "small",
+        "path": "packages/argus/tests/fixtures/homologation/corpus-small"
+      },
+      {
+        "id": "corpus-medium",
+        "size": "medium",
+        "path": "packages/argus/tests/fixtures/homologation/corpus-medium"
+      },
+      {
+        "id": "corpus-stress",
+        "size": "stress",
+        "path": "packages/argus/tests/fixtures/homologation/corpus-stress"
+      }
+    ],
+    "notes": "S8v2/P3: corpus-stress força símbolo > caps balanced → truncate→retrieve com needle no corpo. ListTools default inclui remember (5). remember→recall sem memory sync. INV-H6: prova = jornada MCP, não agent-facing LLM churn."
+  },
+  "corpora": {
+    "corpus-small": {
+      "listed_tools": [
+        "explore",
+        "pack_context",
+        "recall",
+        "remember",
+        "status"
+      ],
+      "listed_count": 5,
+      "tool_sequence": [
+        "explore",
+        "remember",
+        "recall",
+        "status"
+      ],
+      "explore_state": "sucesso",
+      "explore_truncated": false,
+      "explore_actionable": true,
+      "explore_snippet_body": "export function calculateTotal(a: number, b: number): number {\n  return helper() + a + b;\n}",
+      "retrieve_used": false,
+      "needle_in_snippet": true,
+      "needle_in_retrieve": false,
+      "remember_state": "sucesso",
+      "recall_hit": true,
+      "sync_called": false,
+      "status_initialized": true,
+      "status_mcp_slim": true,
+      "agent_rules_version": 2,
+      "full_structural_load_count": 0,
+      "stdout_write_count": 0
+    },
+    "corpus-medium": {
+      "listed_tools": [
+        "explore",
+        "pack_context",
+        "recall",
+        "remember",
+        "status"
+      ],
+      "listed_count": 5,
+      "tool_sequence": [
+        "explore",
+        "remember",
+        "recall",
+        "status"
+      ],
+      "explore_state": "sucesso",
+      "explore_truncated": false,
+      "explore_actionable": true,
+      "explore_snippet_body": "export function placeOrder(sku: string, qty: number): number {\n  const subtotal = productTotal(sku, qty);\n  return calculateInvoice(subtotal);\n}\nconst subtotal = productTotal(sku, qty);",
+      "retrieve_used": false,
+      "needle_in_snippet": true,
+      "needle_in_retrieve": false,
+      "remember_state": "sucesso",
+      "recall_hit": true,
+      "sync_called": false,
+      "status_initialized": true,
+      "status_mcp_slim": true,
+      "agent_rules_version": 2,
+      "full_structural_load_count": 0,
+      "stdout_write_count": 0
+    },
+    "corpus-stress": {
+      "listed_tools": [
+        "explore",
+        "pack_context",
+        "recall",
+        "remember",
+        "status"
+      ],
+      "listed_count": 5,
+      "tool_sequence": [
+        "explore",
+        "retrieve",
+        "remember",
+        "recall",
+        "status"
+      ],
+      "explore_state": "parcial",
+      "explore_truncated": true,
+      "explore_actionable": true,
+      "explore_snippet_body": "export function largeHardeningSymbol(): string {\n  return [\n    \"pad-01\",\n    \"pad-02\",\n    \"pad-03\",\n    \"pad-04\",\n    \"pad-05\",\n    \"pad-06\",\n    \"pad-07\",\n    \"pad-08\",\n    \"pad-09\",\n    \"pad-10\",\n    \"pad-11\",\n    \"pad-12\",\n    \"pad-13\",\n    \"pad-14\",",
+      "retrieve_used": true,
+      "needle_in_snippet": false,
+      "needle_in_retrieve": true,
+      "remember_state": "sucesso",
+      "recall_hit": true,
+      "sync_called": false,
+      "status_initialized": true,
+      "status_mcp_slim": true,
+      "agent_rules_version": 2,
+      "full_structural_load_count": 0,
+      "stdout_write_count": 0
+    }
+  }
+}

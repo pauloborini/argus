@@ -3,6 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
+import {
+  ARGUS_MCP_TOOLS_ENV,
+  DEFAULT_LISTED_MCP_TOOLS,
+  MCP_TOOL_NAMES,
+} from "../src/mcp/tool-registry.js";
 import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { SQLITE_SCHEMA_VERSION } from "../src/storage/sqlite-prepared.js";
 import { getIndexDbPath, initWorkspace } from "../src/workspace/workspace.js";
@@ -39,6 +44,36 @@ describe("status stub e staleness", () => {
     expect(payload.staleness).toBe("unknown");
     expect(payload.index_version).toBeNull();
     expect(payload.storage_backend).toBeNull();
+  });
+
+  it("AC-1.2.2 status relata default slim e forma de restaurar all", () => {
+    const previous = process.env[ARGUS_MCP_TOOLS_ENV];
+    delete process.env[ARGUS_MCP_TOOLS_ENV];
+    try {
+      const root = setupWorkspace();
+      const payload = buildToolResponse("status", root);
+      const surface = payload.mcp_surface as {
+        slim: boolean;
+        mode: string;
+        listed_tools: string[];
+        listed_count: number;
+        registered_count: number;
+        restore_all: string;
+      };
+      expect(surface).toBeTruthy();
+      expect(surface.slim).toBe(true);
+      expect(surface.mode).toBe("default");
+      expect(surface.listed_tools).toEqual([...DEFAULT_LISTED_MCP_TOOLS]);
+      expect(surface.listed_count).toBe(DEFAULT_LISTED_MCP_TOOLS.length);
+      expect(surface.registered_count).toBe(MCP_TOOL_NAMES.length);
+      expect(surface.restore_all).toBe(`${ARGUS_MCP_TOOLS_ENV}=all`);
+    } finally {
+      if (previous === undefined) {
+        delete process.env[ARGUS_MCP_TOOLS_ENV];
+      } else {
+        process.env[ARGUS_MCP_TOOLS_ENV] = previous;
+      }
+    }
   });
 
   it("status rejeita path fora do workspace atual", () => {

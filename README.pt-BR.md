@@ -135,9 +135,23 @@ Para fiar à mão, aponte seu agente ou IDE para o servidor MCP stdio:
 }
 ```
 
-O servidor expõe doze tools: `search`, `explore`, `trace`, `impact`,
-`diff_impact`, `files`, `pack_context`, `retrieve`, `status` e
-`semantic_search`, além de `remember` e `recall` para memória. Todas leem/escrevem apenas estado local.
+**ListTools (slim por default):** só cinco tools são anunciadas —
+`explore`, `pack_context`, `recall`, `remember`, `status` — o path feliz do agente.
+As **doze** tools registradas continuam invocáveis via CallTool / CLI
+(`search`, `trace`, `impact`, `diff_impact`, `files`, `retrieve`,
+`semantic_search`, além das cinco listadas). Override de
+descoberta: `ARGUS_MCP_TOOLS=all` (ou CSV); mudar a env exige **restart** do
+MCP (hosts costumam cachear ListTools). Quebra suave: hosts que assumiam
+doze tools listadas precisam reiniciar após o upgrade.
+
+`explore` / `pack_context` no estilo **balanced** devolvem trechos verbatim
+acionáveis (não só assinatura). Quando o snippet é truncado pelos caps balanced,
+`explore` emite `retrieve_handle` para CallTool `retrieve` reidratar o corpo
+completo sem o host ler o arquivo. `remember` faz índice quente (FTS; embed
+quando disponível) no cofre local para `recall` achar o fato na mesma sessão —
+**não** rode `memory sync` após remember (sync é rebuild destrutivo, não retry
+do hot path). Após mudar tools listadas ou agent-rules, rode
+`argus install --refresh` e reinicie o host MCP.
 
 ---
 
@@ -217,8 +231,8 @@ Gates de release no monorepo (sem SLA de performance — valores orientativos):
 | Comando | Função |
 |---|---|
 | `npm run validate` | typecheck + testes + lint + build |
-| `npm run smoke:package` | tarball instalável + MCP 12 tools |
-| `npm run homologate` | sondas em ≥2 repos locais (`ARGUS_HOMOLOGATION_REPOS`) |
+| `npm run smoke:package` | tarball instalável + MCP ListTools slim (5) + CallTool unlisted |
+| `npm run homologate` | ≥2 corpora (fixtures por default) + golden S8v2 jornada MCP (`homologate-agent-v2`) |
 | `npm run release:check` | consistência de versão |
 | `npm run release:eval` | evidência agregada memória/privacidade/performance com veredito bloqueante → `.argus/release-evaluation/latest.json` |
 

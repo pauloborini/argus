@@ -17,7 +17,13 @@ import { createMcpServer } from "../src/mcp/server.js";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { runSync } from "../src/commands/sync.js";
 import { runMarkDirty } from "../src/commands/mark-dirty.js";
-import { runAgentRulesInstall, runAgentRulesUninstall } from "../src/commands/agent-rules.js";
+import { runAgentRulesInstall, runAgentRulesUninstall, parseAgentRulesVersion, AGENT_RULES_VERSION, BLOCK_BEGIN, buildBlock } from "../src/commands/agent-rules.js";
+import {
+  ARGUS_NO_INSTALL_REFRESH_ENV,
+  runInstallRefresh,
+} from "../src/commands/install.js";
+import { MCP_SERVER_KEY } from "../src/install/mcp-hosts.js";
+import { DEFAULT_LISTED_MCP_TOOLS } from "../src/mcp/tool-registry.js";
 import { runHookInstall, runHookUninstall } from "../src/commands/hooks.js";
 import {
   clearDirtyFlag,
@@ -354,20 +360,58 @@ describe("S28 — sync de baixo atrito", () => {
   });
 
   describe("agent-rules", () => {
-    it("cria CLAUDE.md/AGENTS.md e é idempotente", () => {
+    it("AC-2.1.1: bloco gerado recomenda path feliz alinhado ao ListTools slim", () => {
       const root = useWorkspace();
       expect(runAgentRulesInstall(root)).toBe(0);
-      const claude1 = readFileSync(join(root, "CLAUDE.md"), "utf-8");
-      expect(claude1).toContain("## Argus");
-      expect(existsSync(join(root, "AGENTS.md"))).toBe(true);
-      // Reinstalar não duplica o bloco.
-      expect(runAgentRulesInstall(root)).toBe(0);
-      const claude2 = readFileSync(join(root, "CLAUDE.md"), "utf-8");
-      const occurrences = claude2.split(">>> argus >>>").length - 1;
-      expect(occurrences).toBe(1);
+      const claude = readFileSync(join(root, "CLAUDE.md"), "utf-8");
+      expect(parseAgentRulesVersion(claude)).toBe(AGENT_RULES_VERSION);
+      for (const tool of DEFAULT_LISTED_MCP_TOOLS) {
+        expect(claude).toContain(`\`${tool}\``);
+      }
+      expect(claude).toContain("explore");
+      expect(claude).toContain("pack_context");
+      expect(claude).toContain("recall");
+      expect(claude).toContain("remember");
+      expect(claude).toContain("status");
+      expect(claude).toContain("argus explore");
+      expect(claude).toContain("argus pack-context");
+      expect(claude).toContain("argus memory search");
+      expect(claude).toContain("argus memory remember");
+      expect(claude).toContain("antes de inventar regra");
+      expect(claude).toContain("ao fechar uma decisão");
+      // Path feliz ≠ menu das 12: search não é primeira recomendação operacional.
+      expect(claude).toMatch(/1\.\s+`explore`/);
+      expect(claude).toMatch(/4\.\s+`remember`/);
+      // remember listed: não deve aparecer só como "avançada".
+      expect(claude).not.toMatch(/Tools avançadas[\s\S]*`remember`/);
     });
 
-    it("preserva conteúdo pré-existente do usuário", () => {
+    it("AC-2.1.2: install repetido não duplica e preserva bytes fora dos marcadores", () => {
+      const root = useWorkspace();
+      const marker = "USER_UNIQUE_BYTES_αβγ_§42\n";
+      const prefix = `# Meu projeto\n\n${marker}Regras minhas.\n`;
+      const suffix = "\n# APÓS_BLOCO_UNIQUE_ω\nnotas do usuário\n";
+      // Prefixo sem bloco; 1ª install anexa. Em seguida injetamos sufixo após o
+      // bloco para provar preservação byte-a-byte dos dois lados (antes/depois).
+      writeFileSync(join(root, "CLAUDE.md"), prefix, "utf-8");
+      expect(runAgentRulesInstall(root)).toBe(0);
+      const mid = readFileSync(join(root, "CLAUDE.md"), "utf-8");
+      expect(mid.startsWith(prefix)).toBe(true);
+      expect(mid.split(BLOCK_BEGIN).length - 1).toBe(1);
+      writeFileSync(join(root, "CLAUDE.md"), `${mid.trimEnd()}${suffix}`, "utf-8");
+      const withSuffix = readFileSync(join(root, "CLAUDE.md"), "utf-8");
+      expect(withSuffix.endsWith(suffix)).toBe(true);
+
+      expect(runAgentRulesInstall(root)).toBe(0);
+      const afterSecond = readFileSync(join(root, "CLAUDE.md"), "utf-8");
+      expect(afterSecond).toBe(withSuffix);
+      expect(afterSecond.startsWith(prefix)).toBe(true);
+      expect(afterSecond.endsWith(suffix)).toBe(true);
+      expect(afterSecond.split(">>> argus >>>").length - 1).toBe(1);
+      expect(existsSync(join(root, "AGENTS.md"))).toBe(true);
+    });
+
+    it("AC-2.1.3: uninstall remove somente o bloco Argus", () => {
       const root = useWorkspace();
       writeFileSync(join(root, "CLAUDE.md"), "# Meu projeto\n\nRegras minhas.\n", "utf-8");
       expect(runAgentRulesInstall(root)).toBe(0);
@@ -375,11 +419,123 @@ describe("S28 — sync de baixo atrito", () => {
       expect(content).toContain("# Meu projeto");
       expect(content).toContain("Regras minhas.");
       expect(content).toContain("## Argus");
-      // Uninstall remove só o bloco argus.
       expect(runAgentRulesUninstall(root)).toBe(0);
       const after = readFileSync(join(root, "CLAUDE.md"), "utf-8");
       expect(after).toContain("# Meu projeto");
+      expect(after).toContain("Regras minhas.");
       expect(after).not.toContain(">>> argus >>>");
+      expect(after).not.toContain("## Argus");
+    });
+
+    it("AC-2.2.1: refresh migra versão antiga e preserva conteúdo externo", () => {
+      const root = useWorkspace();
+      const userPrefix = "# Prefácio do usuário\n\nBYTES_EXTERNOS_XYZ\n";
+      const userSuffix = "\n# RODAPÉ_EXTERNO_ABC\n";
+      const legacyBody = `## Argus\n\nMenu legado com \`search\` e \`files\`.\n`;
+      const legacyBlock = `${BLOCK_BEGIN}\n${legacyBody}<!-- <<< argus <<< -->`;
+      writeFileSync(join(root, "CLAUDE.md"), `${userPrefix}${legacyBlock}${userSuffix}`, "utf-8");
+      writeFileSync(join(root, "AGENTS.md"), `${legacyBlock}\n`, "utf-8");
+      expect(parseAgentRulesVersion(readFileSync(join(root, "CLAUDE.md"), "utf-8"))).toBeNull();
+
+      const { code, summary } = runInstallRefresh({ noMcp: true });
+      expect(code).toBe(0);
+      expect(summary.optOut).toBe(false);
+      const claude = readFileSync(join(root, "CLAUDE.md"), "utf-8");
+      expect(claude.startsWith(userPrefix)).toBe(true);
+      expect(claude.endsWith(userSuffix)).toBe(true);
+      expect(claude).toContain("BYTES_EXTERNOS_XYZ");
+      expect(claude).toContain("RODAPÉ_EXTERNO_ABC");
+      expect(parseAgentRulesVersion(claude)).toBe(AGENT_RULES_VERSION);
+      expect(claude).toContain(buildBlock());
+      expect(claude.split(BLOCK_BEGIN).length - 1).toBe(1);
+    });
+  });
+
+  describe("install --refresh", () => {
+    it("AC-2.2.2: entrada MCP converge para path corrente e refresh repetido é no-op", () => {
+      const root = useWorkspace();
+      const prevClaude = process.env.CLAUDE_CONFIG_HOME;
+      const prevCursor = process.env.CURSOR_CONFIG_HOME;
+      process.env.CLAUDE_CONFIG_HOME = join(root, "home-claude");
+      process.env.CURSOR_CONFIG_HOME = join(root, "home-cursor");
+
+      try {
+        writeFileSync(
+          join(root, ".mcp.json"),
+          JSON.stringify({
+            mcpServers: {
+              outro: { command: "keep-me", args: [] },
+              [MCP_SERVER_KEY]: { command: "/stale/node", args: ["/stale/cli.js", "serve", "--mcp"] },
+            },
+          }) + "\n",
+          "utf-8",
+        );
+
+        const first = runInstallRefresh({ hosts: ["claude-code"], scope: "local" });
+        expect(first.code).toBe(0);
+        expect(first.summary.skipped).toBe(false);
+        const mcpPath = join(root, ".mcp.json");
+        const config1 = JSON.parse(readFileSync(mcpPath, "utf-8"));
+        expect(config1.mcpServers.outro).toEqual({ command: "keep-me", args: [] });
+        expect(config1.mcpServers[MCP_SERVER_KEY].command).toBe(process.execPath);
+        expect(config1.mcpServers[MCP_SERVER_KEY].args[0]).not.toContain("/stale/");
+        expect(config1.mcpServers[MCP_SERVER_KEY].env.ARGUS_WORKSPACE_ROOT).toBe(root);
+
+        const second = runInstallRefresh({ hosts: ["claude-code"], scope: "local" });
+        expect(second.code).toBe(0);
+        const rulesUnchanged = second.summary.rules?.files.every((f) => f.action === "unchanged");
+        expect(rulesUnchanged).toBe(true);
+        expect(second.summary.mcp?.[0].changed).toBe(false);
+        expect(readFileSync(mcpPath, "utf-8")).toBe(JSON.stringify(config1, null, 2) + "\n");
+      } finally {
+        if (prevClaude === undefined) {
+          delete process.env.CLAUDE_CONFIG_HOME;
+        } else {
+          process.env.CLAUDE_CONFIG_HOME = prevClaude;
+        }
+        if (prevCursor === undefined) {
+          delete process.env.CURSOR_CONFIG_HOME;
+        } else {
+          process.env.CURSOR_CONFIG_HOME = prevCursor;
+        }
+      }
+    });
+
+    it("AC-2.2.3: opt-out impede mutação e informa ação manual", () => {
+      const root = useWorkspace();
+      expect(runAgentRulesInstall(root)).toBe(0);
+      const before = readFileSync(join(root, "CLAUDE.md"), "utf-8");
+      writeFileSync(
+        join(root, "CLAUDE.md"),
+        before.replace(`argus-agent-rules-version: ${AGENT_RULES_VERSION}`, "argus-agent-rules-version: 0"),
+        "utf-8",
+      );
+      const stale = readFileSync(join(root, "CLAUDE.md"), "utf-8");
+      writeFileSync(
+        join(root, ".mcp.json"),
+        JSON.stringify({ mcpServers: { [MCP_SERVER_KEY]: { command: "stale", args: [] } } }) + "\n",
+        "utf-8",
+      );
+      const mcpBefore = readFileSync(join(root, ".mcp.json"), "utf-8");
+
+      const prev = process.env[ARGUS_NO_INSTALL_REFRESH_ENV];
+      process.env[ARGUS_NO_INSTALL_REFRESH_ENV] = "1";
+      try {
+        const { code, summary } = runInstallRefresh({ hosts: ["claude-code"], scope: "local" });
+        expect(code).toBe(0);
+        expect(summary.skipped).toBe(true);
+        expect(summary.optOut).toBe(true);
+        expect(summary.manualHint).toContain("argus install --refresh");
+        expect(summary.manualHint).toContain(ARGUS_NO_INSTALL_REFRESH_ENV);
+        expect(readFileSync(join(root, "CLAUDE.md"), "utf-8")).toBe(stale);
+        expect(readFileSync(join(root, ".mcp.json"), "utf-8")).toBe(mcpBefore);
+      } finally {
+        if (prev === undefined) {
+          delete process.env[ARGUS_NO_INSTALL_REFRESH_ENV];
+        } else {
+          process.env[ARGUS_NO_INSTALL_REFRESH_ENV] = prev;
+        }
+      }
     });
   });
 

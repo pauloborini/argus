@@ -1,0 +1,79 @@
+{
+  "provenance": {
+    "id": "homologate-agent-v1",
+    "captured": "2026-07-21",
+    "command": "npm exec --workspace=@owerride/argus -- vitest run tests/homologate-agent.test.ts",
+    "runtime_version": "2.1.2",
+    "seam": "S8 host/processo → MCP → payload/memória/status/regras",
+    "level": "golden replay (protocolo MCP in-process; corpora fixtures)",
+    "corpora": [
+      {
+        "id": "corpus-small",
+        "size": "small",
+        "path": "packages/argus/tests/fixtures/homologation/corpus-small"
+      },
+      {
+        "id": "corpus-medium",
+        "size": "medium",
+        "path": "packages/argus/tests/fixtures/homologation/corpus-medium"
+      }
+    ],
+    "notes": "Q1: corpus-small + corpus-medium versionados no repo. retrieve só entra na sequência live se explore emitir handle. Plano 2: ListTools default inclui remember (5 tools); agent_rules_version 2."
+  },
+  "corpora": {
+    "corpus-small": {
+      "listed_tools": [
+        "explore",
+        "pack_context",
+        "recall",
+        "remember",
+        "status"
+      ],
+      "listed_count": 5,
+      "tool_sequence": [
+        "explore",
+        "remember",
+        "recall",
+        "status"
+      ],
+      "explore_state": "sucesso",
+      "explore_actionable": true,
+      "explore_snippet_body": "export function calculateTotal(a: number, b: number): number {\n  return helper() + a + b;\n}",
+      "retrieve_used": false,
+      "remember_state": "sucesso",
+      "recall_hit": true,
+      "status_initialized": true,
+      "status_mcp_slim": true,
+      "agent_rules_version": 2,
+      "full_structural_load_count": 0,
+      "stdout_write_count": 0
+    },
+    "corpus-medium": {
+      "listed_tools": [
+        "explore",
+        "pack_context",
+        "recall",
+        "remember",
+        "status"
+      ],
+      "listed_count": 5,
+      "tool_sequence": [
+        "explore",
+        "remember",
+        "recall",
+        "status"
+      ],
+      "explore_state": "sucesso",
+      "explore_actionable": true,
+      "explore_snippet_body": "export function placeOrder(sku: string, qty: number): number {\n  const subtotal = productTotal(sku, qty);\n  return calculateInvoice(subtotal);\n}\nconst subtotal = productTotal(sku, qty);",
+      "retrieve_used": false,
+      "remember_state": "sucesso",
+      "recall_hit": true,
+      "status_initialized": true,
+      "status_mcp_slim": true,
+      "agent_rules_version": 2,
+      "full_structural_load_count": 0,
+      "stdout_write_count": 0
+    }
+  }
+}
