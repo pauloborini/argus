@@ -6,7 +6,8 @@ import { computeManifestStaleness } from "../../discovery/staleness.js";
 import { readDirtyFlag } from "../../discovery/dirty-flag.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { IndexDbCorruptedError, IndexDbSchemaError } from "../../storage/index-persistence.js";
-import { getManifestPath, readWorkspaceMetadata, resolveRespectGitignore } from "../../workspace/workspace.js";
+import { getManifestPath, resolveRespectGitignore } from "../../workspace/workspace.js";
+import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
 import { VaultEngine } from "../../memory/vault-engine.js";
 import {
   ARGUS_MCP_TOOLS_ENV,
@@ -49,11 +50,13 @@ function withMcpSurface(payload: ToolResponsePayload): ToolResponsePayload {
   };
 }
 
+/**
+ * Status estrutural + memória no mesmo root canônico (pós-heal).
+ * `cwd` é start de discovery; I/O de estado usa somente `rootPath`.
+ */
 export function buildStatusResponse(cwd: string): ToolResponsePayload {
-  const metadata = readWorkspaceMetadata(cwd);
-  const memory = VaultEngine.status(cwd);
-
-  if (!metadata) {
+  const resolved = resolveLocalStateRoot(cwd);
+  if (!resolved) {
     return withMcpSurface({
       initialized: false,
       staleness: "unknown",
@@ -62,14 +65,17 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       index_version: null,
       storage_backend: null,
       schema_version: null,
-      memory,
+      memory: VaultEngine.status(cwd),
       ...stubResponse("falha", WORKSPACE_MISSING),
     });
   }
 
+  const { rootPath, metadata } = resolved;
+  const memory = VaultEngine.status(rootPath);
+
   let manifest: DiscoveryManifest | null;
   try {
-    manifest = readManifest(getManifestPath(metadata.root_path));
+    manifest = readManifest(getManifestPath(rootPath));
   } catch (err) {
     if (err instanceof ManifestCorruptedError) {
       return withMcpSurface({
@@ -109,7 +115,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
 
   let structural: StructuralIndex | null = null;
   try {
-    structural = loadStructuralIndex(metadata.root_path, "lite");
+    structural = loadStructuralIndex(rootPath, "lite");
   } catch (err) {
     if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
       return withMcpSurface({
@@ -130,11 +136,11 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
     throw err;
   }
 
-  const staleness = computeManifestStaleness(metadata.root_path, manifest, {
+  const staleness = computeManifestStaleness(rootPath, manifest, {
     respect_gitignore: resolveRespectGitignore(metadata),
   });
   const coverage = structural?.coverage_by_language ?? {};
-  const dirtyFlag = readDirtyFlag(metadata.root_path);
+  const dirtyFlag = readDirtyFlag(rootPath);
   const basePayload = {
     initialized: true,
     staleness: staleness.staleness,

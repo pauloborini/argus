@@ -1,6 +1,7 @@
 import { VaultEngine } from "../../memory/vault-engine.js";
 import type { Embedder } from "../../embeddings/embedder.js";
-import type { ToolResponsePayload } from "./common.js";
+import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
+import { WORKSPACE_MISSING, type ToolResponsePayload } from "./common.js";
 
 export interface RememberArgs {
   content?: string;
@@ -14,6 +15,13 @@ export async function buildRememberResponse(
   args?: RememberArgs,
   embedder?: Embedder,
 ): Promise<ToolResponsePayload> {
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
+    return {
+      state: "falha",
+      message: WORKSPACE_MISSING,
+    };
+  }
   return VaultEngine.remember(
     args?.content ?? "",
     {
@@ -22,6 +30,6 @@ export async function buildRememberResponse(
       links: args?.links,
       embedder,
     },
-    cwd,
+    rootPath,
   );
 }

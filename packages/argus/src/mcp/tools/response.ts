@@ -217,6 +217,15 @@ export async function buildToolResponseAsync(
   args?: Record<string, unknown>,
   deps?: SemanticSearchDeps,
 ): Promise<ToolResponsePayload> {
+  // Mantém o mesmo fail-closed do dispatcher síncrono. Sem workspace válido,
+  // caminhos async não podem criar memória/handles órfãos no cwd.
+  if (!readWorkspaceMetadata(cwd) && tool !== "status") {
+    return applyResponseFormat(
+      { ...stubResponse("falha", WORKSPACE_MISSING) },
+      resolveResponseFormat(args),
+      tool,
+    );
+  }
   if (tool === "semantic_search") {
     const domain = (args as SemanticSearchArgs | undefined)?.domain;
     if (!readWorkspaceMetadata(cwd) && domain !== "memory") {

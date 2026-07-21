@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { closeIndexDb, openIndexDb } from "../../storage/sqlite-index-store.js";
-import { getIndexDbPath } from "../../workspace/workspace.js";
+import { getIndexDbPath, getPackedHandlesDirPath } from "../../workspace/workspace.js";
 import { isWithinPath } from "./common.js";
 import type {
   PackSegment,
@@ -27,12 +27,13 @@ export interface WriteStoredRetrieveHandlePayload {
   segments: PackSegment[];
 }
 
-export function getPackedHandlesDir(cwd: string): string {
-  return join(cwd, ".argus", "packed-handles");
+/** Diretório canônico de packed-handles sob `rootPath/.argus/`. */
+export function getPackedHandlesDir(rootPath: string): string {
+  return getPackedHandlesDirPath(rootPath);
 }
 
-export function getPackedHandlePath(cwd: string, handle: string): string {
-  return join(getPackedHandlesDir(cwd), handle);
+export function getPackedHandlePath(rootPath: string, handle: string): string {
+  return join(getPackedHandlesDir(rootPath), handle);
 }
 
 export function isValidRetrieveHandle(handle: string): boolean {
