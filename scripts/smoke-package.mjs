@@ -55,8 +55,13 @@ try {
   execFileSync(process.execPath, [cli, "init"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "index"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "memory", "init"], { cwd: workDir, stdio: "inherit" });
-  execFileSync(process.execPath, [cli, "memory", "remember", "# nota\\n"], { cwd: workDir, stdio: "inherit" });
-  execFileSync(process.execPath, [cli, "memory", "sync"], { cwd: workDir, stdio: "inherit" });
+  // Happy path memória: remember → search/recall FTS. Sem memory sync (wipe destrutivo).
+  // ARGUS_HOT_EMBED=0 evita baixar modelo no smoke; FTS basta para honestidade do path.
+  execFileSync(process.execPath, [cli, "memory", "remember", "# nota\\n"], {
+    cwd: workDir,
+    stdio: "inherit",
+    env: { ...process.env, ARGUS_HOT_EMBED: "0" },
+  });
   execFileSync(process.execPath, [cli, "memory", "search", "nota"], { cwd: workDir, stdio: "inherit" });
   execFileSync(process.execPath, [cli, "search", "sample"], {
     cwd: workDir,
@@ -68,6 +73,7 @@ try {
     Object.entries({ ...process.env }).filter((entry) => typeof entry[1] === "string"),
   );
   delete smokeEnv.ARGUS_MCP_TOOLS;
+  smokeEnv.ARGUS_HOT_EMBED = "0";
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [cli, "serve", "--mcp"],

@@ -32,7 +32,7 @@ export async function runMemoryRemember(
   try {
     const content = options.stdin ? await readStdin() : options.file ? "" : text ?? "";
     return print(
-      VaultEngine.remember(content, {
+      await VaultEngine.remember(content, {
         file: options.file,
         type: options.type,
         tags: options.tag,

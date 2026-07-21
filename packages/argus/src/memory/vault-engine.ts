@@ -36,6 +36,8 @@ export interface RememberOptions {
   tags?: string[];
   links?: string[];
   file?: string;
+  /** Injeção de embedder (testes); default tenta createEmbedder() no hot path. */
+  embedder?: Embedder;
 }
 
 export type MemorySearchResult = MemoryRetrievalChunk;
@@ -261,7 +263,11 @@ export class VaultEngine {
     };
   }
 
-  static remember(content: string, options: RememberOptions = {}, cwd: string = process.cwd()): ToolResponsePayload {
+  static async remember(
+    content: string,
+    options: RememberOptions = {},
+    cwd: string = process.cwd(),
+  ): Promise<ToolResponsePayload> {
     if (!content.trim() && !options.file) {
       return { note_path: "", note_id: "", ...stubResponse("falha", "E_MEMORY_INPUT_INVALID: conteúdo vazio.") };
     }
@@ -315,23 +321,45 @@ export class VaultEngine {
         ...stubResponse("parcial", "Nota persistida; indexação quente pendente.", {
           limitations: [
             hot.error ?? "E_MEMORY_HOT_INDEX_FAILED",
-            "Retry idempotente: repita remember ou rode argus memory sync.",
+            "Retry idempotente: repita remember (FTS) ou argus memory embed (vetor unitário).",
           ],
         }),
       };
     }
-    const limitations: string[] = [];
-    if (hot.embedding_status === "pending") {
-      limitations.push("Embedding pendente; FTS disponível. Opcional: argus memory embed.");
+
+    let embeddingStatus = hot.embedding_status;
+    const limitations: string[] = [...hot.warnings];
+    // Hot embed unitário same-session: nunca sync/wipe. Budget em hotUpdateNoteEmbedding.
+    // ARGUS_HOT_EMBED=0: pula createEmbedder (smoke/CI sem baixar modelo); inject via options.embedder ainda roda.
+    const skipDefaultHotEmbed = !options.embedder && process.env.ARGUS_HOT_EMBED === "0";
+    if (embeddingStatus === "pending" && !skipDefaultHotEmbed) {
+      try {
+        const embedder = options.embedder ?? createEmbedder();
+        embeddingStatus = await HotUpdater.hotUpdateNoteEmbedding(cwd, hot.note_id || noteId, embedder);
+      } catch (err) {
+        if (err instanceof EmbeddingsUnavailableError) {
+          embeddingStatus = "pending";
+          limitations.push(
+            `${err.message} FTS disponível. Opcional: argus memory embed.`,
+          );
+        } else {
+          embeddingStatus = "failed";
+          limitations.push(
+            `Embedding falhou: ${err instanceof Error ? err.message : String(err)}. FTS disponível. Opcional: argus memory embed.`,
+          );
+        }
+      }
     }
-    if (hot.warnings.length) {
-      limitations.push(...hot.warnings);
+    if (embeddingStatus === "pending") {
+      limitations.push("Embedding pendente; FTS disponível. Opcional: argus memory embed.");
+    } else if (embeddingStatus === "failed") {
+      limitations.push("Embedding falhou; FTS disponível. Opcional: argus memory embed.");
     }
     return {
       note_path: vaultRel,
       note_id: hot.note_id || noteId,
       fts_indexed: hot.fts_indexed,
-      embedding_status: hot.embedding_status,
+      embedding_status: embeddingStatus,
       ...stubResponse(
         "sucesso",
         "Nota capturada e indexada no cofre de memória.",
@@ -415,7 +443,9 @@ export class VaultEngine {
   }
 
   static async embed(cwd: string = process.cwd(), embedderOverride?: Embedder): Promise<ToolResponsePayload> {
-    VaultEngine.sync(cwd);
+    // Caminho frio/batch incremental: NÃO chama sync (wipe destrutivo). Upsert por nota;
+    // remove só embeddings órfãos. Para rebuild estrutural do vault → `memory sync` explícito.
+    VaultEngine.init(cwd);
     const db = openMemoryDb(cwd);
     try {
       const notes = db.prepare("SELECT id, title, content, content_hash FROM notes ORDER BY path").all() as Array<{
@@ -428,27 +458,51 @@ export class VaultEngine {
         return { note_count: 0, ...stubResponse("sucesso", "Nenhuma nota para embeddar.") };
       }
       const embedder = embedderOverride ?? createEmbedder();
-      const vectors = await embedder.embed(notes.map((note) => `${note.title}\n${note.content}`));
+      const existing = db.prepare("SELECT note_id, content_hash FROM note_embeddings").all() as Array<{
+        note_id: string;
+        content_hash: string;
+      }>;
+      const existingById = new Map(existing.map((row) => [row.note_id, row.content_hash]));
+      const toEmbed = notes.filter((note) => existingById.get(note.id) !== note.content_hash);
+      const vectors =
+        toEmbed.length > 0
+          ? await embedder.embed(toEmbed.map((note) => `${note.title}\n${note.content}`))
+          : [];
       const tx = db.transaction(() => {
-        db.exec("DELETE FROM note_embeddings");
-        const insert = db.prepare(
-          "INSERT INTO note_embeddings (note_id, vector, scale, dim, content_hash) VALUES (?, ?, ?, ?, ?)",
+        const upsert = db.prepare(
+          `INSERT INTO note_embeddings (note_id, vector, scale, dim, content_hash)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(note_id) DO UPDATE SET
+             vector = excluded.vector, scale = excluded.scale, dim = excluded.dim, content_hash = excluded.content_hash`,
         );
-        for (let i = 0; i < notes.length; i += 1) {
-          const note = notes[i]!;
+        for (let i = 0; i < toEmbed.length; i += 1) {
+          const note = toEmbed[i]!;
           const vector = vectors[i]!;
           const q = quantizeInt8(vector);
-          insert.run(note.id, int8ToBlob(q.bytes), q.scale, vector.length, note.content_hash);
+          upsert.run(note.id, int8ToBlob(q.bytes), q.scale, vector.length, note.content_hash);
         }
+        db.prepare(
+          "DELETE FROM note_embeddings WHERE note_id NOT IN (SELECT id FROM notes)",
+        ).run();
+        const noteCount = (db.prepare("SELECT COUNT(*) AS c FROM note_embeddings").get() as { c: number }).c;
+        const dim =
+          toEmbed.length > 0
+            ? vectors[0]!.length
+            : ((db.prepare("SELECT dim FROM note_embeddings LIMIT 1").get() as { dim: number } | undefined)?.dim ??
+              0);
         db.prepare(
           `INSERT INTO note_embeddings_meta (id, model, dim, built_at, note_count, vault_hash)
            VALUES (1, ?, ?, ?, ?, (SELECT vault_hash FROM memory_meta WHERE id = 1))
            ON CONFLICT(id) DO UPDATE SET model = excluded.model, dim = excluded.dim,
              built_at = excluded.built_at, note_count = excluded.note_count, vault_hash = excluded.vault_hash`,
-        ).run("Xenova/bge-small-en-v1.5", vectors[0]!.length, new Date().toISOString(), notes.length);
+        ).run(embedder.model, dim, new Date().toISOString(), noteCount);
       });
       tx();
-      return { note_count: notes.length, ...stubResponse("sucesso", "Embeddings de memória gerados.") };
+      return {
+        note_count: notes.length,
+        embedded_count: toEmbed.length,
+        ...stubResponse("sucesso", "Embeddings de memória atualizados (incremental, sem wipe de sync)."),
+      };
     } catch (err) {
       if (err instanceof EmbeddingsUnavailableError) {
         return { note_count: 0, ...stubResponse("parcial", err.message, { limitations: ["Busca FTS segue disponível."] }) };

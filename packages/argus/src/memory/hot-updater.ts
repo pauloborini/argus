@@ -242,7 +242,7 @@ export function hotUpdateNoteProjection(cwd: string, input: HotUpdateInput): Hot
       embedding_status: "skipped",
       warnings: [],
       code: "E_MEMORY_HOT_INDEX_FAILED",
-      error: `E_MEMORY_HOT_INDEX_FAILED: ${err instanceof Error ? err.message : String(err)}. Retry idempotente: repita remember/hot-update ou rode sync.`,
+      error: `E_MEMORY_HOT_INDEX_FAILED: ${err instanceof Error ? err.message : String(err)}. Retry idempotente: repita remember/hot-update.`,
     };
   }
 
@@ -262,8 +262,8 @@ export function hotUpdateNoteProjection(cwd: string, input: HotUpdateInput): Hot
     });
     tx();
 
-    // Hot path não embeda no request (custo/não-determinismo). FTS fica imediato;
-    // `hotUpdateNoteEmbedding` cobre update unitário. Marca pending salvo hash já alinhado.
+    // FTS imediato. Embed unitário fica a cargo de `hotUpdateNoteEmbedding` (chamado pelo remember).
+    // Aqui só sinaliza pending/unchanged — nunca wipe global nem sync.
     const existingEmb = db
       .prepare("SELECT content_hash FROM note_embeddings WHERE note_id = ?")
       .get(note.id) as { content_hash: string } | undefined;
@@ -271,7 +271,7 @@ export function hotUpdateNoteProjection(cwd: string, input: HotUpdateInput): Hot
       existingEmb?.content_hash === note.contentHash ? "unchanged" : "pending";
     if (embeddingStatus === "pending" && note.body.length > HOT_EMBED_MAX_CHARS) {
       warnings.push(
-        `Embedding acima do budget hot (${HOT_EMBED_MAX_CHARS} chars); use hotUpdateNoteEmbedding/embed.`,
+        `Embedding acima do budget hot (${HOT_EMBED_MAX_CHARS} chars); use argus memory embed (não sync).`,
       );
     }
 
@@ -292,7 +292,7 @@ export function hotUpdateNoteProjection(cwd: string, input: HotUpdateInput): Hot
       embedding_status: "skipped",
       warnings,
       code: "E_MEMORY_HOT_INDEX_FAILED",
-      error: `E_MEMORY_HOT_INDEX_FAILED: ${err instanceof Error ? err.message : String(err)}. Retry idempotente: repita remember/hot-update ou rode sync.`,
+      error: `E_MEMORY_HOT_INDEX_FAILED: ${err instanceof Error ? err.message : String(err)}. Retry idempotente: repita remember/hot-update.`,
     };
   } finally {
     closeMemoryDb(db);
