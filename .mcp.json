@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "argus": {
+      "command": "/Users/pauloborini/.nvm/versions/node/v24.18.0/bin/node",
+      "args": [
+        "/Users/pauloborini/.nvm/versions/node/v24.18.0/lib/node_modules/@owerride/argus/dist/cli.js",
+        "serve",
+        "--mcp"
+      ],
+      "env": {
+        "ARGUS_WORKSPACE_ROOT": "/Users/pauloborini/Documents/projetos/argus"
+      }
+    }
+  }
+}

@@ -17,3 +17,5 @@ dist-release/
 .talos
 .athena
 .argus
+
+.claude
