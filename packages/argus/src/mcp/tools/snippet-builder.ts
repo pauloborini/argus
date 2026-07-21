@@ -122,6 +122,28 @@ export interface SymbolBodyWindow {
 }
 
 /**
+ * Lê o corpo completo do símbolo sem caps de style — usado para persistir
+ * retrieve_handle reversível quando o snippet balanced/deep truncou.
+ */
+export function readFullSymbolBody(
+  cwd: string,
+  path: string,
+  startLine: number,
+  endLine: number,
+): string | null {
+  try {
+    const absolutePath = join(cwd, path);
+    const lines = readFileSync(absolutePath, "utf-8").split("\n");
+    const start = Math.max(0, startLine - 1);
+    const end = Math.min(lines.length, endLine);
+    const body = lines.slice(start, end).join("\n").trim();
+    return body.length > 0 ? body : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Janela verbatim ao redor do símbolo com caps por style.
  * Retorna null se ilegível/vazio ou se bodyMode === "none".
  */

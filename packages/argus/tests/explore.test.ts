@@ -1,11 +1,16 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
 import { buildToolResponse } from "../src/mcp/tools/response.js";
 import { VaultEngine } from "../src/memory/vault-engine.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const TRUNCATE_STRESS_FIXTURE = join(HERE, "fixtures/explore-truncate-stress/large-symbol.ts");
+const HARDENING_NEEDLE = "HARDENING_NEEDLE_BEYOND_CAP_16";
 
 describe("explore tool", () => {
   let tempDir: string | undefined;
@@ -208,6 +213,55 @@ describe("explore tool", () => {
     expect(refs[0]?.mechanism).toBe("fts-only");
     expect(refs[0]?.confidence).toBe("inferred");
     expect(refs[0]?.evidence).toBe("session_expired");
+  });
+
+  it("H1: símbolo > caps balanced emite retrieve_handle e retrieve devolve needle além da janela (AC-1.2.*)", async () => {
+    const source = readFileSync(TRUNCATE_STRESS_FIXTURE, "utf-8");
+    const root = setupWorkspace({
+      "large-symbol.ts": source,
+    });
+    expect(await runIndex()).toBe(0);
+
+    const explore = buildToolResponse("explore", root, {
+      target: "largeHardeningSymbol",
+      mode: "symbol",
+      response_format: "detailed",
+    });
+    const snippets = (explore.snippets as Array<{ truncated?: boolean; body?: string }>) ?? [];
+    expect(snippets.some((s) => s.truncated === true)).toBe(true);
+    expect(snippets.some((s) => (s.body ?? "").includes(HARDENING_NEEDLE))).toBe(false);
+    expect(typeof explore.retrieve_handle).toBe("string");
+    expect(String(explore.retrieve_handle)).toMatch(/^rh_[a-f0-9]{16}$/);
+
+    const next = String(explore.suggested_next_action ?? "").toLowerCase();
+    expect(next).toMatch(/retrieve|pack_context/);
+    expect(next).not.toMatch(/\btrace\b/);
+    expect(next).not.toMatch(/\bimpact\b/);
+    expect(next).not.toMatch(/\bsearch\b/);
+
+    const retrieved = buildToolResponse("retrieve", root, {
+      handle: String(explore.retrieve_handle),
+    });
+    expect(["sucesso", "parcial"]).toContain(retrieved.state);
+    expect(String(retrieved.content)).toContain(HARDENING_NEEDLE);
+  });
+
+  it("suggested_next_action no sucesso sem truncamento não empurra menu avançado (AC-1.2.3)", async () => {
+    const root = setupWorkspace({
+      "utils.ts": "export function calculateTotal() { return 1; }\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("explore", root, {
+      target: "calculateTotal",
+      mode: "symbol",
+    });
+    expect(payload.retrieve_handle).toBeUndefined();
+    const next = String(payload.suggested_next_action ?? "").toLowerCase();
+    expect(next).toContain("pack_context");
+    expect(next).not.toMatch(/\btrace\b/);
+    expect(next).not.toMatch(/\bimpact\b/);
+    expect(next).not.toMatch(/\bsearch\b/);
   });
 
 });
