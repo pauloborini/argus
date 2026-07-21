@@ -397,6 +397,27 @@ describe("memory hot-update (S5 / Plano 4)", () => {
     syncSpy.mockRestore();
   });
 
+  it("AC-4.1.1: remember via dispatcher concise expõe embedding_status (H5)", async () => {
+    const { buildToolResponseAsync } = await import("../../src/mcp/tools/response.js");
+    const cwd = root();
+    const unique = `concise-embed-${Date.now()}-zzz`;
+    const payload = await buildToolResponseAsync("remember", cwd, {
+      content: `Decisão concise: ${unique}`,
+      type: "decision",
+      response_format: "concise",
+    });
+    expect(payload.state).toBe("sucesso");
+    expect(["updated", "pending", "failed"]).toContain(payload.embedding_status);
+    expect(payload.embedding_status).toBe("pending");
+    expect(payload.confidence).toBeUndefined();
+    expect(payload.staleness_hint).toBeUndefined();
+    // Limitations cosméticas (sem E_*) somem; embedding_status é o sinal.
+    const limitations = payload.limitations as string[] | undefined;
+    if (limitations) {
+      expect(limitations.every((item) => /^[EW]_[A-Z0-9_]+\b/.test(item))).toBe(true);
+    }
+  });
+
   it("AC-4.1.1 S5 MCP remember→recall sem sync (Client+Server reais)", async () => {
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");

@@ -12,9 +12,10 @@ import {
   TOOL_DESCRIPTIONS,
   TOOL_INPUT_JSON_SCHEMAS,
   resolveListedTools,
+  type McpToolName,
 } from "../src/mcp/tool-registry.js";
 import { createMcpServer } from "../src/mcp/server.js";
-import { buildToolResponse } from "../src/mcp/tools/response.js";
+import { buildToolResponse, buildToolResponseAsync } from "../src/mcp/tools/response.js";
 import { initWorkspace } from "../src/workspace/workspace.js";
 import { runIndex } from "../src/commands/index-cmd.js";
 
@@ -153,23 +154,34 @@ describe("tool-registry", () => {
     }
   });
 
-  it("stubs parciais (detailed) incluem limitations[]", () => {
+  it("stubs parciais (detailed) incluem limitations[]", async () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
     for (const tool of MCP_TOOL_NAMES) {
-      const payload = buildToolResponse(tool, dir, { response_format: "detailed" });
+      // remember exige async (hot embed); demais tools delegam ao sync.
+      const payload = await buildToolResponseAsync(tool as McpToolName, dir, {
+        response_format: "detailed",
+        ...(tool === "remember" ? { content: "stub parcial envelope" } : {}),
+      });
       if (payload.state === "parcial") {
         expect(payload.limitations?.length).toBeGreaterThan(0);
       }
     }
   });
 
-  it("modo concise dropa limitations e staleness_hint", () => {
+  it("modo concise dropa limitations cosméticas, staleness_hint e confidence", async () => {
     const dir = useEmptyDir();
     initWorkspace(dir);
     for (const tool of MCP_TOOL_NAMES) {
-      const payload = buildToolResponse(tool, dir);
-      expect(payload.limitations).toBeUndefined();
+      const payload = await buildToolResponseAsync(tool as McpToolName, dir, {
+        ...(tool === "remember" ? { content: "stub concise envelope" } : {}),
+      });
+      // Limitations só sobrevivem se forem códigos E_*/W_* (whitelist Plano 4).
+      const limitations = payload.limitations as string[] | undefined;
+      if (limitations) {
+        expect(limitations.length).toBeGreaterThan(0);
+        expect(limitations.every((item) => /^[EW]_[A-Z0-9_]+\b/.test(item))).toBe(true);
+      }
       expect(payload.staleness_hint).toBeUndefined();
       expect(payload.confidence).toBeUndefined();
     }

@@ -246,6 +246,36 @@ describe("explore tool", () => {
     expect(String(retrieved.content)).toContain(HARDENING_NEEDLE);
   });
 
+  it("AC-4.1.2: explore truncado em concise preserva retrieve_handle (H5)", async () => {
+    const source = readFileSync(TRUNCATE_STRESS_FIXTURE, "utf-8");
+    const root = setupWorkspace({
+      "large-symbol.ts": source,
+    });
+    expect(await runIndex()).toBe(0);
+
+    const explore = buildToolResponse("explore", root, {
+      target: "largeHardeningSymbol",
+      mode: "symbol",
+      // concise = default; explícito para o AC
+      response_format: "concise",
+    });
+    expect(typeof explore.retrieve_handle).toBe("string");
+    expect(String(explore.retrieve_handle)).toMatch(/^rh_[a-f0-9]{16}$/);
+    expect(explore.confidence).toBeUndefined();
+    expect(explore.staleness_hint).toBeUndefined();
+    // Limitations cosméticas (sem E_*) somem; handle é o sinal acionável.
+    const limitations = explore.limitations as string[] | undefined;
+    if (limitations) {
+      expect(limitations.every((item) => /^[EW]_[A-Z0-9_]+\b/.test(item))).toBe(true);
+    }
+
+    const retrieved = buildToolResponse("retrieve", root, {
+      handle: String(explore.retrieve_handle),
+      response_format: "concise",
+    });
+    expect(String(retrieved.content)).toContain(HARDENING_NEEDLE);
+  });
+
   it("suggested_next_action no sucesso sem truncamento não empurra menu avançado (AC-1.2.3)", async () => {
     const root = setupWorkspace({
       "utils.ts": "export function calculateTotal() { return 1; }\n",

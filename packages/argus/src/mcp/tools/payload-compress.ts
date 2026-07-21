@@ -1,5 +1,6 @@
 // Compressão de payload em modo concise: remove campos derivados e aplica path dictionary.
-// Campos acionáveis (snippets.body, origin_refs, retrieve_handle, códigos E_*) são preservados.
+// Campos acionáveis (snippets.body, origin_refs, retrieve_handle, embedding_status,
+// limitations com códigos E_*/W_*) são preservados pelo caller (applyResponseFormat).
 import type { ToolResponsePayload } from "./common.js";
 import type { McpToolName } from "../tool-registry.js";
 
