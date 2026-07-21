@@ -1,10 +1,10 @@
-# Contrato técnico — memória v2 (S02 + persistência S03)
+# Contrato técnico — memória v2 (S02 + persistência S03 + hot path Plano 4)
 
-Documento canônico do contrato de dados da memória v2 do Argus. Fixa nomes, regras e casos negativos; a **persistência** no SQLite local foi implementada em S03.
+Documento canônico do contrato de dados da memória v2 do Argus. Fixa nomes, regras e casos negativos; a **persistência** no SQLite local foi implementada em S03; o **hot path** `remember → FTS/embedding → recall` e o **ranking v2** em Plano 4.
 
-**Referências:** PRD S02 §3 D1–D6; PRD S03 write path; tipos em `packages/argus/src/memory/v2-contract.ts`; colunas em `packages/argus/src/memory/v2-persistence-draft.ts`; migração em `packages/argus/src/memory/storage/sqlite-v2-migrate.ts`; schema em `packages/argus/src/memory/storage/sqlite-schema.ts`.
+**Referências:** PRD S02 §3 D1–D6; PRD S03 write path; tipos em `packages/argus/src/memory/v2-contract.ts`; colunas em `packages/argus/src/memory/v2-persistence-draft.ts`; migração em `packages/argus/src/memory/storage/sqlite-v2-migrate.ts`; schema em `packages/argus/src/memory/storage/sqlite-schema.ts`; hot-update em `packages/argus/src/memory/hot-updater.ts`; ranking em `packages/argus/src/memory/memory-retrieval.ts`.
 
-**Runtime atual (S03):** `MEMORY_SQLITE_SCHEMA_VERSION = "2.0.0"`. A tabela `notes` persiste os campos v2 (`scope`, `source`, `confidence`, temporalidade, supersedência, sinais e `migrated_from_v1`). `openMemoryDb` em modo **write** aplica migração forward-only e idempotente de bancos `1.0.0`. `notes_fts` e `note_embeddings` permanecem operacionais; campos v2 não entram no ranking FTS nesta sprint.
+**Runtime atual:** `MEMORY_SQLITE_SCHEMA_VERSION = "2.0.0"`. A tabela `notes` persiste os campos v2 (`scope`, `source`, `confidence`, temporalidade, supersedência, sinais e `migrated_from_v1`). `openMemoryDb` em modo **write** aplica migração forward-only e idempotente de bancos `1.0.0`. `notes_fts` e `note_embeddings` permanecem operacionais. Ranking de leitura aplica fatores v2 (confidence, recência, stale, contradiction) sobre o score-base FTS/RRF.
 
 **Diagnóstico:** `VaultEngine.status` expõe `schema_version` e `schema_v2_ready`. Abertura **readonly** de banco v1 não dispara migração — `schema_v2_ready` fica `false` até a primeira abertura em write (`sync`, `remember`, etc.).
 
@@ -93,7 +93,7 @@ Sinais explícitos com **motivo acionável** (texto ou código estruturado) — 
 | `stale_reason` | Fato sem confirmação no horizonte do escopo (ex.: sessão encerrada) |
 | `contradiction_reason` | Dois fatos vigentes no mesmo escopo com conteúdo conflitante |
 
-Leitores futuros (`recall`, `semantic_search domain=memory|all`) devem expor esses sinais nos resultados (S05).
+Leitores (`recall`, `semantic_search domain=memory|all`) expõem esses sinais nos resultados e no `rank_reason`.
 
 ### Caso negativo — fonte stale
 
@@ -113,21 +113,66 @@ Dois fatos ativos em `project` contradizem-se → leitura sinaliza `contradictio
 | Campo `type` v1 | Categoria da nota (`inbox`, `decision`, …) — **distinto** de `scope` |
 | `migrated_from_v1` | ID/path da nota v1 de origem após migração S03 |
 | Migração | Forward-only; origem v1 só substituída após confirmação de sucesso (D6) |
-| MCP | 12 tools inalteradas; `remember`/`recall` sem novos parâmetros obrigatórios nesta sprint |
+| MCP | Tools registradas intactas; `remember`/`recall` sem novos parâmetros obrigatórios |
 
 ---
 
-## 8. Leitura futura por escopo/tempo (S05)
+## 8. Leitura por escopo/tempo e ranking v2
 
 | Leitor | Contrato |
 |--------|----------|
-| `recall` | Filtrar por escopo ativo e janela temporal antes de apresentar fatos como vigentes |
+| `recall` | Filtrar por escopo ativo e janela temporal antes de apresentar fatos como vigentes; reranquear com fatores v2 |
 | `semantic_search` (`domain=memory\|all`) | Preservar `stale_reason` / `contradiction_reason` em candidatos de memória |
 | Superseded | Não vencem fatos vigentes no ranking padrão; permanecem recuperáveis para auditoria |
 
+### 8.1 Score-base e fatores (defaults P5)
+
+1. Filtros de vigência (scope, `valid_from`, `superseded_by`, sources) aplicam-se **antes** do ranking.
+2. Score-base vem de FTS (BM25 normalizado) ou RRF híbrido.
+3. Fatores v2 monotônicos (constante `MEMORY_V2_RANKING_WEIGHTS`):
+
+| Fator | Default | Efeito |
+|-------|---------|--------|
+| `confidence.confirmed` | 1,20 | Multiplica score-base |
+| `confidence.inferred` | 1,05 | Multiplica score-base |
+| `confidence.presumed` | 1,00 | Neutro |
+| Recência | meia-vida 90 dias, piso 0,70 | Decay suave; não zera fatos antigos |
+| `stale` | 0,50 | Penaliza quando `stale_reason` presente |
+| `contradiction` | 0,35 | Penaliza quando `contradiction_reason` presente |
+
+Wire de auditoria: `rank_factors` (componentes) e `rank_reason` (ex.: `confirmed;stale:session_expired;recency:floor`).
+
+`state: parcial` quando o conjunto vigente inclui stale ou contradiction.
+
 ---
 
-## 9. Mapa campo → módulo
+## 9. Sync, embed e hot-update (caminhos distintos)
+
+| Caminho | Owner | O que faz | O que **não** faz |
+|---------|-------|-----------|-------------------|
+| `VaultEngine.sync` | vault-engine | Rebuild completo notes/FTS/grafo a partir do vault Markdown | Não regenera embeddings (os apaga no rebuild; exige `embed` depois) |
+| `VaultEngine.embed` | vault-engine | Rebuild de `note_embeddings` para todas as notas | Chama `sync` antes (caminho frio/batch) |
+| `hotUpdateNoteProjection` | `hot-updater.ts` | Upsert **de uma nota** + FTS em transação; atualiza `memory_meta` | Não chama `sync`; não `DELETE` global; não remove embeddings de outras notas |
+
+### 9.1 Hot path de `remember`
+
+1. Grava Markdown v2 no vault.
+2. Chama `hotUpdateNoteProjection` (transação SQLite: upsert `notes` + `notes_fts`).
+3. Embedding da nota fica `pending` por default (budget `HOT_EMBED_MAX_CHARS`); FTS fica imediatamente disponível para `recall`.
+4. `hotUpdateNoteEmbedding` pode atualizar **só** aquela nota sem wipe.
+5. Se a projeção falhar após o Markdown existir → `state: parcial`, código `E_MEMORY_HOT_INDEX_FAILED` / `E_MEMORY_HOT_NOTE_MISSING`, retry idempotente (mesmo path não duplica FTS).
+
+O request MCP/CLI de `remember` **nunca** deve chamar `VaultEngine.sync`.
+
+### 9.2 Degradação de embedding
+
+- Sem embeddings → `recall`/`search` usam FTS (`mechanism: fts-only`), estado honesto com limitation.
+- Hot path não bloqueia captura por falha/custo de embed.
+- `sync` full continua apagando embeddings (rebuild estrutural); não usar sync no hot path.
+
+---
+
+## 10. Mapa campo → módulo
 
 | Campo PRD §5 | Wire TS / SQLite |
 |--------------|------------------|
@@ -140,3 +185,5 @@ Dois fatos ativos em `project` contradizem-se → leitura sinaliza `contradictio
 | Stale | `stale_reason` |
 | Contradição | `contradiction_reason` |
 | Origem v1 | `migrated_from_v1` |
+| Ranking | `MEMORY_V2_RANKING_WEIGHTS`, `applyV2RankingFactors` |
+| Hot index | `hotUpdateNoteProjection`, `hotUpdateNoteEmbedding` |
