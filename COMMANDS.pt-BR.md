@@ -44,6 +44,7 @@ instalados nesta máquina (binario no PATH ou diretorio de config presente).
 
 ```bash
 argus install                     # fiação completa (auto-detecta hosts)
+argus install --refresh           # regenera agent-rules + reconverge entradas MCP
 argus install --no-daemon         # só índice + MCP (sem daemon/serviço)
 argus install --no-mcp            # não registra MCP nos hosts
 argus install --no-memory         # não inicializa .argus/memory
@@ -54,6 +55,12 @@ argus install --scope global      # equivalente a --global
 argus install --scope local       # equivalente a --local
 argus install --with-hooks        # adiciona hooks git como fallback de daemon down
 ```
+
+`--refresh` atualiza só superfícies geradas (bloco Argus versionado em
+`AGENTS.md`/`CLAUDE.md` e entradas MCP dos hosts). Conteúdo fora dos marcadores
+é preservado byte a byte. Opt-out: `ARGUS_NO_INSTALL_REFRESH=1` (informa a ação
+manual). Após o refresh, **reinicie** o processo MCP para o host atualizar o
+ListTools.
 
 **Hosts suportados e onde cada um registra o MCP:**
 
@@ -380,8 +387,12 @@ argus retrieve rh_0123456789abcdef
 ## Servidor MCP
 
 ### `argus serve --mcp`
-Sobe o servidor MCP stdio. Expõe nove tools (`search`, `explore`, `trace`,
-`impact`, `diff_impact`, `files`, `pack_context`, `retrieve`, `status`).
+Sobe o servidor MCP stdio. **ListTools** por default anuncia quatro tools do
+path feliz: `explore`, `pack_context`, `recall`, `status`. As **doze** tools
+registradas (`search`, `explore`, `trace`, `impact`, `diff_impact`, `files`,
+`pack_context`, `retrieve`, `status`, `semantic_search`, `remember`, `recall`)
+continuam invocáveis via CallTool. Controle a descoberta com `ARGUS_MCP_TOOLS`
+(`all` ou CSV); exige restart do MCP após mudança.
 
 ```bash
 argus serve --mcp
@@ -486,13 +497,15 @@ Rode a partir da raiz do monorepo.
 | `npm run validate` | typecheck + test + lint + build. |
 | `npm run benchmark:mvp` | Benchmark interno → `.argus/benchmark/latest/`. |
 | `npm run smoke:package` | Instala e exercita o tarball num diretório limpo. |
-| `npm run homologate` | Valida repos externos locais (sonda de retrieval real). |
+| `npm run homologate` | Sonda CLI em ≥2 corpora (fixtures por default) + S8 agent-facing MCP. |
 | `npm run release:check` | Verifica consistência de versão root/runtime/plugin. |
 | `npm run release:eval` | Evidência agregada memória/privacidade/performance com veredito bloqueante → `.argus/release-evaluation/latest.json`. |
 
-Homologação exige pelo menos dois paths locais. Defina `ARGUS_HOMOLOGATION_REPOS=repoA:repoB` se os defaults não existirem.
+Homologação usa por default os fixtures `corpus-small` + `corpus-medium`.
+Override: `ARGUS_HOMOLOGATION_REPOS=repoA:repoB`. A prova agent-facing (S8)
+roda MCP in-process nesses corpora e faz replay do golden `homologate-agent-v1`.
 
-Avaliação de release (S08) cobre retrieval/memória agregados, privacidade local-first, degradação sem embeddings/LLM, dream dry-run e superfície MCP de 12 tools (`remember`/`recall`). Performance registrada é orientativa, sem SLA. Veredito diferente de `passed` sai com código não-zero.
+Avaliação de release cobre retrieval/memória agregados, privacidade local-first, degradação sem embeddings/LLM, dream dry-run e superfície MCP (ListTools slim por default; CallTool mantém as 12, inclusive `remember`/`recall`). Performance registrada é orientativa, sem SLA. Veredito diferente de `passed` sai com código não-zero.
 
 Tags `v*` rodam CI, smoke do tarball, publicação npm (`@owerride/argus`) e GitHub Release com `SHA256SUMS`. A versão da tag deve coincidir com root, runtime e plugin.
 

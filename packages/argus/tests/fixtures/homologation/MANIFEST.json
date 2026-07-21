@@ -1,0 +1,23 @@
+{
+  "id": "homologate-agent-corpora-v1",
+  "purpose": "Q1 — corpora determinísticos para S8 (pequeno + médio)",
+  "note": "Fixtures versionados no repo; não dependem de clones externos.",
+  "corpora": [
+    {
+      "id": "corpus-small",
+      "size": "small",
+      "path": "corpus-small",
+      "probe_target": "calculateTotal",
+      "probe_file": "src/utils.ts",
+      "description": "Dois módulos TS com call edge (utils→dep)"
+    },
+    {
+      "id": "corpus-medium",
+      "size": "medium",
+      "path": "corpus-medium",
+      "probe_target": "placeOrder",
+      "probe_file": "src/services/order.ts",
+      "description": "Multi-módulo billing/catalog/services com imports cruzados"
+    }
+  ]
+}
