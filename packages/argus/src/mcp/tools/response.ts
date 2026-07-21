@@ -52,14 +52,16 @@ function envelopeCode(text: string | undefined): string | undefined {
 
 /**
  * Pós-processa o envelope para o formato pedido. Em `concise` (default) o
- * envelope cai ao sinal mínimo:
+ * envelope cai ao sinal mínimo acionável (INV-H4 / D6):
  *  - `confidence` dropado (100% derivável de `state`);
- *  - `message` mantém só o código `E_*`; prosa estática (sucesso) some;
- *  - `limitations` e `staleness_hint` (prosa pt-br) saem — `state` já carrega o
- *    sinal operacional; a prosa volta em `detailed`.
- * Campos de domínio (candidates, hops, tree, …) são preservados intactos.
+ *  - `message` mantém só o código `E_*`/`W_*`; prosa estática (sucesso) some;
+ *  - `limitations` cosméticas saem; códigos `E_*`/`W_*` sobrevivem compactos;
+ *  - `staleness_hint` (prosa pt-br) sai — `state` + códigos cobrem o sinal;
+ *  - domínio acionável permanece: `embedding_status`, `retrieve_handle`,
+ *    `origin_refs`, snippets, candidates, hops, tree, …
+ * `detailed` restaura a prosa completa.
  */
-function applyResponseFormat(
+export function applyResponseFormat(
   payload: ToolResponsePayload,
   format: ResponseFormat,
   tool: McpToolName,
@@ -70,13 +72,28 @@ function applyResponseFormat(
 
   const { message, confidence, limitations, staleness_hint, ...rest } = payload;
   void confidence;
-  void limitations;
   void staleness_hint;
   const out = rest as ToolResponsePayload;
 
   const messageCode = envelopeCode(typeof message === "string" ? message : undefined);
   if (messageCode) {
     out.message = messageCode;
+  }
+
+  // Whitelist: só códigos E_*/W_* em limitations; prosa cosmética some.
+  if (Array.isArray(limitations) && limitations.length > 0) {
+    const codes: string[] = [];
+    const seen = new Set<string>();
+    for (const item of limitations) {
+      const code = envelopeCode(typeof item === "string" ? item : undefined);
+      if (code && !seen.has(code)) {
+        seen.add(code);
+        codes.push(code);
+      }
+    }
+    if (codes.length > 0) {
+      out.limitations = codes;
+    }
   }
 
   return compressPayload(out, tool);

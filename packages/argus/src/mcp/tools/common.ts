@@ -78,7 +78,8 @@ export const WORKSPACE_MISSING =
 export const STRUCTURAL_INDEX_MISSING =
   "E_INDEX_MISSING: Manifest disponível; índice estrutural ausente — execute argus index ou argus sync.";
 
-// Códigos de staleness_hint — prefixam a prosa em `detailed`; `concise` já dropa o campo.
+// Códigos de staleness_hint — prefixam a prosa em `detailed`; `concise` dropa o
+// campo (não são E_*/W_*). Sinais acionáveis concise: state + códigos E_*/W_* + domínio.
 export const STALE_RUN_SYNC = "STALE_RUN_SYNC";
 export const STALE_RUN_INDEX = "STALE_RUN_INDEX";
 export const STALE_RUN_EMBED = "STALE_RUN_EMBED";
