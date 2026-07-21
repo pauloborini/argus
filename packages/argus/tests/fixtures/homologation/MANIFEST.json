@@ -1,7 +1,7 @@
 {
-  "id": "homologate-agent-corpora-v1",
-  "purpose": "Q1 — corpora determinísticos para S8 (pequeno + médio)",
-  "note": "Fixtures versionados no repo; não dependem de clones externos.",
+  "id": "homologate-agent-corpora-v2",
+  "purpose": "S8v2 — corpora determinísticos para jornada MCP (small + medium + stress truncate)",
+  "note": "Fixtures versionados no repo; corpus-stress força símbolo > caps balanced (P3). Nível de prova = jornada MCP, não churn LLM (INV-H6).",
   "corpora": [
     {
       "id": "corpus-small",
@@ -9,6 +9,7 @@
       "path": "corpus-small",
       "probe_target": "calculateTotal",
       "probe_file": "src/utils.ts",
+      "expect_truncate": false,
       "description": "Dois módulos TS com call edge (utils→dep)"
     },
     {
@@ -17,7 +18,18 @@
       "path": "corpus-medium",
       "probe_target": "placeOrder",
       "probe_file": "src/services/order.ts",
+      "expect_truncate": false,
       "description": "Multi-módulo billing/catalog/services com imports cruzados"
+    },
+    {
+      "id": "corpus-stress",
+      "size": "stress",
+      "path": "corpus-stress",
+      "probe_target": "largeHardeningSymbol",
+      "probe_file": "src/large-symbol.ts",
+      "probe_needle": "HARDENING_NEEDLE_BEYOND_CAP_16",
+      "expect_truncate": true,
+      "description": "Símbolo acima dos caps balanced 16/120 — prova truncate→retrieve"
     }
   ]
 }

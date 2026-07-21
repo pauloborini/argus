@@ -119,7 +119,15 @@ describe("release privacy checklist (S08)", () => {
       response_format: "detailed",
     });
     for (const tool of MCP_TOOL_NAMES) {
-      const payload = buildToolResponse(tool, root, { response_format: "detailed" });
+      // remember exige caminho async (hot embed); demais tools usam dispatcher sync.
+      const payload =
+        tool === "remember"
+          ? await buildToolResponseAsync(tool, root, {
+              content: "privacy checklist capture",
+              type: "insight",
+              response_format: "detailed",
+            })
+          : buildToolResponse(tool, root, { response_format: "detailed" });
       try {
         assertNoSecret(payload);
       } catch {

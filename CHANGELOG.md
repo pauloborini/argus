@@ -16,8 +16,11 @@
   manual; ranking v2 com fatores de confidence/recência/sinais.
 - hot paths lazy (explore/pack/diff/retrieve/status) sem full-load estrutural
   default; sync delta sem materializar o índice anterior quando seguro.
-- homologação agent-facing (S8): jornada MCP em dois corpora fixtures + golden
-  `homologate-agent-v1`; smoke do tarball valida ListTools slim + CallTool unlisted.
+- homologação S8v2 (jornada MCP, não churn LLM): corpora small/medium/stress +
+  golden `homologate-agent-v2` (truncate→retrieve, remember listed, remember→recall
+  sem sync); smoke do tarball valida ListTools slim + CallTool unlisted.
+- explore truncado emite `retrieve_handle`; hot embed no remember; claims de
+  homologação distinguem jornada MCP de medição de churn de agente LLM.
 
 ## 2.1.2 - 2026-07-14
 
