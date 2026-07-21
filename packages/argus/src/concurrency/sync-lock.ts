@@ -1,13 +1,11 @@
 import { closeSync, futimesSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
-import { join } from "node:path";
-import { getWorkspacePath } from "../workspace/workspace.js";
+import { getSyncLockPath } from "../workspace/workspace.js";
 
 /** Sleep síncrono curto sem busy-wait (entre tentativas de lock). */
 function sleepMs(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-const LOCK_FILE = "sync.lock";
 /**
  * Lock considerado órfão após este tempo **sem heartbeat** (mtime do arquivo).
  * O dono vivo refresca o mtime periodicamente ({@link HEARTBEAT_MS}), então um
@@ -21,10 +19,6 @@ const HEARTBEAT_MS = 20_000;
 interface LockRecord {
   pid: number;
   acquired_at: number;
-}
-
-function lockPath(cwd: string): string {
-  return join(getWorkspacePath(cwd), LOCK_FILE);
 }
 
 /** Verdadeiro se o processo `pid` ainda está vivo nesta máquina. */
@@ -99,11 +93,12 @@ export interface SyncLockResult {
  * auto-sync simplesmente pulam: o próximo evento re-tenta).
  */
 export async function withSyncLock<T>(
-  cwd: string,
+  /** Raiz canônica do workspace (pai de `.argus`), não um cwd arbitrário de shell. */
+  rootPath: string,
   fn: () => Promise<T>,
   timeoutMs = 30_000,
 ): Promise<{ result?: T } & SyncLockResult> {
-  const path = lockPath(cwd);
+  const path = getSyncLockPath(rootPath);
   const deadline = Date.now() + timeoutMs;
   let fd: number | null = null;
 

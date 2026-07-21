@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,6 +9,10 @@ import {
   resolveServeWorkspaceRoot,
 } from "../src/workspace/resolve-serve-root.js";
 
+function real(path: string): string {
+  return realpathSync.native(path);
+}
+
 describe("resolveServeWorkspaceRoot", () => {
   let tempDir: string;
   let savedXdgConfigHome: string | undefined;
@@ -16,6 +20,11 @@ describe("resolveServeWorkspaceRoot", () => {
   afterEach(() => {
     if (tempDir && existsSync(tempDir)) {
       unregisterWorkspace(tempDir);
+      try {
+        unregisterWorkspace(real(tempDir));
+      } catch {
+        /* ignore */
+      }
       rmSync(tempDir, { recursive: true, force: true });
     }
     if (savedXdgConfigHome !== undefined) {
@@ -39,7 +48,7 @@ describe("resolveServeWorkspaceRoot", () => {
       [ARGUS_WORKSPACE_ROOT_ENV]: project,
     });
 
-    expect(root).toBe(project);
+    expect(root).toBe(real(project));
     rmSync(outside, { recursive: true, force: true });
   });
 
@@ -52,7 +61,7 @@ describe("resolveServeWorkspaceRoot", () => {
       WORKSPACE_FOLDER_PATHS: project,
     });
 
-    expect(root).toBe(project);
+    expect(root).toBe(real(project));
     rmSync(outside, { recursive: true, force: true });
   });
 
@@ -64,7 +73,7 @@ describe("resolveServeWorkspaceRoot", () => {
 
     const root = resolveServeWorkspaceRoot(nested, {});
 
-    expect(root).toBe(project);
+    expect(root).toBe(real(project));
   });
 
   it("usa registry do daemon quando cwd não contém workspace", () => {
@@ -79,7 +88,7 @@ describe("resolveServeWorkspaceRoot", () => {
     const outside = mkdtempSync(join(tmpdir(), "argus-outside-"));
     const root = resolveServeWorkspaceRoot(outside, {});
 
-    expect(root).toBe(project);
+    expect(root).toBe(real(project));
     rmSync(outside, { recursive: true, force: true });
     rmSync(registryHome, { recursive: true, force: true });
   });
