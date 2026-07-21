@@ -497,13 +497,16 @@ Run from the monorepo root.
 | `npm run validate` | typecheck + test + lint + build. |
 | `npm run benchmark:mvp` | Internal benchmark → `.argus/benchmark/latest/`. |
 | `npm run smoke:package` | Install & exercise the tarball in a clean dir. |
-| `npm run homologate` | CLI probe on ≥2 corpora (fixtures by default) + S8 agent-facing MCP golden. |
+| `npm run homologate` | CLI probe on ≥2 corpora (fixtures by default) + S8v2 MCP journey golden. |
 | `npm run release:check` | Assert version consistency across root/runtime/plugin. |
 | `npm run release:eval` | Aggregated memory/privacy/performance evidence with blocking verdict → `.argus/release-evaluation/latest.json`. |
 
 Homologation defaults to in-repo fixtures (`corpus-small` + `corpus-medium`).
-Override with `ARGUS_HOMOLOGATION_REPOS=repoA:repoB`. Agent-facing proof (S8)
-runs MCP in-process against those corpora and replays golden `homologate-agent-v1`.
+Override with `ARGUS_HOMOLOGATION_REPOS=repoA:repoB`. The S8v2 MCP journey proof
+runs Client+Server in-process (ListTools slim with `remember`, explore truncate→
+`retrieve` on `corpus-stress`, remember→recall without memory sync) and replays
+golden `homologate-agent-v2`. This is a **protocol/journey** gate — it does **not**
+measure agent LLM Read/Grep churn.
 
 Release evaluation covers aggregated retrieval/memory, local-first privacy, degradation without embeddings/LLM, dream dry-run, and the MCP surface (ListTools slim by default; CallTool keeps all 12 including `remember`/`recall`). Recorded performance is indicative only — no SLA. A non-`passed` verdict exits non-zero.
 

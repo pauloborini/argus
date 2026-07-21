@@ -223,9 +223,10 @@ if (payload.verdict === "incomplete") {
   throw new Error(`Homologação incompleta: retrieval degradado em ${degraded}.`);
 }
 
-// S8 — jornada agent-facing MCP (ListTools slim, explore, remember→recall, status)
-// em corpora fixtures + golden replay. Sem mock do seam.
-console.log("Rodando homologação agent-facing S8 (MCP in-process + golden)...");
+// S8v2 — jornada MCP (ListTools slim+remember, explore→retrieve se truncado,
+// remember→recall sem sync) + golden homologate-agent-v2. Sem mock do seam.
+// Nível: protocolo/jornada MCP — NÃO mede churn LLM Read/Grep (INV-H6).
+console.log("Rodando homologação S8v2 jornada MCP (in-process + golden v2)...");
 execFileSync(
   "npm",
   ["exec", "--workspace=@owerride/argus", "--", "vitest", "run", "tests/homologate-agent.test.ts"],
@@ -237,5 +238,5 @@ execFileSync(
 );
 
 console.log(
-  `Homologação aprovada em ${results.length} repositórios/corpora (CLI) + S8 agent-facing.`,
+  `Homologação aprovada em ${results.length} repositórios/corpora (CLI) + S8v2 MCP journey.`,
 );

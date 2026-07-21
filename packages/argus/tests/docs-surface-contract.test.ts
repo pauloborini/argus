@@ -53,6 +53,27 @@ describe("AC-6.2.1 docs surface contract", () => {
     }
   });
 
+  it("AC-6.2.1 README EN/PT citam install --refresh e rejeitam sync pós-remember", () => {
+    for (const rel of ["README.md", "README.pt-BR.md"] as const) {
+      const body = readDoc(rel);
+      expect(body, `${rel} deve citar install --refresh`).toMatch(/install --refresh/);
+      // Ritual positivo pós-remember proibido; anti-claim explícito exigido.
+      expect(body, `${rel} deve rejeitar memory sync após remember`).toMatch(
+        /do \*\*not\*\* run `memory sync` after remember|\*\*não\*\* rode `memory sync` após remember/,
+      );
+    }
+  });
+
+  it("AC-6.2.3 COMMANDS EN/PT distinguem jornada MCP de churn LLM", () => {
+    for (const rel of ["COMMANDS.md", "COMMANDS.pt-BR.md"] as const) {
+      const body = readDoc(rel);
+      expect(body, `${rel} deve citar homologate-agent-v2`).toContain("homologate-agent-v2");
+      expect(body, `${rel} deve negar medição de churn LLM`).toMatch(
+        /does \*\*not\*\*[\s\S]{0,40}LLM|não\*\* mede churn|NÃO mede churn|does not measure/i,
+      );
+    }
+  });
+
   it("catálogo registrado permanece 12 nomes canônicos", () => {
     expect(MCP_TOOL_NAMES).toHaveLength(12);
     expect(DEFAULT_LISTED_MCP_TOOLS).toHaveLength(5);

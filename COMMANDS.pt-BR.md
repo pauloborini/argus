@@ -497,13 +497,16 @@ Rode a partir da raiz do monorepo.
 | `npm run validate` | typecheck + test + lint + build. |
 | `npm run benchmark:mvp` | Benchmark interno → `.argus/benchmark/latest/`. |
 | `npm run smoke:package` | Instala e exercita o tarball num diretório limpo. |
-| `npm run homologate` | Sonda CLI em ≥2 corpora (fixtures por default) + S8 agent-facing MCP. |
+| `npm run homologate` | Sonda CLI em ≥2 corpora (fixtures por default) + golden S8v2 jornada MCP. |
 | `npm run release:check` | Verifica consistência de versão root/runtime/plugin. |
 | `npm run release:eval` | Evidência agregada memória/privacidade/performance com veredito bloqueante → `.argus/release-evaluation/latest.json`. |
 
 Homologação usa por default os fixtures `corpus-small` + `corpus-medium`.
-Override: `ARGUS_HOMOLOGATION_REPOS=repoA:repoB`. A prova agent-facing (S8)
-roda MCP in-process nesses corpora e faz replay do golden `homologate-agent-v1`.
+Override: `ARGUS_HOMOLOGATION_REPOS=repoA:repoB`. A prova S8v2 (jornada MCP)
+roda Client+Server in-process (ListTools slim com `remember`, explore truncado→
+`retrieve` em `corpus-stress`, remember→recall sem memory sync) e faz replay do
+golden `homologate-agent-v2`. É gate de **protocolo/jornada** — **não** mede churn
+de Read/Grep de agente LLM.
 
 Avaliação de release cobre retrieval/memória agregados, privacidade local-first, degradação sem embeddings/LLM, dream dry-run e superfície MCP (ListTools slim por default; CallTool mantém as 12, inclusive `remember`/`recall`). Performance registrada é orientativa, sem SLA. Veredito diferente de `passed` sai com código não-zero.
 
