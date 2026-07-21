@@ -29,7 +29,7 @@ import { runServeMcp } from "./commands/serve.js";
 import { runMarkDirty } from "./commands/mark-dirty.js";
 import { runHookInstall, runHookUninstall } from "./commands/hooks.js";
 import { runAgentRulesInstall, runAgentRulesUninstall } from "./commands/agent-rules.js";
-import { runInstall, runUninstall } from "./commands/install.js";
+import { runInstall, runUninstall, runInstallRefresh } from "./commands/install.js";
 import {
   runDaemon,
   runDaemonStart,
@@ -138,6 +138,7 @@ program
 program
   .command("install")
   .description("Fiação zero-toque do repo: workspace + índice + MCP + daemon (um comando)")
+  .option("--refresh", "Atualiza agent-rules versionadas e entradas MCP sem reindexar")
   .option("--hosts <lista>", "Hosts MCP a registrar (CSV); default: detectados (claude-code/cursor sempre)")
   .option("--scope <escopo>", "Escopo do registro MCP: global | local")
   .option("-g, --global", "Registra MCP global (todos os projetos) — default p/ codex/opencode/pi")
@@ -148,6 +149,7 @@ program
   .option("--no-memory", "Não inicializar/sincronizar o cofre de memória")
   .action(
     async (opts: {
+      refresh?: boolean;
       hosts?: string;
       scope?: string;
       global?: boolean;
@@ -157,6 +159,16 @@ program
       withHooks?: boolean;
       memory?: boolean;
     }) => {
+      if (opts.refresh) {
+        finish(
+          runInstallRefresh({
+            hosts: parseHosts(opts.hosts),
+            scope: parseScope(opts),
+            noMcp: opts.mcp === false,
+          }).code,
+        );
+        return;
+      }
       finish(
         await runInstall({
           hosts: parseHosts(opts.hosts),
