@@ -50,7 +50,7 @@ describe("explore tool", () => {
     expect((payload.snippets as Array<{ path: string }>)[0]?.path).toBe("utils.ts");
   });
 
-  it("overview-first: central_symbols e snippets carregam signature sem corpo", async () => {
+  it("balanced acionável: snippets carregam body verbatim além da assinatura (S3)", async () => {
     const root = setupWorkspace({
       "utils.ts": 'import { helper } from "./dep";\nexport function calculateTotal() { helper(); return 1; }\n',
       "dep.ts": "export function helper() {}\n",
@@ -60,9 +60,30 @@ describe("explore tool", () => {
     const payload = buildToolResponse("explore", root, { target: "calculateTotal", mode: "symbol" });
     const central = (payload.central_symbols as Array<{ name: string; signature?: string }>)[0];
     expect(central?.signature).toContain("calculateTotal");
+    // Assinatura em central_symbols permanece sem corpo; o trecho verbatim vai em snippets.body.
     expect(central?.signature).not.toContain("return 1");
-    const snippet = (payload.snippets as Array<{ signature?: string }>)[0];
+    const snippet = (payload.snippets as Array<{ signature?: string; body?: string }>)[0];
     expect(snippet?.signature).toContain("calculateTotal");
+    expect(snippet?.body).toBeTruthy();
+    expect(snippet?.body).toContain("return 1");
+    expect(snippet?.body).toContain("helper()");
+  });
+
+  it("concise preserva snippet.body, refs e códigos acionáveis (AC-3.2.2)", async () => {
+    const root = setupWorkspace({
+      "utils.ts": "export function calculateTotal() { return 1; }\n",
+    });
+    expect(await runIndex()).toBe(0);
+
+    const payload = buildToolResponse("explore", root, { target: "calculateTotal", mode: "symbol" });
+    expect(payload.confidence).toBeUndefined();
+    expect(payload.limitations).toBeUndefined();
+    const snippet = (payload.snippets as Array<{ body?: string; signature?: string; path?: string }>)[0];
+    expect(snippet?.body).toContain("return 1");
+    expect(snippet?.signature).toContain("calculateTotal");
+    expect(snippet?.path).toBe("utils.ts");
+    expect((payload.relevant_files as unknown[]).length).toBeGreaterThan(0);
+    expect((payload.central_symbols as unknown[]).length).toBeGreaterThan(0);
   });
 
   it("declara ambiguidade quando múltiplos alvos competem", async () => {

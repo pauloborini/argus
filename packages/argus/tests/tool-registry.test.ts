@@ -110,6 +110,18 @@ describe("tool-registry", () => {
     expect(TOOL_INPUT_JSON_SCHEMAS.retrieve.properties.handle.pattern).toBe("^(rh|mh)_[a-f0-9]{16}$");
   });
 
+  it("AC-3.2.1 retrieve.context_lines está no JSON Schema tipado", () => {
+    const schema = TOOL_INPUT_JSON_SCHEMAS.retrieve;
+    expect(schema.properties).toHaveProperty("context_lines");
+    expect(schema.properties.context_lines).toMatchObject({
+      type: "integer",
+      minimum: 0,
+      maximum: 100,
+    });
+    // additionalProperties false: capacidade descobrível só via properties tipadas.
+    expect(schema.additionalProperties).toBe(false);
+  });
+
   it("servidor MCP identificado como argus", () => {
     expect(MCP_SERVER_NAME).toBe("argus");
   });
@@ -332,6 +344,46 @@ describe("S1 MCP surface slim (ListTools vs CallTool)", () => {
 
     // InMemoryTransport não usa stdout; qualquer write espúrio de handlers é regressão.
     expect(stdoutChunks).toEqual([]);
+  });
+
+  it("AC-3.2.1 ListTools publica retrieve.context_lines quando override lista retrieve; CallTool aplica janela (S2)", async () => {
+    const root = useIndexedWorkspace();
+    expect(await runIndex()).toBe(0);
+
+    // Override lista retrieve (unlisted por default) — schema público deve expor context_lines.
+    const client = await connectClient("retrieve,status");
+    const { tools } = await client.listTools();
+    const retrieveTool = tools.find((t) => t.name === "retrieve");
+    expect(retrieveTool).toBeTruthy();
+    const props = (retrieveTool?.inputSchema as { properties?: Record<string, unknown> })?.properties;
+    expect(props).toHaveProperty("context_lines");
+
+    // Pack com budget baixo gera handle; retrieve com context_lines expande do disco real.
+    const packed = buildToolResponse("pack_context", root, {
+      sources: ["lib.ts"],
+      goal: "S2 context_lines",
+      token_budget: 60,
+      style: "deep",
+      response_format: "detailed",
+    });
+    const handle = String(packed.retrieve_handle);
+    expect(handle).toMatch(/^rh_[a-f0-9]{16}$/);
+
+    const res = await client.callTool({
+      name: "retrieve",
+      arguments: { handle, context_lines: 1 },
+    });
+    expect(res.isError).not.toBe(true);
+    const text = (res.content as Array<{ type: string; text: string }>)[0].text;
+    const payload = JSON.parse(text) as {
+      state: string;
+      context_lines?: number;
+      content?: string;
+    };
+    expect(["sucesso", "parcial"]).toContain(payload.state);
+    expect(payload.context_lines).toBe(1);
+    expect(String(payload.content)).toContain("alpha");
+    await client.close();
   });
 
   it("env var name documentada bate com constante", () => {

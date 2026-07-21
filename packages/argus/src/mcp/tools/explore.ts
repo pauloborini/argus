@@ -10,7 +10,7 @@ import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
 import { queryMemoryGraphForExplore } from "../../memory/memory-graph-query.js";
 import { WORKSPACE_MISSING, uniqueByKey, fileMatchesTests } from "./common.js";
 import type { ToolResponsePayload, ExploreArgs, IndexEnvelope, ExploreSnippetRef, ExploreRef } from "./common.js";
-import { readSymbolSignature } from "./pack.js";
+import { buildActionableSnippet, readSymbolSignature } from "./snippet-builder.js";
 
 function buildSnippetRefs(
   cwd: string,
@@ -18,14 +18,17 @@ function buildSnippetRefs(
   symbols: ExtractedSymbol[],
   limit: number,
 ): ExploreSnippetRef[] {
-  return symbols.slice(0, limit).map((symbol) => ({
-    path: entry.relative_path,
-    start_line: symbol.start_line,
-    end_line: symbol.end_line,
-    symbol: symbol.name,
-    signature:
-      readSymbolSignature(cwd, entry.relative_path, symbol.start_line, symbol.end_line) ?? undefined,
-  }));
+  // Explore default = balanced acionável (trecho verbatim + signature).
+  return symbols.slice(0, limit).map((symbol) =>
+    buildActionableSnippet(
+      cwd,
+      entry.relative_path,
+      symbol.start_line,
+      symbol.end_line,
+      symbol.name,
+      "balanced",
+    ),
+  );
 }
 
 function collectFileRelevantFiles(

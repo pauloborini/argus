@@ -1,0 +1,23 @@
+{
+  "provenance": {
+    "id": "explore-pack-balanced-v1",
+    "captured": "2026-07-21",
+    "command": "npm exec --workspace=@owerride/argus -- vitest run tests/explore-pack-balanced-golden.test.ts",
+    "fixture": "utils.ts + dep.ts (calculateTotal/helper)",
+    "budget": {
+      "pack_token_budget": 400,
+      "style": "balanced"
+    }
+  },
+  "explore": {
+    "state": "sucesso",
+    "snippet_signature": "export function calculateTotal()",
+    "snippet_body": "export function calculateTotal() { helper(); return 1; }",
+    "relevant_files_count": 2
+  },
+  "pack": {
+    "state": "parcial",
+    "packed_context": "Objetivo: entender refactor\nEstilo: balanced\nFontes: utils.ts\n\nFonte: utils.ts\nObjetivo local: entender refactor\nResumo: Arquivo utils.ts em utils.ts: 1 símbolo(s) centrais, 1 import(s), 0 caller(s) inferido(s) e 1 callee(s) inferido(s).\nSímbolos centrais: calculateTotal\nArquivos relevantes: utils.ts, dep.ts\nCallees: helper@utils.ts\nSnippet utils.ts:2-2\nexport function calculateTotal() { helper(); return 1; }",
+    "origin_refs_count": 1
+  }
+}
