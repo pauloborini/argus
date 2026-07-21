@@ -39,7 +39,9 @@ describe("AC-6.2.1 docs surface contract", () => {
 
   it("CHANGELOG registra surface slim e compatibilidade CallTool", () => {
     const changelog = readDoc("CHANGELOG.md");
-    expect(changelog).toMatch(/ListTools|slim|quatro tools|4 tools/i);
+    expect(changelog).toMatch(/ListTools|slim/i);
+    expect(changelog).toMatch(/cinco tools|5 tools|no máximo cinco/i);
+    expect(changelog).not.toMatch(/\bquatro tools\b|\b4 tools\b|\bno máximo quatro\b/i);
     expect(changelog).toMatch(/CallTool|unlisted|invoc/i);
     expect(changelog).toMatch(/restart|cache/i);
   });
@@ -53,6 +55,6 @@ describe("AC-6.2.1 docs surface contract", () => {
 
   it("catálogo registrado permanece 12 nomes canônicos", () => {
     expect(MCP_TOOL_NAMES).toHaveLength(12);
-    expect(DEFAULT_LISTED_MCP_TOOLS).toHaveLength(4);
+    expect(DEFAULT_LISTED_MCP_TOOLS).toHaveLength(5);
   });
 });

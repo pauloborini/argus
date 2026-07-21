@@ -35,8 +35,9 @@ describe("S8 homologate-agent-v1 (agent-facing MCP)", () => {
       results.push(result);
 
       // AC-6.1.1
-      expect(result.listed_count).toBeLessThanOrEqual(4);
+      expect(result.listed_count).toBeLessThanOrEqual(5);
       expect(result.listed_tools).toEqual([...DEFAULT_LISTED_MCP_TOOLS]);
+      expect(result.listed_tools).toContain("remember");
       expect(result.explore.actionable).toBe(true);
       expect(result.explore.snippet_body).toContain(spec.probeNeedle);
       expect(["sucesso", "parcial", "stale"]).toContain(result.explore.state);

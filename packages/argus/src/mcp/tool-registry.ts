@@ -22,13 +22,14 @@ export const MCP_SERVER_NAME = "argus";
 export const ARGUS_MCP_TOOLS_ENV = "ARGUS_MCP_TOOLS";
 
 /**
- * Path feliz default (D1/P6): no máximo quatro tools listadas.
+ * Path feliz default (D1): no máximo cinco tools listadas (inclui captura).
  * CallTool continua aceitando o catálogo completo em `MCP_TOOL_NAMES`.
  */
 export const DEFAULT_LISTED_MCP_TOOLS: readonly McpToolName[] = [
   "explore",
   "pack_context",
   "recall",
+  "remember",
   "status",
 ] as const;
 
@@ -57,7 +58,7 @@ function emitListedToolsDiagnostic(message: string): void {
 
 /**
  * Resolve a política de descoberta (ListTools) a partir de `ARGUS_MCP_TOOLS`.
- * - ausente → default slim (4)
+ * - ausente → default slim (5)
  * - `all` → catálogo completo (12), ordem de `MCP_TOOL_NAMES`
  * - CSV → conjunto pedido, deduplicado, ordem estável da primeira ocorrência
  * - inválida/vazia → warning em stderr + default seguro (não expõe 12)
@@ -343,7 +344,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   semantic_search:
     "Busca semântica densa (embeddings) com fusão híbrida; fallback quando o lexical vier vazio (avançada; unlisted por default)",
   remember:
-    "Capturar nota, decisão ou insight no cofre local (avançada; unlisted por default — use recall para ler)",
+    "Path feliz de captura: gravar nota, decisão ou insight no cofre local (use recall para ler)",
   recall: "Recuperar decisões e fatos do cofre local com FTS/híbrido, sem LLM",
 };
 
