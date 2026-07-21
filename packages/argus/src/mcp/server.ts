@@ -5,7 +5,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { MCP_SERVER_NAME, MCP_TOOL_NAMES, TOOL_INPUT_JSON_SCHEMAS, TOOL_DESCRIPTIONS } from "./tool-registry.js";
+import { MCP_SERVER_NAME, isMcpToolName, resolveListedTools, buildMcpToolDefinitions } from "./tool-registry.js";
 import { buildToolResponseAsync, buildToolResponseTsv } from "./tools/response.js";
 import { ARGUS_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
@@ -15,6 +15,11 @@ import { runSync } from "../commands/sync.js";
 export interface McpServerOptions {
   /** Roda sync incremental antes de cada tool call quando há dirty pendente. */
   autoSync?: boolean;
+  /**
+   * Override de `ARGUS_MCP_TOOLS` (testes). Ausente = lê process.env.
+   * Mudança em runtime exige novo `createMcpServer` (restart MCP).
+   */
+  listedToolsEnv?: string | undefined;
 }
 
 const TOOL_INPUT_SCHEMAS = {
@@ -88,6 +93,13 @@ const TOOL_INPUT_SCHEMAS = {
 
 export function createMcpServer(options: McpServerOptions = {}): Server {
   const autoSync = options.autoSync !== false;
+  // Política de descoberta resolvida no boot: ListTools usa listed; CallTool usa all.
+  // `listedToolsEnv` permite testes isolarem a env sem mutar process.env globalmente.
+  const listedResolution =
+    "listedToolsEnv" in options
+      ? resolveListedTools(options.listedToolsEnv)
+      : resolveListedTools();
+  const listedDefinitions = buildMcpToolDefinitions(listedResolution.listed);
   // Ancora o auto-sync no cwd do server (onde o workspace foi validado em
   // `runServeMcp`), não no cwd do momento da tool call — mantém a leitura da
   // dirty-flag e o sync sobre o mesmo workspace que as tools resolvem.
@@ -160,17 +172,14 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: MCP_TOOL_NAMES.map((name) => ({
-      name,
-      description: TOOL_DESCRIPTIONS[name],
-      inputSchema: TOOL_INPUT_JSON_SCHEMAS[name],
-    })),
+    tools: listedDefinitions,
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name;
 
-    if (!(MCP_TOOL_NAMES as readonly string[]).includes(toolName)) {
+    // Unlisted ≠ desabilitada: validação e dispatch usam o catálogo completo.
+    if (!isMcpToolName(toolName)) {
       return {
         content: [
           {
@@ -182,7 +191,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
       };
     }
 
-    const schema = TOOL_INPUT_SCHEMAS[toolName as keyof typeof TOOL_INPUT_SCHEMAS];
+    const schema = TOOL_INPUT_SCHEMAS[toolName];
 
     let args: Record<string, unknown>;
     try {
@@ -206,7 +215,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
 
     if (args.response_format === "tsv") {
       const { text, truncationNote, isError } = buildToolResponseTsv(
-        toolName as (typeof MCP_TOOL_NAMES)[number],
+        toolName,
         pathArg,
         args,
       );
@@ -218,7 +227,7 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     }
 
     const payload = await buildToolResponseAsync(
-      toolName as (typeof MCP_TOOL_NAMES)[number],
+      toolName,
       pathArg,
       args,
     );
