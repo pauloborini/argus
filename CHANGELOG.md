@@ -2,25 +2,31 @@
 
 ## Unreleased
 
-- surface MCP slim por default: ListTools anuncia no máximo cinco tools
+## 2.2.0 - 2026-07-21
+
+- surface MCP slim por default: ListTools anuncia cinco tools
   (`explore`, `pack_context`, `recall`, `remember`, `status`); as 12 registradas
   continuam invocáveis via CallTool/CLI. Override: `ARGUS_MCP_TOOLS=all` (ou CSV).
   **Compatibilidade:** hosts que cacheiam ListTools precisam **reiniciar** o
-  processo MCP após o upgrade; unlisted não significa desabilitada.
-  (`retrieve` permanece unlisted — handle já vem do payload.)
+  processo MCP após o upgrade; unlisted não significa desabilitada
+  (`retrieve` permanece unlisted — handle já vem do payload)
 - `argus install --refresh` regenera o bloco de agent-rules versionado e
-  reconverge entradas MCP; opt-out: `ARGUS_NO_INSTALL_REFRESH=1`.
+  reconverge entradas MCP; opt-out: `ARGUS_NO_INSTALL_REFRESH=1`
 - explore/pack balanced entregam trechos verbatim acionáveis; `retrieve`
-  publica `context_lines` no schema.
+  publica `context_lines` no schema; explore truncado emite `retrieve_handle`
+  reidratável
 - memória: `remember` faz upsert quente (FTS) — `recall` same-session sem sync
-  manual; ranking v2 com fatores de confidence/recência/sinais.
+  manual; ranking v2 com fatores de confidence/recência/sinais;
+  `type=decision` grava `confidence=confirmed`
+- hot embed unitário no `remember` (sem wipe/`memory sync` no happy path);
+  `argus memory embed` incremental
 - hot paths lazy (explore/pack/diff/retrieve/status) sem full-load estrutural
-  default; sync delta sem materializar o índice anterior quando seguro.
+  default; sync delta sem materializar o índice anterior quando seguro
+- concise preserva honesty acionável (`embedding_status`, `retrieve_handle`,
+  códigos `E_*`/`W_*`)
 - homologação S8v2 (jornada MCP, não churn LLM): corpora small/medium/stress +
-  golden `homologate-agent-v2` (truncate→retrieve, remember listed, remember→recall
-  sem sync); smoke do tarball valida ListTools slim + CallTool unlisted.
-- explore truncado emite `retrieve_handle`; hot embed no remember; claims de
-  homologação distinguem jornada MCP de medição de churn de agente LLM.
+  golden `homologate-agent-v2`; smoke do tarball valida ListTools slim +
+  CallTool unlisted
 
 ## 2.1.2 - 2026-07-14
 
