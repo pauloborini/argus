@@ -26,9 +26,19 @@ export {
   WORKSPACE_METADATA_FILE,
   getManifestPath,
   getMetadataPath,
+  getStatePaths,
   getWorkspacePath,
   initWorkspace,
   readWorkspaceMetadata,
   requireWorkspace,
   workspaceExists,
 } from "./workspace/workspace.js";
+export type { WorkspaceStatePaths } from "./workspace/workspace.js";
+export {
+  ARGUS_WORKSPACE_ROOT_ENV,
+  W_WORKSPACE_ROOT_HEALED,
+  healRootPathIfNeeded,
+  resolveWorkspaceRoot,
+} from "./workspace/resolve-workspace.js";
+export type { WorkspaceHandle } from "./workspace/resolve-workspace.js";
+export { resolveServeWorkspaceRoot } from "./workspace/resolve-serve-root.js";

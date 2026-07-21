@@ -40,6 +40,10 @@ import {
   requireWorkspace,
   resolveRespectGitignore,
 } from "../workspace/workspace.js";
+import {
+  healRootPathIfNeeded,
+  W_WORKSPACE_ROOT_HEALED,
+} from "../workspace/resolve-workspace.js";
 
 export type SyncedVia = "full" | "git-delta" | "dirty-flag" | "watch";
 
@@ -89,6 +93,35 @@ function toWorkspaceRelative(rootPath: string, paths: string[]): string[] {
   return out;
 }
 
+/**
+ * Rebaseia paths absolutos emitidos contra o start lexical para o root real
+ * pós-heal. No macOS, por exemplo, watchers podem emitir `/var/...` enquanto
+ * `realpath` canônico é `/private/var/...`; comparar as duas strings direto
+ * classificaria um arquivo interno como escape do workspace.
+ */
+function rebaseExplicitPaths(
+  startCwd: string,
+  rootPath: string,
+  paths: string[],
+): string[] {
+  const lexicalRoot = resolve(startCwd);
+  const canonicalRoot = resolve(rootPath);
+  if (lexicalRoot === canonicalRoot) {
+    return paths;
+  }
+
+  return paths.map((raw) => {
+    if (!raw || !isAbsolute(raw)) {
+      return raw;
+    }
+    const rel = normalizeRelativePath(relative(lexicalRoot, resolve(raw)));
+    if (!rel || rel.startsWith("../")) {
+      return raw;
+    }
+    return resolve(canonicalRoot, rel);
+  });
+}
+
 interface ResolvedDelta {
   changed: DiscoveredFile[];
   removed: string[];
@@ -130,7 +163,6 @@ function resolveDelta(
   rootPath: string,
   previousManifest: DiscoveryManifest,
   options: SyncOptions,
-  cwd: string,
   respectGitignore: boolean,
 ): ResolvedDelta {
   const walkPath = (): ResolvedDelta => {
@@ -179,7 +211,7 @@ function resolveDelta(
     return walkPath();
   }
 
-  const dirty = readDirtyFlag(cwd);
+  const dirty = readDirtyFlag(rootPath);
   const dirtyCount = dirty ? dirty.paths.length : 0;
   if (dirty && !dirty.force_full && dirty.paths.length > 0 && dirty.since_ref) {
     const delta = gitDelta(rootPath, dirty.since_ref, { respect_gitignore: respectGitignore });
@@ -204,7 +236,7 @@ function resolveDelta(
 }
 
 export async function runSync(options: SyncOptions = {}): Promise<number> {
-  const cwd = options.cwd ?? process.cwd();
+  const startCwd = options.cwd ?? process.cwd();
   // Diagnose informativa: stdout no uso normal (CLI/daemon), stderr quando
   // `quiet` (caminho MCP, que não pode contaminar o stdout do JSON-RPC).
   const emitInfo = options.quiet
@@ -213,21 +245,34 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
   let rootPath: string;
   let respectGitignore: boolean;
   try {
-    const metadata = requireWorkspace(cwd);
-    rootPath = metadata.root_path;
-    respectGitignore = resolveRespectGitignore(metadata, options.respectGitignore);
+    // Start só descobre; após heal D4, todo I/O de estado usa rootPath canônico
+    // (mesmo pai de `.argus` que contém workspace.json — INV-W1).
+    const metadata = requireWorkspace(startCwd);
+    const { metadata: healedMeta, healed } = healRootPathIfNeeded(startCwd, metadata);
+    if (healed) {
+      process.stderr.write(
+        `${W_WORKSPACE_ROOT_HEALED}: root_path alinhado para ${healedMeta.root_path} (antes: ${metadata.root_path}).\n`,
+      );
+    }
+    rootPath = healedMeta.root_path;
+    respectGitignore = resolveRespectGitignore(healedMeta, options.respectGitignore);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(message);
     return 1;
   }
 
+  const explicitPaths = options.paths
+    ? rebaseExplicitPaths(startCwd, rootPath, options.paths)
+    : undefined;
+  const resolvedOptions = explicitPaths ? { ...options, paths: explicitPaths } : options;
+
   // Seção crítica sob lock de workspace: serializa escritas concorrentes ao
   // índice entre daemon, auto-sync do MCP e `argus sync` manual. Se o lock não
   // for adquirido a tempo, o sync é pulado (não é erro: outro processo já está
   // reconciliando; o próximo evento/tool-call re-tenta).
-  const lock = await withSyncLock(cwd, async (): Promise<number> => {
-    const manifestPath = getManifestPath(cwd);
+  const lock = await withSyncLock(rootPath, async (): Promise<number> => {
+    const manifestPath = getManifestPath(rootPath);
     let previousManifest: DiscoveryManifest | null;
     try {
       previousManifest = readManifest(manifestPath);
@@ -245,13 +290,15 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
     }
 
     try {
-      const resolved = resolveDelta(rootPath, previousManifest, options, cwd, respectGitignore);
+      const resolved = resolveDelta(rootPath, previousManifest, resolvedOptions, respectGitignore);
       const nextFingerprints = applyDeltaFingerprints(
         previousManifest,
         resolved.changed,
         resolved.removed,
       );
       const delta = diffManifest(previousManifest, nextFingerprints);
+      // Sempre reescreve o manifest (incluindo `generated_at`) mesmo em no-op
+      // de conteúdo — timestamp estrutural honesto (P4 default).
       const nextManifest = buildDiscoveryManifest(rootPath, nextFingerprints);
       writeManifestAtomic(manifestPath, nextManifest);
 
@@ -341,7 +388,7 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
       // `status: fresh`. Deixá-la intacta faz o próximo sync (MCP lazy / boot /
       // manual) reconciliar de fato.
       if (resolved.syncedVia !== "watch") {
-        clearDirtyFlag(cwd);
+        clearDirtyFlag(rootPath);
       }
 
       if (resolved.limitations.length > 0) {
@@ -365,10 +412,10 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
     // — registra-os na dirty-flag para que o próximo sync (MCP lazy / boot /
     // manual) reconcilie. Sem isso, uma edição coincidente com a contenção
     // sumiria silenciosamente do índice.
-    if (options.paths && options.paths.length > 0) {
-      const rel = toWorkspaceRelative(rootPath, options.paths);
+    if (explicitPaths && explicitPaths.length > 0) {
+      const rel = toWorkspaceRelative(rootPath, explicitPaths);
       if (rel.length > 0) {
-        markDirty(rel, { cwd });
+        markDirty(rel, { cwd: rootPath });
       }
     }
     console.error("Sync já em andamento neste workspace; execução pulada.");
