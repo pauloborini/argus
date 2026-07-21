@@ -278,6 +278,8 @@ export const TOOL_INPUT_JSON_SCHEMAS = {
     type: "object" as const,
     properties: {
       handle: { type: "string", pattern: "^(rh|mh)_[a-f0-9]{16}$" },
+      // Body-on-demand: expande origin_refs lendo o disco com ± padding de linhas.
+      context_lines: { type: "integer", minimum: 0, maximum: 100 },
       response_format: RESPONSE_FORMAT_SCHEMA,
     },
     required: ["handle"],

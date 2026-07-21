@@ -137,9 +137,12 @@ export interface ExploreSnippetRef {
   start_line: number;
   end_line: number;
   symbol?: string;
-  // Overview-first: assinatura (linha de declaração) sem o corpo. Deixa o
-  // agente ver a forma do símbolo e decidir se vale expandir via FS/retrieve.
+  // Assinatura (linha de declaração) sem o corpo — sempre presente quando legível.
   signature?: string;
+  // Trecho verbatim limitado (balanced/deep). Ausente em brief.
+  body?: string;
+  // true quando o corpo do símbolo foi cortado pelos caps do style.
+  truncated?: boolean;
 }
 
 export interface ExploreRef {

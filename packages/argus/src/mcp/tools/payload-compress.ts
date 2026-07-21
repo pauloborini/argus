@@ -1,4 +1,5 @@
 // Compressão de payload em modo concise: remove campos derivados e aplica path dictionary.
+// Campos acionáveis (snippets.body, origin_refs, retrieve_handle, códigos E_*) são preservados.
 import type { ToolResponsePayload } from "./common.js";
 import type { McpToolName } from "../tool-registry.js";
 
@@ -29,6 +30,7 @@ function stripDerivedFields(payload: ToolResponsePayload, tool: McpToolName): To
     void tests;
     return rest as ToolResponsePayload;
   }
+  // explore/pack: snippets, origin_refs, retrieve_handle e packed_context permanecem intactos.
   return payload;
 }
 

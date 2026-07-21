@@ -13,6 +13,15 @@ import type { ToolResponsePayload, PackContextArgs, RetrieveArgs, IndexEnvelope,
 import { LazyTraceGraph, personalizedPageRank } from "./graph.js";
 import { buildExploreResponse } from "./explore.js";
 import { countTokens } from "../../packing/tokenizer.js";
+import {
+  buildActionableSnippet,
+  formatSnippetBlock,
+  getSnippetStyleCaps,
+  type SnippetStyle,
+} from "./snippet-builder.js";
+
+/** Re-export para consumidores externos do seam de assinatura. */
+export { readSymbolSignature } from "./snippet-builder.js";
 
 /**
  * Resumo de segmento que **preserva o código**. As linhas de scaffolding em
@@ -43,20 +52,15 @@ function getPackStyleConfig(style: NonNullable<PackContextArgs["style"]>): {
   depth: number;
   budget: number;
   snippetLimit: number;
-  inlineBodies: boolean;
+  snippetStyle: SnippetStyle;
 } {
-  switch (style) {
-    case "brief":
-      // Overview-first: assinatura + handle (path:linhas), zero corpo.
-      return { depth: 1, budget: 4, snippetLimit: 1, inlineBodies: false };
-    case "deep":
-      // Escape hatch: inlina corpos completos quando o agente quer o código.
-      return { depth: 4, budget: 10, snippetLimit: 3, inlineBodies: true };
-    case "balanced":
-    default:
-      // Default overview-first: o agente tem FS; inlinar código é desperdício.
-      return { depth: 2, budget: 6, snippetLimit: 2, inlineBodies: false };
-  }
+  const caps = getSnippetStyleCaps(style);
+  return {
+    depth: caps.depth,
+    budget: caps.budget,
+    snippetLimit: caps.snippetLimit,
+    snippetStyle: style,
+  };
 }
 
 function getPackedHandlesDir(cwd: string): string {
@@ -412,77 +416,6 @@ function uniqueOriginRefs(refs: PackOriginRef[]): PackOriginRef[] {
   );
 }
 
-/**
- * Lê só a **assinatura** do símbolo: da linha de declaração até o abre-corpo
- * (`{` ou `:` final) ou um teto de 3 linhas. Núcleo do modelo overview-first
- * — o agente vê a forma (`export function calc(a, b)`) sem puxar o corpo.
- * Whitespace colapsado, cap ~200 chars; null se ilegível/vazio.
- */
-export function readSymbolSignature(
-  cwd: string,
-  path: string,
-  startLine: number,
-  endLine: number,
-): string | null {
-  try {
-    const absolutePath = join(cwd, path);
-    const lines = readFileSync(absolutePath, "utf-8").split("\n");
-    const start = Math.max(0, startLine - 1);
-    const hardEnd = Math.min(lines.length, endLine);
-    const collected: string[] = [];
-    for (let i = start; i < hardEnd && collected.length < 3; i += 1) {
-      const line = lines[i] ?? "";
-      collected.push(line);
-      if (line.includes("{") || line.trimEnd().endsWith(":")) {
-        break;
-      }
-    }
-    const declaration = collected.join(" ");
-    let bodyStart = declaration.length;
-    const pythonDeclaration = /^\s*(?:async\s+)?(?:def|class)\b/.test(declaration);
-    let nesting = 0;
-    for (let i = 0; i < declaration.length; i += 1) {
-      const char = declaration[i];
-      if (char === "(" || char === "[" || char === "<") {
-        nesting += 1;
-      } else if (char === ")" || char === "]" || char === ">") {
-        nesting = Math.max(0, nesting - 1);
-      } else if (char === "{") {
-        bodyStart = i;
-        break;
-      } else if (char === "=" && declaration[i + 1] === ">") {
-        bodyStart = i;
-        break;
-      } else if (char === ":" && nesting === 0 && pythonDeclaration) {
-        bodyStart = i + 1;
-        break;
-      }
-    }
-    const signature = declaration
-      .slice(0, bodyStart)
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!signature) {
-      return null;
-    }
-    return signature.length > 200 ? `${signature.slice(0, 197)}...` : signature;
-  } catch {
-    return null;
-  }
-}
-
-function readSnippetContent(cwd: string, ref: ExploreSnippetRef): string | null {
-  try {
-    const absolutePath = join(cwd, ref.path);
-    const lines = readFileSync(absolutePath, "utf-8").split("\n");
-    const start = Math.max(0, ref.start_line - 1);
-    const end = Math.min(lines.length, ref.end_line);
-    return lines.slice(start, end).join("\n").trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 function sourceLooksLikeIndexedFile(index: StructuralIndex, source: string): boolean {
   return index.files.some((entry) => entry.relative_path === source);
 }
@@ -497,10 +430,11 @@ function buildPackSegmentsFromSource(
   segments: PackSegment[];
   limitations: string[];
   reversibility: ReadStoredPackHandleResult["reversibility"];
+  hadSnippetTruncation: boolean;
 } {
   const trimmed = source.trim();
   if (!trimmed) {
-    return { segments: [], limitations: [], reversibility: "full" };
+    return { segments: [], limitations: [], reversibility: "full", hadSnippetTruncation: false };
   }
 
   if (trimmed.startsWith("rh_") || trimmed.startsWith("mh_")) {
@@ -510,12 +444,14 @@ function buildPackSegmentsFromSource(
         segments: [],
         limitations: [`Retrieve handle não encontrado: ${trimmed}.`],
         reversibility: "none",
+        hadSnippetTruncation: false,
       };
     }
     return {
       segments: stored.segments,
       limitations: stored.limitations,
       reversibility: stored.reversibility,
+      hadSnippetTruncation: false,
     };
   }
 
@@ -525,6 +461,7 @@ function buildPackSegmentsFromSource(
       segments: [memorySegment],
       limitations: [],
       reversibility: "full",
+      hadSnippetTruncation: false,
     };
   }
 
@@ -533,6 +470,7 @@ function buildPackSegmentsFromSource(
       segments: [],
       limitations: ["Índice estrutural indisponível para empacotar fontes locais."],
       reversibility: "none",
+      hadSnippetTruncation: false,
     };
   }
 
@@ -555,6 +493,7 @@ function buildPackSegmentsFromSource(
           : `Fonte não resolvida para pack_context: ${trimmed}.`,
       ],
       reversibility: "none",
+      hadSnippetTruncation: false,
     };
   }
 
@@ -591,25 +530,21 @@ function buildPackSegmentsFromSource(
       symbol: item.symbol,
     })),
   ]);
-  const snippetBlocks = snippets
-    .map((snippet) => {
-      if (config.inlineBodies) {
-        const content = readSnippetContent(cwd, snippet);
-        if (!content) {
-          return null;
-        }
-        return `Snippet ${snippet.path}:${snippet.start_line}-${snippet.end_line}\n${content}`;
-      }
-      // Overview-first: handle (path:linhas) + assinatura, sem corpo. O agente
-      // tem FS e expande sob demanda; inlinar código é desperdício de tokens.
-      const signature =
-        snippet.signature ??
-        readSymbolSignature(cwd, snippet.path, snippet.start_line, snippet.end_line) ??
-        undefined;
-      const head = `Símbolo ${snippet.symbol ?? snippet.path}@${snippet.path}:${snippet.start_line}-${snippet.end_line}`;
-      return signature ? `${head} — ${signature}` : head;
-    })
-    .filter((item): item is string => item !== null);
+  // Reconstrói snippets com o style do pack (explore default é balanced; brief/deep divergem).
+  const styledSnippets = snippets.map((snippet) =>
+    buildActionableSnippet(
+      cwd,
+      snippet.path,
+      snippet.start_line,
+      snippet.end_line,
+      snippet.symbol,
+      config.snippetStyle,
+    ),
+  );
+  const snippetBlocks = styledSnippets
+    .map((snippet) => formatSnippetBlock(snippet, config.snippetStyle))
+    .filter((item) => item.trim().length > 0);
+  const hadSnippetTruncation = styledSnippets.some((s) => s.truncated === true);
 
   const lines = [
     `Fonte: ${trimmed}`,
@@ -658,6 +593,7 @@ function buildPackSegmentsFromSource(
     segments,
     limitations: ((payload.limitations as string[] | undefined) ?? []).slice(0, 4),
     reversibility: "full",
+    hadSnippetTruncation,
   };
 }
 
@@ -805,6 +741,7 @@ export function buildPackContextResponse(
   const limitations = new Set<string>();
   const segments: PackSegment[] = [];
   let sourceReversibility: ReadStoredPackHandleResult["reversibility"] = "full";
+  let hadSnippetTruncation = false;
 
   for (const source of sources) {
     const result = buildPackSegmentsFromSource(cwd, envelope, source, goal, style);
@@ -815,6 +752,9 @@ export function buildPackContextResponse(
       segments.push(segment);
     }
     sourceReversibility = compareReversibility(sourceReversibility, result.reversibility);
+    if (result.hadSnippetTruncation) {
+      hadSnippetTruncation = true;
+    }
   }
 
   // Item 14: PageRank personalizado no subgrafo curto das fontes, via
@@ -904,7 +844,8 @@ export function buildPackContextResponse(
   let retrieveHandle: string | undefined;
   let reversibility: ReadStoredPackHandleResult["reversibility"] = sourceReversibility;
   const isMemoryOnlyPack = sources.every((source) => source.startsWith("memory:") || source.startsWith("note:") || source.startsWith("mh_"));
-  if (hadMaterialLoss || isMemoryOnlyPack) {
+  // Handle quando há perda de budget OU truncamento de snippet por caps do style.
+  if (hadMaterialLoss || hadSnippetTruncation || isMemoryOnlyPack) {
     const handlePrefix = isMemoryOnlyPack
       ? "mh"
       : "rh";
@@ -930,6 +871,10 @@ export function buildPackContextResponse(
       limitations.add(
         "token_budget excedido; essencial preservado; ver removed_or_summarized e reutilize retrieve_handle em sources[].",
       );
+    } else if (hadSnippetTruncation && !hadMaterialLoss) {
+      limitations.add(
+        "Snippet(s) truncados pelos caps do style; use retrieve com context_lines ou style=deep.",
+      );
     }
   }
 
@@ -938,7 +883,11 @@ export function buildPackContextResponse(
   }
 
   const state =
-    envelope.state === "stale" ? "stale" : hadMaterialLoss || limitations.size > 0 ? "parcial" : "sucesso";
+    envelope.state === "stale"
+      ? "stale"
+      : hadMaterialLoss || hadSnippetTruncation || limitations.size > 0
+        ? "parcial"
+        : "sucesso";
 
   return {
     packed_context: packedContext,

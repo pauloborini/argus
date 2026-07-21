@@ -69,6 +69,7 @@ const TOOL_INPUT_SCHEMAS = {
   }).passthrough(),
   retrieve: z.object({
     handle: z.string().regex(/^(rh|mh)_[a-f0-9]{16}$/),
+    context_lines: z.number().int().min(0).max(100).optional(),
   }).passthrough(),
   semantic_search: z.object({
     query: z.string().min(1),
