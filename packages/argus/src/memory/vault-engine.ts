@@ -27,7 +27,12 @@ import {
   type MemoryRetrievalChunk,
 } from "./memory-retrieval.js";
 import * as HotUpdater from "./hot-updater.js";
-import { defaultDirectCaptureV2, isLegacyV1Note, normalizeV2Metadata } from "./v2-metadata.js";
+import {
+  confidenceForDirectCapture,
+  defaultDirectCaptureV2,
+  isLegacyV1Note,
+  normalizeV2Metadata,
+} from "./v2-metadata.js";
 
 const VALID_TYPES = new Set(["inbox", "decision", "meeting", "entity", "project", "reference"]);
 
@@ -284,7 +289,10 @@ export class VaultEngine {
     const noteDir = join(getVaultDir(cwd), targetType as VaultSubdir);
     mkdirSync(noteDir, { recursive: true });
     const notePath = join(noteDir, fileName);
-    const v2Defaults = defaultDirectCaptureV2(now);
+    // D7: decisão capturada via remember → confirmed; inbox/genérico → presumed.
+    const v2Defaults = defaultDirectCaptureV2(now, {
+      confidence: confidenceForDirectCapture(targetType),
+    });
     const finalContent = [
       "---",
       `title: ${JSON.stringify(title)}`,

@@ -577,4 +577,39 @@ describe("S6 ranking via recall em banco real", () => {
     expect(confirmed!.score).toBeGreaterThan(presumed!.score);
     expect(titles.indexOf("Ancient confirmed")).toBeLessThan(titles.indexOf("Ancient presumed"));
   });
+
+  it("AC-5.1.2 remember real: confirmed (decision) precede presumed (inbox) no recall", async () => {
+    const cwd = root();
+    const token = "rankpeerbodyidenticalfortsparity";
+    const body = `${token} shared body identical for bm25 parity`;
+
+    const confirmed = await VaultEngine.remember(body, { type: "decision", tags: ["rank-peer"] }, cwd);
+    const presumed = await VaultEngine.remember(body, { type: "inbox", tags: ["rank-peer"] }, cwd);
+    expect(confirmed.state).toBe("sucesso");
+    expect(presumed.state).toBe("sucesso");
+    expect(confirmed.note_id).not.toBe(presumed.note_id);
+
+    const recalled = await VaultEngine.recall(token, { limit: 10 }, cwd);
+    const chunks = recalled.chunks.filter(
+      (c) => c.note_id === confirmed.note_id || c.note_id === presumed.note_id,
+    );
+    expect(chunks).toHaveLength(2);
+
+    const confirmedChunk = chunks.find((c) => c.note_id === confirmed.note_id)!;
+    const presumedChunk = chunks.find((c) => c.note_id === presumed.note_id)!;
+    expect(confirmedChunk.confidence).toBe("confirmed");
+    expect(presumedChunk.confidence).toBe("presumed");
+    expect(confirmedChunk.rank_factors?.confidence).toBe(
+      MEMORY_V2_RANKING_WEIGHTS.confidence.confirmed,
+    );
+    expect(presumedChunk.rank_factors?.confidence).toBe(
+      MEMORY_V2_RANKING_WEIGHTS.confidence.presumed,
+    );
+    expect(confirmedChunk.rank_reason).toMatch(/^confirmed;/);
+    expect(presumedChunk.rank_reason).toMatch(/^presumed;/);
+    expect(confirmedChunk.score).toBeGreaterThan(presumedChunk.score);
+
+    const titles = recalled.chunks.map((c) => c.note_id);
+    expect(titles.indexOf(confirmed.note_id)).toBeLessThan(titles.indexOf(presumed.note_id));
+  });
 });
