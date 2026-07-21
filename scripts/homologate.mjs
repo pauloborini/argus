@@ -14,8 +14,27 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const cli = join(root, "packages", "argus", "dist", "cli.js");
+const packageDir = join(root, "packages", "argus");
+
+const fixtureSmall = join(
+  packageDir,
+  "tests",
+  "fixtures",
+  "homologation",
+  "corpus-small",
+);
+const fixtureMedium = join(
+  packageDir,
+  "tests",
+  "fixtures",
+  "homologation",
+  "corpus-medium",
+);
+
 const configured = process.env.ARGUS_HOMOLOGATION_REPOS?.split(":").filter(Boolean);
 const candidates = configured ?? [
+  fixtureSmall,
+  fixtureMedium,
   resolve(root, "../talos"),
   resolve(root, "../paytrainer-app"),
   join(root, ".app-vault", "archive", "headroom"),
@@ -24,7 +43,8 @@ const targets = candidates.filter(existsSync);
 
 if (targets.length < 2) {
   throw new Error(
-    "Homologação exige pelo menos 2 repos. Defina ARGUS_HOMOLOGATION_REPOS com paths separados por `:`.",
+    "Homologação exige pelo menos 2 repos/corpora. Defina ARGUS_HOMOLOGATION_REPOS com paths separados por `:` " +
+      "ou garanta os fixtures em packages/argus/tests/fixtures/homologation/.",
   );
 }
 
@@ -112,7 +132,7 @@ function probeRetrieval(cwd) {
   };
 }
 
-for (const source of targets) {
+for (const source of targets.slice(0, 4)) {
   const temp = mkdtempSync(join(tmpdir(), "argus-homologation-"));
   const target = join(temp, basename(source));
   try {
@@ -202,6 +222,20 @@ if (payload.verdict === "incomplete") {
     .join("; ");
   throw new Error(`Homologação incompleta: retrieval degradado em ${degraded}.`);
 }
+
+// S8 — jornada agent-facing MCP (ListTools slim, explore, remember→recall, status)
+// em corpora fixtures + golden replay. Sem mock do seam.
+console.log("Rodando homologação agent-facing S8 (MCP in-process + golden)...");
+execFileSync(
+  "npm",
+  ["exec", "--workspace=@owerride/argus", "--", "vitest", "run", "tests/homologate-agent.test.ts"],
+  {
+    cwd: root,
+    stdio: "inherit",
+    env: { ...process.env, HOMOLOGATE_EVIDENCE: "1" },
+  },
+);
+
 console.log(
-  `Homologação aprovada em ${results.length} repositórios com retrieval útil sondado.`,
+  `Homologação aprovada em ${results.length} repositórios/corpora (CLI) + S8 agent-facing.`,
 );

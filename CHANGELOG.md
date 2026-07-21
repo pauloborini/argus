@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- surface MCP slim por default: ListTools anuncia no máximo quatro tools
+  (`explore`, `pack_context`, `recall`, `status`); as 12 registradas continuam
+  invocáveis via CallTool/CLI. Override: `ARGUS_MCP_TOOLS=all` (ou CSV).
+  **Compatibilidade:** hosts que cacheiam ListTools precisam **reiniciar** o
+  processo MCP após o upgrade; unlisted não significa desabilitada.
+- `argus install --refresh` regenera o bloco de agent-rules versionado e
+  reconverge entradas MCP; opt-out: `ARGUS_NO_INSTALL_REFRESH=1`.
+- explore/pack balanced entregam trechos verbatim acionáveis; `retrieve`
+  publica `context_lines` no schema.
+- memória: `remember` faz upsert quente (FTS) — `recall` same-session sem sync
+  manual; ranking v2 com fatores de confidence/recência/sinais.
+- hot paths lazy (explore/pack/diff/retrieve/status) sem full-load estrutural
+  default; sync delta sem materializar o índice anterior quando seguro.
+- homologação agent-facing (S8): jornada MCP em dois corpora fixtures + golden
+  `homologate-agent-v1`; smoke do tarball valida ListTools slim + CallTool unlisted.
+
 ## 2.1.2 - 2026-07-14
 
 - correção: `argus status` (sem `--json`) agora exibe saída formatada legível (seções: repositório, índice estrutural, cobertura por linguagem, memória) em vez de JSON cru; o dist publicado 2.1.1 estava dessincronizado do fonte e não incluía o módulo `format-status`

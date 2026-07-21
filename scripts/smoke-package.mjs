@@ -63,11 +63,17 @@ try {
     stdio: "inherit",
   });
 
+  // Default slim: ListTools ≤4. CallTool continua aceitando o catálogo completo.
+  const smokeEnv = Object.fromEntries(
+    Object.entries({ ...process.env }).filter((entry) => typeof entry[1] === "string"),
+  );
+  delete smokeEnv.ARGUS_MCP_TOOLS;
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [cli, "serve", "--mcp"],
     cwd: workDir,
     stderr: "pipe",
+    env: smokeEnv,
   });
   let mcpStderr = "";
   transport.stderr?.on("data", (chunk) => {
@@ -77,13 +83,32 @@ try {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    if (tools.tools.length !== 12 || !tools.tools.some((tool) => tool.name === "remember") || !tools.tools.some((tool) => tool.name === "recall")) {
-      throw new Error(`Smoke MCP recebeu surface inesperada: ${tools.tools.map((tool) => tool.name)}`);
+    const listed = tools.tools.map((tool) => tool.name);
+    const expectedListed = ["explore", "pack_context", "recall", "status"];
+    if (
+      listed.length !== 4 ||
+      expectedListed.some((name) => !listed.includes(name))
+    ) {
+      throw new Error(
+        `Smoke MCP esperava ListTools slim (${expectedListed.join(",")}): got ${listed.join(",")}`,
+      );
+    }
+    // Unlisted continua invocável (remember não aparece em ListTools).
+    const remember = await client.callTool({
+      name: "remember",
+      arguments: { content: "Smoke package remember unlisted", type: "inbox" },
+    });
+    const rememberText = remember.content.find((item) => item.type === "text");
+    if (!rememberText || /Tool desconhecida|Unknown tool/i.test(rememberText.text ?? "")) {
+      throw new Error("Smoke MCP não conseguiu CallTool remember (unlisted).");
     }
     const status = await client.callTool({ name: "status", arguments: {} });
     const statusText = status.content.find((item) => item.type === "text");
     if (!statusText || !/"initialized"\s*:\s*true/.test(statusText.text)) {
       throw new Error("Smoke MCP não conseguiu consultar status do workspace.");
+    }
+    if (!/"slim"\s*:\s*true/.test(statusText.text)) {
+      throw new Error("Smoke MCP status sem mcp_surface.slim=true.");
     }
   } catch (error) {
     throw new Error(

@@ -44,6 +44,7 @@ installed on this machine (binary on PATH or config directory present).
 
 ```bash
 argus install                     # full wiring (auto-detects hosts)
+argus install --refresh           # regenerate agent-rules + reconverge MCP entries
 argus install --no-daemon         # index + MCP only (no daemon/service)
 argus install --no-mcp            # don't register MCP in hosts
 argus install --no-memory         # don't initialize .argus/memory
@@ -54,6 +55,12 @@ argus install --scope global      # same as --global
 argus install --scope local       # same as --local
 argus install --with-hooks        # add git hooks as a daemon-down fallback
 ```
+
+`--refresh` updates only generated surfaces (versioned Argus block in
+`AGENTS.md`/`CLAUDE.md` and MCP host entries). Content outside the Argus
+markers is preserved byte-for-byte. Opt out of automatic refresh mutation with
+`ARGUS_NO_INSTALL_REFRESH=1` (reports the manual action). After refresh, **restart**
+the MCP process so hosts pick up ListTools changes.
 
 **Supported hosts and where each registers the MCP:**
 
@@ -381,8 +388,12 @@ argus retrieve rh_0123456789abcdef
 ## MCP server
 
 ### `argus serve --mcp`
-Start the stdio MCP server. Exposes nine tools (`search`, `explore`, `trace`,
-`impact`, `diff_impact`, `files`, `pack_context`, `retrieve`, `status`).
+Start the stdio MCP server. **ListTools** defaults to four happy-path tools:
+`explore`, `pack_context`, `recall`, `status`. All **twelve** registered tools
+(`search`, `explore`, `trace`, `impact`, `diff_impact`, `files`, `pack_context`,
+`retrieve`, `status`, `semantic_search`, `remember`, `recall`) remain callable
+via CallTool. Control discovery with `ARGUS_MCP_TOOLS` (`all` or CSV); requires
+MCP restart after change.
 
 ```bash
 argus serve --mcp
@@ -486,13 +497,15 @@ Run from the monorepo root.
 | `npm run validate` | typecheck + test + lint + build. |
 | `npm run benchmark:mvp` | Internal benchmark → `.argus/benchmark/latest/`. |
 | `npm run smoke:package` | Install & exercise the tarball in a clean dir. |
-| `npm run homologate` | Validate external local repos (real retrieval probe). |
+| `npm run homologate` | CLI probe on ≥2 corpora (fixtures by default) + S8 agent-facing MCP golden. |
 | `npm run release:check` | Assert version consistency across root/runtime/plugin. |
 | `npm run release:eval` | Aggregated memory/privacy/performance evidence with blocking verdict → `.argus/release-evaluation/latest.json`. |
 
-Homologation needs at least two local repo paths. Set `ARGUS_HOMOLOGATION_REPOS=repoA:repoB` when defaults are missing.
+Homologation defaults to in-repo fixtures (`corpus-small` + `corpus-medium`).
+Override with `ARGUS_HOMOLOGATION_REPOS=repoA:repoB`. Agent-facing proof (S8)
+runs MCP in-process against those corpora and replays golden `homologate-agent-v1`.
 
-Release evaluation (S08) covers aggregated retrieval/memory, local-first privacy, degradation without embeddings/LLM, dream dry-run, and the 12-tool MCP surface (`remember`/`recall`). Recorded performance is indicative only — no SLA. A non-`passed` verdict exits non-zero.
+Release evaluation covers aggregated retrieval/memory, local-first privacy, degradation without embeddings/LLM, dream dry-run, and the MCP surface (ListTools slim by default; CallTool keeps all 12 including `remember`/`recall`). Recorded performance is indicative only — no SLA. A non-`passed` verdict exits non-zero.
 
 Tags `v*` run CI, tarball smoke, npm publish (`@owerride/argus`), and a GitHub Release with `SHA256SUMS`. The tag version must match root, runtime and plugin.
 
