@@ -1,23 +1,34 @@
 <!-- >>> argus >>> -->
 ## Argus
 
-Este repositório tem um índice local Argus (`.argus/`). Antes de varrer
-o código com grep/leitura repetida, use as tools do argus — elas respondem
-perguntas estruturais a partir do índice:
+<!-- argus-agent-rules-version: 2 -->
 
-- `search` — achar símbolo por nome.
-- `explore` — contexto estrutural de símbolo/arquivo/tema.
-- `trace` / `impact` / `diff_impact` — fluxo, raio de impacto e impacto do diff.
-- `files` — estrutura indexada.
-- `pack_context` / `retrieve` — empacotar e reidratar contexto.
-- `status` — saúde e staleness do índice.
-- `semantic_search` — busca semântica em código, memória ou ambos (`domain`).
+Este repositório tem um índice local Argus (`.argus/`). Antes de varrer
+o código com grep/leitura repetida, prefira as tools do path feliz
+(listadas por default no MCP — as mesmas de ListTools slim): `explore`, `pack_context`, `recall`, `remember`, `status`.
+
+Decisão operacional:
+
+1. `explore` — primeira escolha para entender símbolo, arquivo ou tema.
+2. `pack_context` — reunir múltiplas fontes (código + memória) sob budget.
+3. `recall` — recuperar decisões/regras já capturadas; use antes de inventar regra de projeto.
+4. `remember` — ao fechar uma decisão ou insight, capture no cofre
+   (MCP `remember` ou CLI `argus memory remember`).
+5. `status` — saúde, staleness e modo slim da surface MCP.
+
+Fallback CLI (quando o MCP não estiver disponível): `argus explore`,
+`argus pack-context`, `argus memory search` (equiv. recall),
+`argus memory remember`, `argus status`.
 
 Memória local no mesmo estado `.argus/`:
 
-- `remember` — capturar decisão/insight no cofre.
-- `recall` — buscar no cofre sem LLM.
-- `pack_context` aceita código + memória; prefira pacote único a múltiplas leituras.
+- `remember` / `recall` — captura e busca no cofre sem LLM.
+- `pack_context` aceita código + memória; prefira um pacote a várias leituras.
+
+Tools avançadas (`search`, `trace`, `impact`, `diff_impact`, `files`,
+`retrieve`, `semantic_search`) continuam invocáveis via CallTool
+ou CLI mesmo quando não listadas. Para ListTools completo:
+`ARGUS_MCP_TOOLS=all` (exige restart do MCP).
 
 O índice é mantido fresco automaticamente: hooks git marcam mudanças e o
 servidor MCP roda sync incremental antes de responder. Não é preciso rodar

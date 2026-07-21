@@ -1,14 +1,20 @@
 import { resolve } from "node:path";
 import { rmSync } from "node:fs";
-import { initWorkspace, getWorkspacePath } from "../workspace/workspace.js";
+import { initWorkspace, getWorkspacePath, requireWorkspace } from "../workspace/workspace.js";
 import { runIndex } from "./index-cmd.js";
-import { runAgentRulesInstall, runAgentRulesUninstall } from "./agent-rules.js";
+import {
+  installAgentRules,
+  runAgentRulesInstall,
+  runAgentRulesUninstall,
+  type AgentRulesInstallSummary,
+} from "./agent-rules.js";
 import { runHookInstall, runHookUninstall } from "./hooks.js";
 import {
   registerMcpForHosts,
   unregisterMcpForHosts,
   resolveDefaultHosts,
   SUPPORTED_HOSTS,
+  type HostRegistrationResult,
   type McpHostId,
   type McpScope,
 } from "../install/mcp-hosts.js";
@@ -21,6 +27,23 @@ import { installService, uninstallService } from "../daemon/service.js";
 import { isDaemonRunning, runDaemonReload, runDaemonStart } from "./daemon.js";
 import { migrateLegacyAthena } from "../memory/migrate-legacy-athena.js";
 import { VaultEngine } from "../memory/vault-engine.js";
+
+/** Opt-out de refresh automático de regras/MCP (D3). */
+export const ARGUS_NO_INSTALL_REFRESH_ENV = "ARGUS_NO_INSTALL_REFRESH";
+
+function isTruthyEnv(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "no";
+}
+
+export function isInstallRefreshOptedOut(
+  envValue: string | undefined = process.env[ARGUS_NO_INSTALL_REFRESH_ENV],
+): boolean {
+  return isTruthyEnv(envValue);
+}
 
 /** Aguarda o daemon publicar o pidfile após um start destacado (best-effort). */
 async function waitForDaemon(timeoutMs = 2_000): Promise<boolean> {
@@ -46,6 +69,23 @@ export interface InstallOptions {
   withHooks?: boolean;
   /** Pula init/sync do cofre de memória. */
   noMemory?: boolean;
+}
+
+export interface InstallRefreshOptions {
+  hosts?: McpHostId[];
+  scope?: McpScope;
+  /** Pula o refresh de entradas MCP. */
+  noMcp?: boolean;
+}
+
+export interface InstallRefreshSummary {
+  skipped: boolean;
+  optOut: boolean;
+  manualHint?: string;
+  rules?: AgentRulesInstallSummary;
+  mcp?: HostRegistrationResult[];
+  restartHint?: string;
+  messages: string[];
 }
 
 /**
@@ -170,6 +210,103 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   }
   console.log("\nA partir daqui é só codar — o índice se mantém fresco sozinho.");
   return 0;
+}
+
+/**
+ * Atualiza bloco agent-rules versionado e entradas MCP dos hosts sem reindexar.
+ * Idempotente: refresh repetido é no-op quando versão/path já convergem.
+ * Respeita `ARGUS_NO_INSTALL_REFRESH` (opt-out) — informa ação manual sem mutar.
+ */
+export function runInstallRefresh(options: InstallRefreshOptions = {}): {
+  code: number;
+  summary: InstallRefreshSummary;
+} {
+  const cwd = process.cwd();
+  const messages: string[] = [];
+
+  if (isInstallRefreshOptedOut()) {
+    const manualHint =
+      `Remova ${ARGUS_NO_INSTALL_REFRESH_ENV} e rode \`argus install --refresh\` ` +
+      `para atualizar agent-rules e entradas MCP.`;
+    messages.push(
+      `${ARGUS_NO_INSTALL_REFRESH_ENV} ativo — refresh automático ignorado (sem mutação).`,
+    );
+    messages.push(manualHint);
+    for (const line of messages) {
+      console.log(line);
+    }
+    return {
+      code: 0,
+      summary: {
+        skipped: true,
+        optOut: true,
+        manualHint,
+        messages,
+      },
+    };
+  }
+
+  let root: string;
+  try {
+    root = resolve(requireWorkspace(cwd).root_path);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(msg);
+    return {
+      code: 1,
+      summary: { skipped: false, optOut: false, messages: [msg] },
+    };
+  }
+
+  const rules = installAgentRules(cwd);
+  for (const { name, action } of rules.files) {
+    messages.push(
+      action === "unchanged"
+        ? `${name}: agent-rules já na versão corrente`
+        : `${name}: agent-rules ${action === "created" ? "criadas" : "atualizadas"}`,
+    );
+  }
+
+  let mcp: HostRegistrationResult[] | undefined;
+  let hadPartialFailure = false;
+  if (!options.noMcp) {
+    const hosts = options.hosts ?? resolveDefaultHosts(root, options.scope);
+    mcp = registerMcpForHosts(root, hosts, options.scope);
+    for (const r of mcp) {
+      messages.push(`MCP ${r.message}`);
+      console.log(`  MCP ${r.message}`);
+    }
+    const failed = mcp.filter((r) => !r.ok);
+    if (failed.length > 0) {
+      hadPartialFailure = true;
+    }
+  }
+
+  const restartHint =
+    "Reinicie o processo MCP do host para carregar ListTools/entrada atualizados.";
+  messages.push(restartHint);
+
+  console.log("\n✓ Argus refresh:");
+  for (const item of messages) {
+    if (!item.startsWith("MCP ")) {
+      console.log(`  • ${item}`);
+    }
+  }
+
+  const summary: InstallRefreshSummary = {
+    skipped: false,
+    optOut: false,
+    rules,
+    mcp,
+    restartHint,
+    messages,
+  };
+
+  if (hadPartialFailure) {
+    console.log("\nRefresh concluído com pendências em um ou mais hosts — demais preservados.");
+    return { code: 1, summary };
+  }
+  return { code: 0, summary };
 }
 
 export interface UninstallOptions {

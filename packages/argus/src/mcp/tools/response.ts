@@ -52,14 +52,16 @@ function envelopeCode(text: string | undefined): string | undefined {
 
 /**
  * Pós-processa o envelope para o formato pedido. Em `concise` (default) o
- * envelope cai ao sinal mínimo:
+ * envelope cai ao sinal mínimo acionável (INV-H4 / D6):
  *  - `confidence` dropado (100% derivável de `state`);
- *  - `message` mantém só o código `E_*`; prosa estática (sucesso) some;
- *  - `limitations` e `staleness_hint` (prosa pt-br) saem — `state` já carrega o
- *    sinal operacional; a prosa volta em `detailed`.
- * Campos de domínio (candidates, hops, tree, …) são preservados intactos.
+ *  - `message` mantém só o código `E_*`/`W_*`; prosa estática (sucesso) some;
+ *  - `limitations` cosméticas saem; códigos `E_*`/`W_*` sobrevivem compactos;
+ *  - `staleness_hint` (prosa pt-br) sai — `state` + códigos cobrem o sinal;
+ *  - domínio acionável permanece: `embedding_status`, `retrieve_handle`,
+ *    `origin_refs`, snippets, candidates, hops, tree, …
+ * `detailed` restaura a prosa completa.
  */
-function applyResponseFormat(
+export function applyResponseFormat(
   payload: ToolResponsePayload,
   format: ResponseFormat,
   tool: McpToolName,
@@ -70,13 +72,28 @@ function applyResponseFormat(
 
   const { message, confidence, limitations, staleness_hint, ...rest } = payload;
   void confidence;
-  void limitations;
   void staleness_hint;
   const out = rest as ToolResponsePayload;
 
   const messageCode = envelopeCode(typeof message === "string" ? message : undefined);
   if (messageCode) {
     out.message = messageCode;
+  }
+
+  // Whitelist: só códigos E_*/W_* em limitations; prosa cosmética some.
+  if (Array.isArray(limitations) && limitations.length > 0) {
+    const codes: string[] = [];
+    const seen = new Set<string>();
+    for (const item of limitations) {
+      const code = envelopeCode(typeof item === "string" ? item : undefined);
+      if (code && !seen.has(code)) {
+        seen.add(code);
+        codes.push(code);
+      }
+    }
+    if (codes.length > 0) {
+      out.limitations = codes;
+    }
   }
 
   return compressPayload(out, tool);
@@ -121,15 +138,39 @@ function buildToolResponseInner(
     };
   }
 
-  // search/files/trace/impact não precisam do grafo materializado: carregam
-  // meta-only e resolvem cobertura/tree/grafo por query alvo (trace/impact via
-  // LazyTraceGraph), matando o full-load no caminho quente.
+  // Tools quentes usam meta-only + SQL/LazyTraceGraph por alvo. Full-load só
+  // permanece para caminhos que ainda materializam o grafo inteiro (nenhum no
+  // path feliz explore/pack/diff/retrieve/status).
+  const needsIndex =
+    tool !== "retrieve" &&
+    tool !== "status" &&
+    tool !== "remember" &&
+    tool !== "recall";
+
+  if (!needsIndex) {
+    switch (tool) {
+      case "retrieve":
+        return buildRetrieveResponse(cwd, args as RetrieveArgs | undefined);
+      case "status":
+        return buildStatusResponse(cwd);
+      case "remember":
+        throw new Error(
+          "remember exige buildToolResponseAsync (hot embed assíncrono).",
+        );
+      case "recall":
+        return buildRecallResponse(cwd, args as RecallArgs | undefined);
+    }
+  }
+
   const mode: StructuralLoadMode =
     tool === "search" ||
     tool === "files" ||
     tool === "trace" ||
     tool === "impact" ||
-    tool === "semantic_search"
+    tool === "semantic_search" ||
+    tool === "explore" ||
+    tool === "pack_context" ||
+    tool === "diff_impact"
       ? "lite"
       : "full";
   const envelope = buildIndexEnvelope(cwd, mode);
@@ -158,25 +199,17 @@ function buildToolResponseInner(
       }
     case "pack_context":
       return buildPackContextResponse(cwd, envelope, args as PackContextArgs | undefined);
-    case "retrieve":
-      return buildRetrieveResponse(cwd, args as RetrieveArgs | undefined);
-    case "status":
-      return buildStatusResponse(cwd);
     case "semantic_search":
       // Caminho síncrono: degrada para fallback lexical (sem embeddar a query).
       // A busca densa real exige embed assíncrono → buildToolResponseAsync.
       return buildSemanticSearchDegraded(cwd, envelope, args as SemanticSearchArgs | undefined);
-    case "remember":
-      return buildRememberResponse(cwd, args as RememberArgs | undefined);
-    case "recall":
-      return buildRecallResponse(cwd, args as RecallArgs | undefined);
   }
 }
 
 /**
- * Variante assíncrona do dispatcher. Só `semantic_search` precisa de await (embed
- * da query); as outras 9 tools delegam ao caminho síncrono. Usada pelo servidor
- * MCP e pelo comando CLI `semantic-search`.
+ * Variante assíncrona do dispatcher. `semantic_search`, `remember` (hot embed) e
+ * `recall` híbrido precisam de await; as demais tools delegam ao caminho síncrono.
+ * Usada pelo servidor MCP e pelo comando CLI `semantic-search`.
  */
 export async function buildToolResponseAsync(
   tool: McpToolName,
@@ -204,7 +237,7 @@ export async function buildToolResponseAsync(
   }
   if (tool === "remember") {
     return applyResponseFormat(
-      buildRememberResponse(cwd, args as RememberArgs | undefined),
+      await buildRememberResponse(cwd, args as RememberArgs | undefined, deps?.embedder),
       resolveResponseFormat(args),
       tool,
     );
@@ -217,7 +250,7 @@ export async function buildToolResponseAsync(
     );
   }
   if (tool === "pack_context" && (args as PackContextArgs | undefined)?.synthesize === true) {
-    const envelope = buildIndexEnvelope(cwd, "full");
+    const envelope = buildIndexEnvelope(cwd, "lite");
     const pack = buildPackContextResponse(cwd, envelope, args as PackContextArgs | undefined);
     if (pack.state !== "falha" && typeof pack.packed_context === "string") {
       pack.synthesis = await ThinkEngine.think(String((args as PackContextArgs | undefined)?.goal ?? ""), {

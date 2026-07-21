@@ -137,9 +137,23 @@ To wire it by hand, point your agent or IDE at the stdio MCP server:
 }
 ```
 
-The server exposes twelve tools: `search`, `explore`, `trace`, `impact`,
-`diff_impact`, `files`, `pack_context`, `retrieve`, `status` and
-`semantic_search`, plus memory tools `remember` and `recall`. They all read/write local state only.
+**ListTools (default slim):** only five tools are advertised —
+`explore`, `pack_context`, `recall`, `remember`, `status` — the happy path for agents.
+All **twelve** registered tools remain callable via CallTool / CLI
+(`search`, `trace`, `impact`, `diff_impact`, `files`, `retrieve`,
+`semantic_search`, plus the five listed). Override discovery with
+`ARGUS_MCP_TOOLS=all` (or a CSV allowlist); changing the env requires an MCP
+**restart** (hosts often cache ListTools). Soft break: hosts that assumed
+twelve listed tools must restart after upgrade.
+
+`explore` / `pack_context` in **balanced** style return actionable verbatim
+snippets (not signature-only). When a snippet is truncated by the balanced caps,
+`explore` emits a `retrieve_handle` so CallTool `retrieve` rehydrates the full
+body without reading the file via the host. `remember` hot-indexes (FTS; embed
+when available) into the local vault so `recall` finds the fact in the same
+session — do **not** run `memory sync` after remember (sync is a destructive
+full rebuild, not a hot-path retry). After changing listed tools or agent-rules,
+run `argus install --refresh` and restart the MCP host.
 
 ---
 
@@ -218,8 +232,8 @@ Monorepo release gates (no performance SLA — indicative timings only):
 | Command | Role |
 |---|---|
 | `npm run validate` | typecheck + tests + lint + build |
-| `npm run smoke:package` | installable tarball + MCP 12 tools |
-| `npm run homologate` | probes on ≥2 local repos (`ARGUS_HOMOLOGATION_REPOS`) |
+| `npm run smoke:package` | installable tarball + MCP ListTools slim (5) + CallTool unlisted |
+| `npm run homologate` | ≥2 corpora (fixtures by default) + S8v2 MCP journey golden (`homologate-agent-v2`) |
 | `npm run release:check` | version consistency |
 | `npm run release:eval` | aggregated memory/privacy/performance evidence with blocking verdict → `.argus/release-evaluation/latest.json` |
 

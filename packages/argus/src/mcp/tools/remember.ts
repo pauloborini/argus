@@ -1,4 +1,5 @@
 import { VaultEngine } from "../../memory/vault-engine.js";
+import type { Embedder } from "../../embeddings/embedder.js";
 import type { ToolResponsePayload } from "./common.js";
 
 export interface RememberArgs {
@@ -8,11 +9,19 @@ export interface RememberArgs {
   links?: string[];
 }
 
-export function buildRememberResponse(cwd: string, args?: RememberArgs): ToolResponsePayload {
-  return VaultEngine.remember(args?.content ?? "", {
-    type: args?.type,
-    tags: args?.tags,
-    links: args?.links,
-  }, cwd);
+export async function buildRememberResponse(
+  cwd: string,
+  args?: RememberArgs,
+  embedder?: Embedder,
+): Promise<ToolResponsePayload> {
+  return VaultEngine.remember(
+    args?.content ?? "",
+    {
+      type: args?.type,
+      tags: args?.tags,
+      links: args?.links,
+      embedder,
+    },
+    cwd,
+  );
 }
-

@@ -123,7 +123,7 @@ describe("semantic_search tool", () => {
 
   it("domain=all funde código+memória por RRF, não sort bruto por score", async () => {
     const root = await setup();
-    VaultEngine.remember("# Billing memory\n\ninvoice payment memory note", { type: "decision" }, root);
+    await VaultEngine.remember("# Billing memory\n\ninvoice payment memory note", { type: "decision" }, root);
     VaultEngine.sync(root);
     expect(await runEmbed({ embedder })).toBe(0);
     await VaultEngine.embed(root, embedder);
@@ -173,7 +173,7 @@ describe("semantic_search tool", () => {
 
   it("domain=all sem embeddings de código ainda funde memória por RRF", async () => {
     const root = await setup();
-    VaultEngine.remember("# Memória lexical\n\ntermo memoria unico billing", { type: "inbox" }, root);
+    await VaultEngine.remember("# Memória lexical\n\ntermo memoria unico billing", { type: "inbox" }, root);
     VaultEngine.sync(root);
 
     const envelope = buildIndexEnvelope(root, "lite");
@@ -193,7 +193,7 @@ describe("semantic_search tool", () => {
 
   it("domain=all sem embeddings de memória retorna parcial com lexical útil", async () => {
     const root = await setup();
-    VaultEngine.remember("# Memória lexical\n\ntermo memoria unico", { type: "inbox" }, root);
+    await VaultEngine.remember("# Memória lexical\n\ntermo memoria unico", { type: "inbox" }, root);
     VaultEngine.sync(root);
     expect(await runEmbed({ embedder })).toBe(0);
 
