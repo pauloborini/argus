@@ -1,24 +1,26 @@
 # Procedimento de Release (Patch / Minor / Major)
 
-Procedimento completo de ponta a ponta para publicar uma nova versao do `argus` com tag Git, release no GitHub (tarball + checksums) e CI verde.
+Procedimento completo de ponta a ponta para publicar uma nova versao do `argus` com tag Git, release no GitHub (tarball + checksums) e **gates locais** (sem GitHub Actions).
+
+Publicacao canônica: [MANUAL_RELEASE.md](MANUAL_RELEASE.md) · skill `.cursor/skills/argus-manual-release/`
 
 ---
 
 ## 1. Pre-requisitos
 
-- [ ] Node.js `>=20` instalado (CI de release usa Node 24)
+- [ ] Node.js `>=20` instalado
 - [ ] npm `>=10` (gerenciador de dependencias do monorepo)
 - [ ] `gh` CLI autenticado (`gh auth status`)
+- [ ] `npm whoami` = `owerride` (ou `NODE_AUTH_TOKEN` da conta Automation)
 - [ ] Acesso de escrita ao repo GitHub `pauloborini/argus`
-- [ ] Secret `NPM_TOKEN` no GitHub (token npm **Automation** da conta `owerride`)
-- [ ] Branch `main` protegida exige PR e CI verde antes do merge
+- [ ] Branch `main` protegida exige PR + 1 review (sem required status checks de Actions)
 
 ---
 
 ## 2. Estrategia de branches
 
 ```
-feature/*  →  develop  →  release/vX.Y.Z  →  main  →  tag vX.Y.Z
+feature/*  →  develop  →  release/vX.Y.Z  →  main  →  tag vX.Y.Z  →  manual-release.mjs
                                               ↑
                                          sync de volta
                                               ↓
@@ -28,7 +30,7 @@ feature/*  →  develop  →  release/vX.Y.Z  →  main  →  tag vX.Y.Z
 - `develop` — branch de integracao, recebe `feature/*` e `fix/*`
 - `release/vX.Y.Z` — branch efemera onde o bump e feito e o PR e aberto contra `main`
 - `main` — branch estavel, unica onde **tags sao criadas**
-- Tag `vX.Y.Z` na `main` dispara o workflow `.github/workflows/release.yml`
+- Apos a tag, rodar `node scripts/manual-release.mjs` (npm publish + GitHub Release)
 
 Apos o release, a `main` e mergeada de volta em `develop` para manter o historico sincronizado.
 
@@ -41,13 +43,10 @@ git fetch origin --prune
 git checkout develop
 git pull origin develop
 git log --oneline -10
+npm view @owerride/argus version dist-tags --json
 ```
 
-Garanta que `develop` esta atualizada e a CI da ultima push esta verde:
-
-```bash
-gh run list --branch develop --limit 5 --json status,conclusion,displayTitle,headBranch
-```
+Garanta que `develop` esta atualizada e os gates locais passam no ultimo codigo relevante (`npm run validate`).
 
 ---
 
@@ -232,11 +231,13 @@ Ou abra manualmente em `https://github.com/pauloborini/argus/pull/new/release/v1
 
 ## 11. Revisar o PR
 
-- [ ] CI verde nos jobs `validate` (matriz Node 20/22/24 x Ubuntu/macOS) e `package-smoke`
-- [ ] Diff confere: apenas os 7 arquivos esperados alterados
-- [ ] `release:check` no log do CI mostra `Release consistente: v1.0.2`
+- [ ] Gates locais ja passaram nesta maquina: `release:check`, `validate`, `smoke:package`
+- [ ] Diff confere: apenas os arquivos esperados do bump
 - [ ] Nenhum artefato gerado no diff (`dist/`, `dist-release/`, etc.)
 - [ ] CHANGELOG reflete as mudancas reais deste ciclo
+- [ ] 1 review de aprovacao (protecao da `main`)
+
+Colar evidência no PR (saida resumida dos gates) — nao ha Actions para validar.
 
 ---
 
@@ -282,36 +283,30 @@ git push origin :refs/tags/v1.0.2
 
 ---
 
-## 14. Acompanhar o release CI
+## 14. Publicar (release local)
 
-O push da tag `v*` dispara `.github/workflows/release.yml`.
-
-Acompanhar em tempo real:
+Nao ha workflow de Actions. Apos a tag:
 
 ```bash
-gh run list --limit 5 --json databaseId,workflowName,status,conclusion,headBranch,event,createdAt,displayTitle
+export TMPDIR=/tmp
+export npm_config_cache=/tmp/npm-cache-argus
+export npm_config_devdir=/tmp/node-gyp-cache
+git checkout v1.0.2
+node scripts/manual-release.mjs
+# se validate/smoke ja rodaram neste turno:
+node scripts/manual-release.mjs --skip-validate
 ```
 
-Ver detalhes de uma run:
+O script executa nesta ordem:
 
-```bash
-gh run view <run-id>
-```
+1. preflight (`gh` + npm auth)
+2. `npm run release:check`
+3. `npm run validate` + `npm run smoke:package` (exceto `--skip-validate`)
+4. `npm pack` em `dist-release/` com `SHA256SUMS`
+5. `npm publish --workspace=@owerride/argus --access public`
+6. `gh release create|upload` com assets
 
-Se falhar, ver logs:
-
-```bash
-gh run view <run-id> --log-failed
-```
-
-A release CI executa nesta ordem:
-
-1. `npm ci`
-2. `npm run validate` (typecheck + test + lint + build)
-3. `npm run smoke:package` (tarball em dir limpo, CLI + MCP)
-4. `npm run release:check` (7 fontes de versao identicas + tag match)
-5. `npm pack` em `dist-release/` com `SHA256SUMS`
-6. **`gh release create`** com assets e `--generate-notes`
+Detalhes: [MANUAL_RELEASE.md](MANUAL_RELEASE.md).
 
 ---
 
@@ -414,11 +409,11 @@ git tag v1.0.2
 git push origin v1.0.2
 ```
 
-### `release:check` falha com "Tag main nao corresponde"
+### `release:check` falha com "Tag ... nao corresponde"
 
-**Sintoma:** CI de push/PR falha no `release:check`.
+**Sintoma:** `manual-release.mjs` (ou shell com `GITHUB_REF_TYPE=tag`) falha no `release:check`.
 
-**Solucao:** Verificar se a versao do script `check-release.mjs` inclui a validacao condicional por `GITHUB_REF_TYPE`. A checagem de tag so deve disparar quando `GITHUB_REF_TYPE=tag`. Em `GITHUB_REF_TYPE=branch` (push/PR), a checagem de tag e pulada.
+**Solucao:** A checagem de tag so dispara quando `GITHUB_REF_TYPE=tag`. O script de release local seta isso automaticamente para `v$version`. Confira se a tag bate com `package.json`.
 
 ### `node-gyp` falha localmente
 
@@ -442,7 +437,9 @@ env TMPDIR=/tmp npm_config_devdir=/tmp/node-gyp-cache \
 ## Referencias
 
 - [RELEASE_BUMP.md](RELEASE_BUMP.md) — runbook para IA executar bump mecanico
+- [MANUAL_RELEASE.md](MANUAL_RELEASE.md) — publicacao canônica (gates + npm + GitHub Release)
 - [check-release.mjs](../scripts/check-release.mjs) — script de consistencia de versao
 - [smoke-package.mjs](../scripts/smoke-package.mjs) — script de smoke test do tarball
-- [release.yml](../.github/workflows/release.yml) — workflow de release por tag
-- [ci.yml](../.github/workflows/ci.yml) — workflow de CI (push/PR)
+- [manual-release.mjs](../scripts/manual-release.mjs) — publish local
+- [.github/workflows/README.md](../.github/workflows/README.md) — Actions removidos de proposito
+- Skill Cursor: `.cursor/skills/argus-manual-release/SKILL.md`
