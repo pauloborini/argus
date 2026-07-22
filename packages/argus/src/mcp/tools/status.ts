@@ -76,7 +76,17 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       index_version: null,
       storage_backend: null,
       schema_version: null,
-      memory: VaultEngine.status(cwd),
+      // Sem root resolvido não existe cofre canônico a consultar. Ler o cwd
+      // aqui ressuscitaria estado órfão/sombra e quebraria D1/D3/INV-W4.
+      memory: {
+        initialized: false,
+        staleness: "unknown",
+        notes_count: 0,
+        last_sync_at: null,
+        embeddings_ready: false,
+        schema_version: null,
+        schema_v2_ready: false,
+      },
       structural_status: { last_sync_at: null },
       ...stubResponse("falha", WORKSPACE_MISSING),
     });

@@ -7,7 +7,7 @@ import { getIndexDbPath } from "../../workspace/workspace.js";
 import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
 import { getVaultDir } from "../../memory/paths.js";
 import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
-import { uniqueByKey, isWithinPath } from "./common.js";
+import { WORKSPACE_MISSING, uniqueByKey, isWithinPath } from "./common.js";
 import type { ToolResponsePayload, PackContextArgs, RetrieveArgs, IndexEnvelope, ExploreSnippetRef, PackOriginRef, PackRemovedEntry, PackSegment, ReadStoredPackHandleResult, TraceNode } from "./common.js";
 import { LazyTraceGraph, personalizedPageRank } from "./graph.js";
 import { buildExploreResponse } from "./explore.js";
@@ -70,7 +70,6 @@ function getPackStyleConfig(style: NonNullable<PackContextArgs["style"]>): {
 }
 
 export function buildRetrieveResponse(cwd: string, args?: RetrieveArgs): ToolResponsePayload {
-  const rootPath = resolveLocalStateRoot(cwd)?.rootPath ?? cwd;
   const handle = args?.handle?.trim() ?? "";
   if (!isValidRetrieveHandle(handle)) {
     return {
@@ -79,6 +78,16 @@ export function buildRetrieveResponse(cwd: string, args?: RetrieveArgs): ToolRes
       origin_refs: [],
       reversibility: "none",
       ...stubResponse("falha", "E_RETRIEVE_INVALID: Handle inválido."),
+    };
+  }
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
+    return {
+      handle,
+      content: "",
+      origin_refs: [],
+      reversibility: "none",
+      ...stubResponse("falha", WORKSPACE_MISSING),
     };
   }
 
@@ -485,7 +494,6 @@ export function buildPackContextResponse(
   envelope: IndexEnvelope,
   args?: PackContextArgs,
 ): ToolResponsePayload {
-  const rootPath = resolveLocalStateRoot(cwd)?.rootPath ?? cwd;
   const sources = uniqueByKey(
     ((args?.sources ?? []).map((item) => item.trim()).filter((item) => item.length > 0)),
     (item) => item,
@@ -502,6 +510,18 @@ export function buildPackContextResponse(
       reversibility: "none",
       token_estimate: 0,
       ...stubResponse("falha", "Input inválido para a tool"),
+    };
+  }
+
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
+    return {
+      packed_context: "",
+      origin_refs: [],
+      removed_or_summarized: [],
+      reversibility: "none",
+      token_estimate: 0,
+      ...stubResponse("falha", WORKSPACE_MISSING),
     };
   }
 

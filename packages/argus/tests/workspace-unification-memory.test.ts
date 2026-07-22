@@ -15,6 +15,8 @@ import { buildRememberResponse } from "../src/mcp/tools/remember.js";
 import { buildRecallResponseAsync } from "../src/mcp/tools/recall.js";
 import { buildStatusResponse } from "../src/mcp/tools/status.js";
 import { buildToolResponseAsync } from "../src/mcp/tools/response.js";
+import { buildPackContextResponse, buildRetrieveResponse } from "../src/mcp/tools/pack.js";
+import { buildIndexEnvelope } from "../src/mcp/tools/common.js";
 import {
   createRetrieveHandleId,
   getPackedHandlePath,
@@ -258,5 +260,33 @@ describe("workspace unification — memory/handles", () => {
     expect(packed.state).toBe("falha");
     expect(packed.message).toMatch(/E_WORKSPACE_INVALID/);
     expect(existsSync(join(startCwd, ".argus"))).toBe(false);
+  });
+
+  it("INV-W4/W5: seams diretos de pack/retrieve/status não usam cwd órfão", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "argus-ws-mem-orphan-"));
+    const startCwd = real(tempDir);
+    const orphanVault = join(startCwd, ".argus", "memory", "vault", "decision");
+    mkdirSync(orphanVault, { recursive: true });
+    writeFileSync(join(orphanVault, "orphan.md"), "# órfã\n\nnão canônica\n", "utf-8");
+
+    const envelope = buildIndexEnvelope(startCwd);
+    const packed = buildPackContextResponse(startCwd, envelope, {
+      sources: ["memory:decision/orphan.md"],
+      goal: "não consumir estado órfão",
+      token_budget: 200,
+    });
+    const retrieved = buildRetrieveResponse(startCwd, {
+      handle: "mh_0123456789abcdef",
+    });
+    const status = buildStatusResponse(startCwd);
+
+    expect(packed.state).toBe("falha");
+    expect(packed.message).toMatch(/E_WORKSPACE_INVALID/);
+    expect(retrieved.state).toBe("falha");
+    expect(retrieved.message).toMatch(/E_WORKSPACE_INVALID/);
+    expect(status.state).toBe("falha");
+    expect((status.memory as { initialized: boolean }).initialized).toBe(false);
+    expect(existsSync(join(startCwd, ".argus", "index.db"))).toBe(false);
+    expect(existsSync(join(startCwd, ".argus", "packed-handles"))).toBe(false);
   });
 });
