@@ -3,7 +3,7 @@
     "id": "homologate-agent-v2",
     "captured": "2026-07-21",
     "command": "npm exec --workspace=@owerride/argus -- vitest run tests/homologate-agent.test.ts",
-    "runtime_version": "2.2.0",
+    "runtime_version": "2.3.0",
     "seam": "H6 Client+Server InMemoryTransport → explore/retrieve/remember/recall/status",
     "level": "ancorada + golden replay (jornada MCP in-process; NÃO mede churn LLM Read/Grep)",
     "corpora": [
