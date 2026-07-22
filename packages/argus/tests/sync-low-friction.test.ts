@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -479,7 +480,7 @@ describe("S28 — sync de baixo atrito", () => {
         expect(config1.mcpServers.outro).toEqual({ command: "keep-me", args: [] });
         expect(config1.mcpServers[MCP_SERVER_KEY].command).toBe(process.execPath);
         expect(config1.mcpServers[MCP_SERVER_KEY].args[0]).not.toContain("/stale/");
-        expect(config1.mcpServers[MCP_SERVER_KEY].env.ARGUS_WORKSPACE_ROOT).toBe(root);
+        expect(config1.mcpServers[MCP_SERVER_KEY].env.ARGUS_WORKSPACE_ROOT).toBe(realpathSync.native(root));
 
         const second = runInstallRefresh({ hosts: ["claude-code"], scope: "local" });
         expect(second.code).toBe(0);

@@ -143,11 +143,12 @@ function formatMemorySection(memory: MemoryStatus | undefined): string[] {
 
   lines.push(`  Notas salvas: ${memory.notes_count}`);
   lines.push(`  Busca semântica: ${describeEmbeddings(memory.embeddings_ready)}`);
-  lines.push(`  Sincronização: ${describeMemoryStaleness(memory.staleness)}`);
+  lines.push(`  Sincronização do cofre: ${describeMemoryStaleness(memory.staleness)}`);
+  // INV-W7: rótulo qualifica "cofre" — distinto do índice estrutural.
   if (memory.last_sync_at) {
-    lines.push(`  Última sincronização: ${formatRelativePt(memory.last_sync_at)}`);
+    lines.push(`  Última sync do cofre: ${formatRelativePt(memory.last_sync_at)}`);
   } else {
-    lines.push("  Última sincronização: nenhuma ainda");
+    lines.push("  Última sync do cofre: nenhuma ainda");
   }
   if (memory.error) {
     lines.push(`  Problema: ${memory.error}`);
@@ -191,9 +192,20 @@ export function formatRepoStatusHuman(payload: ToolResponsePayload, cwd: string)
   const staleness = String(payload.staleness ?? "unknown");
   const pending = Number(payload.pending_files_count ?? 0);
 
+  // INV-W7: rótulos explícitos cofre vs índice estrutural. O usuário não pode
+  // mais confundir "Última sincronização" do cofre com sync do código.
+  const structuralStatus = payload.structural_status as { last_sync_at?: string | null } | undefined;
+
   lines.push("Índice estrutural:");
   lines.push(`  Situação geral: ${describeIndexState(state)}`);
   lines.push(`  Sincronização com o código: ${describeIndexStaleness(staleness, pending)}`);
+  // Timestamp estrutural vem de `manifest.generated_at` (atualizado em todo sync
+  // — Plano 2 / P4). Distinto de `memory.last_sync_at` (cofre).
+  if (structuralStatus?.last_sync_at) {
+    lines.push(`  Última sync do índice: ${formatRelativePt(structuralStatus.last_sync_at)}`);
+  } else {
+    lines.push("  Última sync do índice: nenhuma ainda");
+  }
 
   const dirty = payload.dirty_pending as
     | { paths: number; force_full?: boolean; since_ref?: string | null }

@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIndex } from "../src/commands/index-cmd.js";
+import { runStatus } from "../src/commands/status.js";
 import {
   ARGUS_MCP_TOOLS_ENV,
   DEFAULT_LISTED_MCP_TOOLS,
@@ -44,6 +45,39 @@ describe("status stub e staleness", () => {
     expect(payload.staleness).toBe("unknown");
     expect(payload.index_version).toBeNull();
     expect(payload.storage_backend).toBeNull();
+  });
+
+  it("AC-4.1.1: CLI status em subdiretório resolve o workspace pai", () => {
+    const root = setupWorkspace();
+    const nested = join(root, "packages", "x");
+    mkdirSync(nested, { recursive: true });
+    process.chdir(nested);
+    const output: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => output.push(args.map(String).join(" "));
+    try {
+      expect(runStatus({ json: true })).toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const payload = JSON.parse(output.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(payload.initialized).toBe(true);
+    expect(payload.state).toBe("parcial");
+    expect(String(payload.message)).not.toContain("E_WORKSPACE_INVALID");
+  });
+
+  it("Plano 4: dispatcher CLI usa o mesmo root em subdiretório", async () => {
+    const root = setupWorkspace();
+    expect(await runIndex()).toBe(0);
+    const nested = join(root, "packages", "x");
+    mkdirSync(nested, { recursive: true });
+
+    const payload = buildToolResponse("files", nested, { response_format: "detailed" });
+
+    expect(payload.state).not.toBe("falha");
+    expect(Array.isArray(payload.tree)).toBe(true);
+    expect(JSON.stringify(payload.tree)).toContain("main.ts");
   });
 
   it("AC-1.2.2 status relata default slim e forma de restaurar all", () => {

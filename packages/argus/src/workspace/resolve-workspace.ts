@@ -35,6 +35,13 @@ export interface WorkspaceHandle {
   healed?: boolean;
   /** Código de warning estável quando `healed` é true. */
   healWarning?: typeof W_WORKSPACE_ROOT_HEALED;
+  /** Path antigo de `root_path` antes do heal (para diagnóstico de sombra D5). */
+  previousRootPath?: string;
+}
+
+export interface WorkspaceResolutionOptions {
+  /** Registry é útil para bootstrap do MCP/daemon, mas proibido em tool calls fail-closed. */
+  includeRegistry?: boolean;
 }
 
 function walkUpDirectories(start: string): string[] {
@@ -70,6 +77,7 @@ function appendWorkspaceFolderPaths(candidates: string[], raw: string | undefine
 export function collectWorkspaceRootCandidates(
   startCwd: string = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
+  options: WorkspaceResolutionOptions = {},
 ): string[] {
   const candidates: string[] = [];
 
@@ -83,10 +91,12 @@ export function collectWorkspaceRootCandidates(
   appendWorkspaceFolderPaths(candidates, env.WORKSPACE_FOLDER_PATHS);
   candidates.push(...walkUpDirectories(startCwd));
 
-  try {
-    candidates.push(...listWorkspaceRoots());
-  } catch {
-    /* registry indisponível em alguns ambientes de teste */
+  if (options.includeRegistry !== false) {
+    try {
+      candidates.push(...listWorkspaceRoots());
+    } catch {
+      /* registry indisponível em alguns ambientes de teste */
+    }
   }
 
   return candidates;
@@ -155,10 +165,11 @@ export function resolveLocalStateRoot(startCwd: string): {
 export function resolveWorkspaceRoot(
   startCwd: string = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
+  options: WorkspaceResolutionOptions = {},
 ): WorkspaceHandle | null {
   const seen = new Set<string>();
 
-  for (const raw of collectWorkspaceRootCandidates(startCwd, env)) {
+  for (const raw of collectWorkspaceRootCandidates(startCwd, env, options)) {
     const candidate = resolve(raw);
     if (seen.has(candidate)) {
       continue;
@@ -189,10 +200,94 @@ export function resolveWorkspaceRoot(
       stateDir: getWorkspacePath(rootPath),
       metadata: healedMeta,
       ...(healed
-        ? { healed: true as const, healWarning: W_WORKSPACE_ROOT_HEALED }
+        ? { healed: true as const, healWarning: W_WORKSPACE_ROOT_HEALED, previousRootPath: metadata.root_path }
         : {}),
     };
   }
 
   return null;
+}
+
+/**
+ * Resolve + heal + fail-closed. Lança `E_WORKSPACE_INVALID` se nenhum
+ * workspace válido for encontrado nos candidatos (env → walk-up → registry).
+ *
+ * Diferente de `requireWorkspace` (workspace.ts), faz walk-up a partir de
+ * `startCwd` — subdiretórios de um repo com `.argus` na raiz resolvem
+ * corretamente (Plano 4).
+ */
+export function requireWorkspaceRoot(
+  startCwd: string = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): WorkspaceHandle {
+  const handle = resolveWorkspaceRoot(startCwd, env);
+  if (!handle) {
+    throw new Error(
+      "E_WORKSPACE_INVALID: Workspace não preparado ou path inválido. Execute argus init.",
+    );
+  }
+  return handle;
+}
+
+/**
+ * Resultado do diagnóstico de `.argus` sombra (D5).
+ * `shadows` lista paths com `.argus/workspace.json` diferente do root canônico.
+ */
+export interface ShadowArgusState {
+  /** Path canônico que contém o `.argus` ativo. */
+  canonical: string;
+  /** Paths absolutos de `.argus` sombra (diferentes do root canônico). */
+  shadows: string[];
+  /** Path do `.argus` sombra que era o `root_path` antes do heal (se aplicável). */
+  previousRootShadow?: string;
+}
+
+/**
+ * Diagnóstico de sombra D5: detecta `.argus` em paths diferentes do root
+ * canônico. Nunca apaga — apenas reporta para o usuário decidir.
+ *
+ * Fontes de candidatos a sombra:
+ * 1. `previousRootPath` do handle (antigo `root_path` antes do heal).
+ * 2. Registry do daemon (roots registrados diferentes do canônico).
+ */
+export function findShadowArgusState(handle: WorkspaceHandle): ShadowArgusState {
+  const shadows: string[] = [];
+  const canonical = realpathOrResolve(handle.rootPath);
+  const seen = new Set<string>([canonical]);
+
+  // 1. Antigo root_path antes do heal
+  if (handle.previousRootPath) {
+    const previous = realpathOrResolve(handle.previousRootPath);
+    if (!seen.has(previous)) {
+      seen.add(previous);
+      if (existsSync(getMetadataPath(previous))) {
+        shadows.push(previous);
+      }
+    }
+  }
+
+  // 2. Registry do daemon
+  try {
+    for (const root of listWorkspaceRoots()) {
+      const physicalRoot = realpathOrResolve(root);
+      if (seen.has(physicalRoot)) {
+        continue;
+      }
+      seen.add(physicalRoot);
+      if (existsSync(getMetadataPath(physicalRoot))) {
+        shadows.push(physicalRoot);
+      }
+    }
+  } catch {
+    /* registry indisponível */
+  }
+
+  const result: ShadowArgusState = { canonical, shadows };
+  if (handle.previousRootPath) {
+    const previous = realpathOrResolve(handle.previousRootPath);
+    if (shadows.includes(previous)) {
+      result.previousRootShadow = previous;
+    }
+  }
+  return result;
 }
