@@ -13,11 +13,23 @@ import {
 
 describe("workspace", () => {
   let tempDir: string;
+  let savedXdg: string | undefined;
+  let isolatedRegistry: string | undefined;
 
   afterEach(() => {
     if (tempDir && existsSync(tempDir)) {
       rmSync(tempDir, { recursive: true, force: true });
     }
+    if (savedXdg !== undefined) {
+      process.env.XDG_CONFIG_HOME = savedXdg;
+    } else if (isolatedRegistry) {
+      delete process.env.XDG_CONFIG_HOME;
+    }
+    if (isolatedRegistry) {
+      rmSync(isolatedRegistry, { recursive: true, force: true });
+      isolatedRegistry = undefined;
+    }
+    savedXdg = undefined;
   });
 
   it("init cria metadados em .argus/", () => {
@@ -46,6 +58,11 @@ describe("workspace", () => {
 
   it("requireWorkspace falha sem init", () => {
     tempDir = mkdtempSync(join(tmpdir(), "argus-ws-"));
+    // Isola registry para que walk-up não ache workspaces reais do daemon.
+    savedXdg = process.env.XDG_CONFIG_HOME;
+    isolatedRegistry = mkdtempSync(join(tmpdir(), "argus-ws-reg-"));
+    process.env.XDG_CONFIG_HOME = isolatedRegistry;
+
     expect(workspaceExists(tempDir)).toBe(false);
     expect(() => requireWorkspace(tempDir)).toThrow(/E_WORKSPACE_INVALID/);
   });

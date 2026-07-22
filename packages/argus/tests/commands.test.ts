@@ -18,12 +18,24 @@ import { initWorkspace } from "../src/workspace/workspace.js";
 describe("commands lifecycle", () => {
   let tempDir: string;
   let originalCwd: string;
+  let savedXdg: string | undefined;
+  let isolatedRegistry: string | undefined;
 
   afterEach(() => {
     process.chdir(originalCwd);
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
     }
+    if (savedXdg !== undefined) {
+      process.env.XDG_CONFIG_HOME = savedXdg;
+    } else if (isolatedRegistry) {
+      delete process.env.XDG_CONFIG_HOME;
+    }
+    if (isolatedRegistry) {
+      rmSync(isolatedRegistry, { recursive: true, force: true });
+      isolatedRegistry = undefined;
+    }
+    savedXdg = undefined;
   });
 
   function useEmptyDir(): void {
@@ -32,31 +44,29 @@ describe("commands lifecycle", () => {
     process.chdir(tempDir);
   }
 
+  /** Isola o registry do daemon para que walk-up não ache workspaces reais. */
+  function isolateRegistry(): void {
+    savedXdg = process.env.XDG_CONFIG_HOME;
+    isolatedRegistry = mkdtempSync(join(tmpdir(), "argus-empty-registry-"));
+    process.env.XDG_CONFIG_HOME = isolatedRegistry;
+  }
+
   it("index falha sem workspace com exit 1", async () => {
     useEmptyDir();
+    isolateRegistry();
     await expect(runIndex()).resolves.toBe(1);
   });
 
   it("sync falha sem workspace com exit 1", async () => {
     useEmptyDir();
+    isolateRegistry();
     await expect(runSync()).resolves.toBe(1);
   });
 
   it("serve --mcp falha sem workspace com exit 1", async () => {
     useEmptyDir();
-    const savedXdg = process.env.XDG_CONFIG_HOME;
-    const isolatedRegistry = mkdtempSync(join(tmpdir(), "argus-empty-registry-"));
-    process.env.XDG_CONFIG_HOME = isolatedRegistry;
-    try {
-      await expect(runServeMcp()).resolves.toBe(1);
-    } finally {
-      if (savedXdg !== undefined) {
-        process.env.XDG_CONFIG_HOME = savedXdg;
-      } else {
-        delete process.env.XDG_CONFIG_HOME;
-      }
-      rmSync(isolatedRegistry, { recursive: true, force: true });
-    }
+    isolateRegistry();
+    await expect(runServeMcp()).resolves.toBe(1);
   });
 
   it("status retorna 1 sem workspace", () => {

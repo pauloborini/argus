@@ -7,7 +7,7 @@ import { readDirtyFlag } from "../../discovery/dirty-flag.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { IndexDbCorruptedError, IndexDbSchemaError } from "../../storage/index-persistence.js";
 import { getManifestPath, resolveRespectGitignore } from "../../workspace/workspace.js";
-import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
+import { resolveWorkspaceRoot } from "../../workspace/resolve-workspace.js";
 import { VaultEngine } from "../../memory/vault-engine.js";
 import {
   ARGUS_MCP_TOOLS_ENV,
@@ -18,6 +18,17 @@ import {
 } from "../tool-registry.js";
 import { INDEX_MISSING, STALE_INDEX, WORKSPACE_MISSING, STRUCTURAL_INDEX_MISSING, PARTIAL_NO_MANIFEST_LIMITATIONS, PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS, PARTIAL_STRUCTURAL_MISSING_LIMITATIONS, PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS, STALE_RUN_SYNC, STALE_RUN_INDEX, STALE_UNKNOWN, loadStructuralIndex, mergeStructuralLimitations, buildIndexVersion } from "./common.js";
 import type { ToolResponsePayload } from "./common.js";
+
+/**
+ * Sincronização estrutural exposta no payload de status.
+ *
+ * `last_sync_at` espelha `manifest.generated_at` (gravado a cada sync bem ou
+ * sem conteúdo — Plano 2 / P4 default). É distinto de `memory.last_sync_at`
+ * (cofre) para remover a ambiguidade "há 8 h" pós-sync estrutural.
+ */
+export interface StructuralStatus {
+  last_sync_at: string | null;
+}
 
 /** Observabilidade da política ListTools (slim ≠ CallTool). */
 export function buildMcpSurfaceStatus(
@@ -55,7 +66,7 @@ function withMcpSurface(payload: ToolResponsePayload): ToolResponsePayload {
  * `cwd` é start de discovery; I/O de estado usa somente `rootPath`.
  */
 export function buildStatusResponse(cwd: string): ToolResponsePayload {
-  const resolved = resolveLocalStateRoot(cwd);
+  const resolved = resolveWorkspaceRoot(cwd, process.env, { includeRegistry: false });
   if (!resolved) {
     return withMcpSurface({
       initialized: false,
@@ -66,6 +77,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       storage_backend: null,
       schema_version: null,
       memory: VaultEngine.status(cwd),
+      structural_status: { last_sync_at: null },
       ...stubResponse("falha", WORKSPACE_MISSING),
     });
   }
@@ -87,6 +99,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
         storage_backend: null,
           schema_version: null,
           memory,
+          structural_status: { last_sync_at: null },
         ...stubResponse("parcial", err.message, {
           limitations: PARTIAL_CORRUPTED_MANIFEST_LIMITATIONS,
           staleness_hint: `${STALE_RUN_INDEX}: Execute argus index para reconstruir o manifest.`,
@@ -106,12 +119,20 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       storage_backend: null,
       schema_version: null,
       memory,
+      structural_status: { last_sync_at: null },
       ...stubResponse("parcial", INDEX_MISSING, {
         limitations: PARTIAL_NO_MANIFEST_LIMITATIONS,
         staleness_hint: `${STALE_RUN_INDEX}: Execute argus index para criar o manifest inicial.`,
       }),
     });
   }
+
+  // Sincronização estrutural: `manifest.generated_at` é (re)escrito em todo
+  // sync bem-sucedido (Plano 2 / P4), inclusive no-op de conteúdo. Distinto
+  // do timestamp do cofre (`memory.last_sync_at`) — Plano 6 / INV-W7.
+  const structural_status: StructuralStatus = {
+    last_sync_at: manifest.generated_at ?? null,
+  };
 
   let structural: StructuralIndex | null = null;
   try {
@@ -127,6 +148,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
         storage_backend: "sqlite",
         schema_version: null,
         memory,
+        structural_status,
         ...stubResponse("falha", err.message, {
           limitations: PARTIAL_CORRUPTED_STRUCTURAL_LIMITATIONS,
           staleness_hint: `${STALE_RUN_INDEX}: Execute argus index para reconstruir o índice estrutural.`,
@@ -153,6 +175,7 @@ export function buildStatusResponse(cwd: string): ToolResponsePayload {
       ? { paths: dirtyFlag.paths.length, force_full: dirtyFlag.force_full, since_ref: dirtyFlag.since_ref }
       : null,
     memory,
+    structural_status,
   };
 
   if (!structural) {

@@ -3,10 +3,6 @@ import { VaultEngine } from "../memory/vault-engine.js";
 import { DreamEngine } from "../memory/dream-engine.js";
 import { serializePayload } from "../output.js";
 import { requireWorkspace } from "../workspace/workspace.js";
-import {
-  healRootPathIfNeeded,
-  W_WORKSPACE_ROOT_HEALED,
-} from "../workspace/resolve-workspace.js";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -23,18 +19,10 @@ function print(payload: { state?: unknown; [key: string]: unknown }): number {
 
 /**
  * Resolve o root canônico do workspace antes de I/O de memória.
- * Heal D4 local (sem walk-up — Plano 4); CLI memory opera no mesmo `.argus` do índice.
+ * `requireWorkspace` já faz walk-up + heal D4 (Plano 4).
  */
 function resolveMemoryRoot(): string {
-  const startCwd = process.cwd();
-  const metadata = requireWorkspace(startCwd);
-  const { metadata: healedMeta, healed } = healRootPathIfNeeded(startCwd, metadata);
-  if (healed) {
-    process.stderr.write(
-      `${W_WORKSPACE_ROOT_HEALED}: root_path alinhado para ${healedMeta.root_path} (antes: ${metadata.root_path}).\n`,
-    );
-  }
-  return healedMeta.root_path;
+  return requireWorkspace(process.cwd()).root_path;
 }
 
 export function runMemoryInit(): number {

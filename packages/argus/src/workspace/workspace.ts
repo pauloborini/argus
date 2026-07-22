@@ -1,5 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+// Import estático seguro: uso apenas dentro de `requireWorkspace` (call-time,
+// não module-eval), então a dependência circular workspace ↔ resolve-workspace
+// não causa TDZ em ESM.
+import { requireWorkspaceRoot } from "./resolve-workspace.js";
 
 export const WORKSPACE_DIR = ".argus";
 export const WORKSPACE_METADATA_FILE = "workspace.json";
@@ -245,10 +249,17 @@ export function initWorkspace(rootPath: string = process.cwd()): WorkspaceResult
   }
 }
 
-export function requireWorkspace(rootPath: string = process.cwd()): WorkspaceMetadata {
-  const metadata = readWorkspaceMetadata(rootPath);
-  if (!metadata) {
-    throw new Error("E_WORKSPACE_INVALID: Workspace não preparado ou path inválido. Execute argus init.");
-  }
-  return metadata;
+/**
+ * Resolve o workspace com walk-up + heal D4 e retorna a metadata healada.
+ *
+ * Delega à resolução compartilhada (env → walk-up → registry), preservando a
+ * mesma precedência usada pelo MCP. Lança `E_WORKSPACE_INVALID` se nenhum
+ * workspace válido for encontrado.
+ *
+ * O argumento é um **start de discovery** (ex.: `process.cwd()` ou subdiretório
+ * do repo), não necessariamente o root final — o retorno traz `root_path`
+ * canonicalizado pós-heal.
+ */
+export function requireWorkspace(startCwd: string = process.cwd()): WorkspaceMetadata {
+  return requireWorkspaceRoot(startCwd).metadata;
 }

@@ -40,10 +40,6 @@ import {
   requireWorkspace,
   resolveRespectGitignore,
 } from "../workspace/workspace.js";
-import {
-  healRootPathIfNeeded,
-  W_WORKSPACE_ROOT_HEALED,
-} from "../workspace/resolve-workspace.js";
 
 export type SyncedVia = "full" | "git-delta" | "dirty-flag" | "watch";
 
@@ -245,17 +241,10 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
   let rootPath: string;
   let respectGitignore: boolean;
   try {
-    // Start só descobre; após heal D4, todo I/O de estado usa rootPath canônico
-    // (mesmo pai de `.argus` que contém workspace.json — INV-W1).
+    // requireWorkspace já faz walk-up + heal D4; root_path vem canonicalizado.
     const metadata = requireWorkspace(startCwd);
-    const { metadata: healedMeta, healed } = healRootPathIfNeeded(startCwd, metadata);
-    if (healed) {
-      process.stderr.write(
-        `${W_WORKSPACE_ROOT_HEALED}: root_path alinhado para ${healedMeta.root_path} (antes: ${metadata.root_path}).\n`,
-      );
-    }
-    rootPath = healedMeta.root_path;
-    respectGitignore = resolveRespectGitignore(healedMeta, options.respectGitignore);
+    rootPath = metadata.root_path;
+    respectGitignore = resolveRespectGitignore(metadata, options.respectGitignore);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(message);

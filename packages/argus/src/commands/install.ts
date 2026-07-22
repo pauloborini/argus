@@ -1,6 +1,6 @@
-import { resolve } from "node:path";
 import { rmSync } from "node:fs";
-import { initWorkspace, getWorkspacePath, requireWorkspace } from "../workspace/workspace.js";
+import { initWorkspace, getWorkspacePath } from "../workspace/workspace.js";
+import { requireWorkspaceRoot, findShadowArgusState } from "../workspace/resolve-workspace.js";
 import { runIndex } from "./index-cmd.js";
 import {
   installAgentRules,
@@ -88,6 +88,28 @@ export interface InstallRefreshSummary {
   messages: string[];
 }
 
+function replaceHealedRegistryRoot(
+  handle: ReturnType<typeof requireWorkspaceRoot>,
+  ensureCanonical: boolean,
+): void {
+  const previous = handle.previousRootPath;
+  const removedPrevious = previous ? unregisterWorkspace(previous) : false;
+  if (ensureCanonical || removedPrevious) {
+    registerWorkspace(handle.rootPath);
+  }
+}
+
+function formatShadowDiagnostic(handle: ReturnType<typeof requireWorkspaceRoot>): string[] {
+  const shadow = findShadowArgusState(handle);
+  if (shadow.shadows.length === 0) {
+    return [];
+  }
+  return [
+    `Estado canônico: ${shadow.canonical}`,
+    `Estado(s) sombra: ${shadow.shadows.join(", ")} (não removido — D5)`,
+  ];
+}
+
 /**
  * Fiação zero-toque de um repo: workspace + índice + agent-rules + registro de
  * MCP nos hosts + registro no daemon (com serviço auto-start). Um comando,
@@ -95,7 +117,6 @@ export interface InstallRefreshSummary {
  */
 export async function runInstall(options: InstallOptions = {}): Promise<number> {
   const cwd = process.cwd();
-  const root = resolve(cwd);
   const summary: string[] = [];
   let hadPartialFailure = false;
 
@@ -107,6 +128,10 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   }
   summary.push(init.created ? "workspace criado" : "workspace já existia");
 
+  // Resolve+heal para obter o root canônico (D4). Todo I/O subsequente usa root.
+  const handle = requireWorkspaceRoot(cwd);
+  const root = handle.rootPath;
+
   // 2. Índice inicial
   const indexCode = await runIndex();
   if (indexCode !== 0) {
@@ -116,7 +141,7 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   summary.push("índice construído");
 
   if (!options.noMemory) {
-    const migration = migrateLegacyAthena(cwd);
+    const migration = migrateLegacyAthena(root);
     if (migration.status === "failed") {
       console.error(migration.message);
       return 1;
@@ -125,12 +150,12 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
       summary.push("legado .athena migrado para .argus/memory");
     }
 
-    const initMemory = VaultEngine.init(cwd);
+    const initMemory = VaultEngine.init(root);
     if (initMemory.state === "falha") {
       console.error(initMemory.message);
       return 1;
     }
-    const syncMemory = VaultEngine.sync(cwd);
+    const syncMemory = VaultEngine.sync(root);
     if (syncMemory.state === "falha") {
       console.error(syncMemory.message);
       return 1;
@@ -139,7 +164,7 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
   }
 
   // 3. Agent-rules (alavanca portável para o agente usar o Argus)
-  runAgentRulesInstall(cwd);
+  runAgentRulesInstall(root);
   summary.push("agent-rules escritas (CLAUDE.md/AGENTS.md)");
 
   // 4. Registro de MCP nos hosts. Sem `--hosts`, auto-detecta os instalados
@@ -161,7 +186,7 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
 
   // 5. Registro no daemon (antes de subir o serviço, para o boot já ver o repo)
   if (!options.noDaemon) {
-    registerWorkspace(root);
+    replaceHealedRegistryRoot(handle, true);
     summary.push("repo registrado no daemon");
 
     // 6. Serviço de usuário (auto-start no login + restart)
@@ -196,8 +221,18 @@ export async function runInstall(options: InstallOptions = {}): Promise<number> 
 
   // 8. Hooks git (opcional, fallback)
   if (options.withHooks) {
-    runHookInstall(cwd);
+    runHookInstall(root);
     summary.push("hooks git instalados (fallback)");
+  }
+
+  // 9. Diagnóstico de sombra (D5): reporta sem apagar
+  const shadowMessages = formatShadowDiagnostic(handle);
+  if (shadowMessages.length > 0) {
+    console.log("\n⚠ .argus sombra detectado (não removido automaticamente — D5):");
+    for (const message of shadowMessages) {
+      console.log(`  • ${message}`);
+    }
+    console.log("  Remova manualmente se não for mais necessário.");
   }
 
   console.log("\n✓ Argus instalado neste repositório:");
@@ -246,9 +281,9 @@ export function runInstallRefresh(options: InstallRefreshOptions = {}): {
     };
   }
 
-  let root: string;
+  let handle: ReturnType<typeof requireWorkspaceRoot>;
   try {
-    root = resolve(requireWorkspace(cwd).root_path);
+    handle = requireWorkspaceRoot(cwd);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(msg);
@@ -257,8 +292,15 @@ export function runInstallRefresh(options: InstallRefreshOptions = {}): {
       summary: { skipped: false, optOut: false, messages: [msg] },
     };
   }
+  const root = handle.rootPath;
 
-  const rules = installAgentRules(cwd);
+  // Se o heal substituiu um root ainda registrado, troca a entrada sem apagar
+  // o estado sombra. Refresh não passa a registrar repos que nunca usaram daemon.
+  replaceHealedRegistryRoot(handle, false);
+
+  // Heal D4: root já está canonicalizado pelo requireWorkspaceRoot.
+  // Agent-rules e MCP usam o root canônico, não o cwd de discovery.
+  const rules = installAgentRules(root);
   for (const { name, action } of rules.files) {
     messages.push(
       action === "unchanged"
@@ -280,6 +322,13 @@ export function runInstallRefresh(options: InstallRefreshOptions = {}): {
     if (failed.length > 0) {
       hadPartialFailure = true;
     }
+  }
+
+  // Diagnóstico de sombra (D5): reporta sem apagar
+  const shadowMessages = formatShadowDiagnostic(handle);
+  if (shadowMessages.length > 0) {
+    messages.push("⚠ .argus sombra detectado (não removido automaticamente — D5)");
+    messages.push(...shadowMessages);
   }
 
   const restartHint =
@@ -320,17 +369,30 @@ export interface UninstallOptions {
 /** Reverte a fiação de um repo, sem deixar resíduo. */
 export function runUninstall(options: UninstallOptions = {}): number {
   const cwd = process.cwd();
-  const root = resolve(cwd);
+
+  // Resolve+heal para obter o root canônico (D4). Purge e unregister usam root.
+  let handle: ReturnType<typeof requireWorkspaceRoot>;
+  try {
+    handle = requireWorkspaceRoot(cwd);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    return 1;
+  }
+  const root = handle.rootPath;
+
   // Sem `--hosts`, tenta todos os suportados (no-op quando não registrado), pra
   // não deixar resíduo em nenhum host.
   const hosts = options.hosts ?? SUPPORTED_HOSTS;
 
   unregisterWorkspace(root);
+  if (handle.previousRootPath) {
+    unregisterWorkspace(handle.previousRootPath);
+  }
   for (const r of unregisterMcpForHosts(root, hosts, options.scope)) {
     console.log(`  MCP ${r.message}`);
   }
-  runAgentRulesUninstall(cwd);
-  runHookUninstall(cwd);
+  runAgentRulesUninstall(root);
+  runHookUninstall(root);
 
   // Se nenhum workspace resta, remove o serviço global do daemon.
   if (listWorkspaceRoots().length === 0) {
@@ -341,8 +403,18 @@ export function runUninstall(options: UninstallOptions = {}): number {
   }
 
   if (options.purge) {
-    rmSync(getWorkspacePath(cwd), { recursive: true, force: true });
+    rmSync(getWorkspacePath(root), { recursive: true, force: true });
     console.log("  .argus/ removido (--purge)");
+
+    // Diagnóstico de sombra (D5): reporta sem apagar
+    const shadowMessages = formatShadowDiagnostic(handle);
+    if (shadowMessages.length > 0) {
+      console.log("\n⚠ .argus sombra detectado (não removido automaticamente — D5):");
+      for (const message of shadowMessages) {
+        console.log(`  • ${message}`);
+      }
+      console.log("  Remova manualmente se não for mais necessário.");
+    }
   }
 
   console.log("\n✓ Argus desinstalado deste repositório.");

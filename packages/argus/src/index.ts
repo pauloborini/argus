@@ -37,9 +37,11 @@ export type { WorkspaceStatePaths } from "./workspace/workspace.js";
 export {
   ARGUS_WORKSPACE_ROOT_ENV,
   W_WORKSPACE_ROOT_HEALED,
+  findShadowArgusState,
   healRootPathIfNeeded,
+  requireWorkspaceRoot,
   resolveLocalStateRoot,
   resolveWorkspaceRoot,
 } from "./workspace/resolve-workspace.js";
-export type { WorkspaceHandle } from "./workspace/resolve-workspace.js";
+export type { ShadowArgusState, WorkspaceHandle, WorkspaceResolutionOptions } from "./workspace/resolve-workspace.js";
 export { resolveServeWorkspaceRoot } from "./workspace/resolve-serve-root.js";

@@ -2,10 +2,6 @@ import {
   requireWorkspace,
   resolveRespectGitignore,
 } from "../workspace/workspace.js";
-import {
-  healRootPathIfNeeded,
-  W_WORKSPACE_ROOT_HEALED,
-} from "../workspace/resolve-workspace.js";
 import { gitDelta } from "../discovery/git-delta.js";
 import { markDirty } from "../discovery/dirty-flag.js";
 
@@ -30,15 +26,10 @@ export function runMarkDirty(options: MarkDirtyOptions = {}): number {
   let rootPath: string;
   let respectGitignore: boolean;
   try {
+    // requireWorkspace já faz walk-up + heal D4; root_path vem canonicalizado.
     const metadata = requireWorkspace(startCwd);
-    const { metadata: healedMeta, healed } = healRootPathIfNeeded(startCwd, metadata);
-    if (healed) {
-      process.stderr.write(
-        `${W_WORKSPACE_ROOT_HEALED}: root_path alinhado para ${healedMeta.root_path} (antes: ${metadata.root_path}).\n`,
-      );
-    }
-    rootPath = healedMeta.root_path;
-    respectGitignore = resolveRespectGitignore(healedMeta);
+    rootPath = metadata.root_path;
+    respectGitignore = resolveRespectGitignore(metadata);
   } catch (err) {
     // Hook em repo sem workspace argus: silencioso, não trava git.
     const message = err instanceof Error ? err.message : String(err);

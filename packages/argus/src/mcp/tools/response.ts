@@ -3,6 +3,7 @@ import { stubResponse } from "../../contracts/response-state.js";
 import { STRUCTURAL_INDEX_SCHEMA_VERSION } from "../../extraction/types.js";
 import { SQLITE_SCHEMA_VERSION } from "../../storage/sqlite-prepared.js";
 import { readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { resolveWorkspaceRoot } from "../../workspace/resolve-workspace.js";
 import type { McpToolName } from "../tool-registry.js";
 import { WORKSPACE_MISSING, buildIndexEnvelope, isWithinPath } from "./common.js";
 import type { ToolResponsePayload, SearchArgs, FilesArgs, ExploreArgs, TraceArgs, ImpactArgs, DiffImpactArgs, PackContextArgs, PackOriginRef, PackRemovedEntry, RetrieveArgs, StructuralLoadMode } from "./common.js";
@@ -104,11 +105,41 @@ export function buildToolResponse(
   cwd: string = process.cwd(),
   args?: Record<string, unknown>,
 ): ToolResponsePayload {
+  const pathFailure = tool === "status" ? validateStatusPath(cwd) : null;
+  if (pathFailure) {
+    return applyResponseFormat(pathFailure, resolveResponseFormat(args), tool);
+  }
+  const rootCwd = resolveWorkspaceRoot(cwd, process.env, { includeRegistry: false })?.rootPath ?? cwd;
   return applyResponseFormat(
-    buildToolResponseInner(tool, cwd, args),
+    buildToolResponseInner(tool, rootCwd, args),
     resolveResponseFormat(args),
     tool,
   );
+}
+
+function statusPathFailure(): ToolResponsePayload {
+  return {
+    initialized: false,
+    staleness: "unknown",
+    pending_files_count: 0,
+    coverage_by_language: {},
+    ...stubResponse(
+      "falha",
+      "E_PATH_OUTSIDE_WORKSPACE: `path` precisa permanecer no workspace atual.",
+    ),
+  };
+}
+
+/** Mantém o boundary de `status --path`, inclusive com shell em subdiretório. */
+function validateStatusPath(cwd: string): ToolResponsePayload | null {
+  if (isWithinPath(process.cwd(), cwd)) {
+    return null;
+  }
+  const current = resolveWorkspaceRoot(process.cwd(), process.env, { includeRegistry: false });
+  const requested = resolveWorkspaceRoot(cwd, process.env, { includeRegistry: false });
+  return current && requested && current.rootPath === requested.rootPath
+    ? null
+    : statusPathFailure();
 }
 
 function buildToolResponseInner(
@@ -116,22 +147,6 @@ function buildToolResponseInner(
   cwd: string = process.cwd(),
   args?: Record<string, unknown>,
 ): ToolResponsePayload {
-  if (tool === "status" && !isWithinPath(process.cwd(), cwd)) {
-    const currentWorkspace = readWorkspaceMetadata(process.cwd());
-    if (!currentWorkspace || !isWithinPath(currentWorkspace.root_path, cwd)) {
-      return {
-        initialized: false,
-        staleness: "unknown",
-        pending_files_count: 0,
-        coverage_by_language: {},
-        ...stubResponse(
-          "falha",
-          "E_PATH_OUTSIDE_WORKSPACE: `path` precisa permanecer no workspace atual.",
-        ),
-      };
-    }
-  }
-
   if (!readWorkspaceMetadata(cwd) && tool !== "status") {
     return {
       ...stubResponse("falha", WORKSPACE_MISSING),
@@ -217,9 +232,10 @@ export async function buildToolResponseAsync(
   args?: Record<string, unknown>,
   deps?: SemanticSearchDeps,
 ): Promise<ToolResponsePayload> {
+  const rootCwd = resolveWorkspaceRoot(cwd, process.env, { includeRegistry: false })?.rootPath ?? cwd;
   // Mantém o mesmo fail-closed do dispatcher síncrono. Sem workspace válido,
   // caminhos async não podem criar memória/handles órfãos no cwd.
-  if (!readWorkspaceMetadata(cwd) && tool !== "status") {
+  if (!readWorkspaceMetadata(rootCwd) && tool !== "status") {
     return applyResponseFormat(
       { ...stubResponse("falha", WORKSPACE_MISSING) },
       resolveResponseFormat(args),
@@ -228,16 +244,16 @@ export async function buildToolResponseAsync(
   }
   if (tool === "semantic_search") {
     const domain = (args as SemanticSearchArgs | undefined)?.domain;
-    if (!readWorkspaceMetadata(cwd) && domain !== "memory") {
+    if (!readWorkspaceMetadata(rootCwd) && domain !== "memory") {
       return applyResponseFormat(
-        buildToolResponseInner(tool, cwd, args),
+        buildToolResponseInner(tool, rootCwd, args),
         resolveResponseFormat(args),
         tool,
       );
     }
-    const envelope = buildIndexEnvelope(cwd, "lite");
+    const envelope = buildIndexEnvelope(rootCwd, "lite");
     const inner = await buildSemanticSearchResponse(
-      cwd,
+      rootCwd,
       envelope,
       args as SemanticSearchArgs | undefined,
       deps,
@@ -246,25 +262,25 @@ export async function buildToolResponseAsync(
   }
   if (tool === "remember") {
     return applyResponseFormat(
-      await buildRememberResponse(cwd, args as RememberArgs | undefined, deps?.embedder),
+      await buildRememberResponse(rootCwd, args as RememberArgs | undefined, deps?.embedder),
       resolveResponseFormat(args),
       tool,
     );
   }
   if (tool === "recall") {
     return applyResponseFormat(
-      await buildRecallResponseAsync(cwd, args as RecallArgs | undefined, deps?.embedder),
+      await buildRecallResponseAsync(rootCwd, args as RecallArgs | undefined, deps?.embedder),
       resolveResponseFormat(args),
       tool,
     );
   }
   if (tool === "pack_context" && (args as PackContextArgs | undefined)?.synthesize === true) {
-    const envelope = buildIndexEnvelope(cwd, "lite");
-    const pack = buildPackContextResponse(cwd, envelope, args as PackContextArgs | undefined);
+    const envelope = buildIndexEnvelope(rootCwd, "lite");
+    const pack = buildPackContextResponse(rootCwd, envelope, args as PackContextArgs | undefined);
     if (pack.state !== "falha" && typeof pack.packed_context === "string") {
       pack.synthesis = await ThinkEngine.think(String((args as PackContextArgs | undefined)?.goal ?? ""), {
         context: pack.packed_context,
-        cwd,
+        cwd: rootCwd,
         packEvidence: {
           origin_refs: pack.origin_refs as PackOriginRef[] | undefined,
           retrieve_handle: typeof pack.retrieve_handle === "string" ? pack.retrieve_handle : undefined,
@@ -277,7 +293,7 @@ export async function buildToolResponseAsync(
     }
     return applyResponseFormat(pack, resolveResponseFormat(args), tool);
   }
-  return buildToolResponse(tool, cwd, args);
+  return buildToolResponse(tool, rootCwd, args);
 }
 
 const TSV_TRUNCATE_LIMIT = 50;
@@ -312,7 +328,8 @@ export function buildToolResponseTsv(
     };
   }
 
-  if (!readWorkspaceMetadata(cwd)) {
+  const rootCwd = resolveWorkspaceRoot(cwd, process.env, { includeRegistry: false })?.rootPath ?? cwd;
+  if (!readWorkspaceMetadata(rootCwd)) {
     return {
       text: JSON.stringify({ state: "falha", message: WORKSPACE_MISSING }),
       truncationNote: undefined,
@@ -321,7 +338,7 @@ export function buildToolResponseTsv(
   }
 
   if (tool === "search") {
-    const payload = buildToolResponseInner("search", cwd, args);
+    const payload = buildToolResponseInner("search", rootCwd, args);
     const candidates = Array.isArray(payload.candidates)
       ? (payload.candidates as Array<{ name: string; path: string; kind: string; start_line: number; score: number }>)
       : [];
@@ -342,7 +359,7 @@ export function buildToolResponseTsv(
   }
 
   // tool === "files"
-  const rows_data = readFilesForTsv(cwd);
+  const rows_data = readFilesForTsv(rootCwd);
   const total = rows_data.length;
   const rows = rows_data.slice(0, TSV_TRUNCATE_LIMIT).map((f) => [
     f.path,
