@@ -221,6 +221,11 @@ namespaces, classes, structs, records, interfaces, enums e membros top-level
   `memory dream`) é **local-first**: nada sai do workspace sem configuração explícita
   de provider LLM; sem embeddings ou LLM o runtime retorna `parcial` com limitações
   documentadas, não certeza plena.
+- O estado do workspace vive em **um único** `.argus/` no root canônico (realpath
+  do diretório que contém `workspace.json`). Se `root_path` divergir, o Argus
+  **heala** automaticamente (warning `W_WORKSPACE_ROOT_HEALED`) em vez de
+  espalhar estado entre dois paths. Um `.argus` sombra num path antigo é
+  **diagnosticado, nunca apagado automaticamente** — migre-o à mão.
 
 ---
 
