@@ -4,6 +4,9 @@
 
 ## 2.3.0 - 2026-07-22
 
+- release: GitHub Actions removido; publicação canônica via
+  `docs/MANUAL_RELEASE.md` + `npm run release:manual`
+  (skill `.cursor/skills/argus-manual-release/`)
 - workspace: unificação do estado `.argus/` em um único root canônico. CLI, MCP,
   hooks, daemon e memória agora leem e escrevem **um só** `<rootPath>/.argus/`
   (o mesmo que a LLM consome), encerrando o dual-write `cwd` vs

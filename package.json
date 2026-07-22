@@ -16,6 +16,7 @@
     "smoke:package": "node scripts/smoke-package.mjs",
     "homologate": "npm run build && node scripts/homologate.mjs",
     "release:check": "node scripts/check-release.mjs",
+    "release:manual": "node scripts/manual-release.mjs",
     "release:eval": "npm run build && node scripts/release-evaluation.mjs"
   },
   "engines": {

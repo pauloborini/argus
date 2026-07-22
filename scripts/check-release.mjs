@@ -38,9 +38,8 @@ if (versions.size !== 1) {
   );
 }
 
-// GITHUB_REF_NAME existe em todo evento de Actions (na CI vale o nome da branch,
-// ex.: "main"). A checagem de tag só faz sentido quando o ref é realmente uma tag,
-// senão a CI por push/PR sempre falharia. GITHUB_REF_TYPE distingue branch x tag.
+// GITHUB_REF_NAME / GITHUB_REF_TYPE: o script manual-release seta
+// GITHUB_REF_TYPE=tag ao publicar. Fora disso a checagem de tag é pulada.
 const refType = process.env.GITHUB_REF_TYPE;
 const tag = process.env.GITHUB_REF_NAME;
 if (refType === "tag" && tag !== `v${root.version}`) {

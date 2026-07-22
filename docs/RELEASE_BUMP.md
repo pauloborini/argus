@@ -1,17 +1,21 @@
-# Bump de versao e release CI
+# Bump de versao (release local)
 
-Runbook para IA executar bump e liberar release sem drift entre codigo, npm (`@owerride/argus`), tarball GitHub e GitHub Actions.
+Runbook para IA executar bump sem drift entre codigo, npm (`@owerride/argus`) e tarball GitHub Release.
+
+**Publicacao canônica:** [MANUAL_RELEASE.md](MANUAL_RELEASE.md) + `node scripts/manual-release.mjs`  
+**Skill:** `.cursor/skills/argus-manual-release/`  
+Não há GitHub Actions neste repo.
 
 ## Objetivo
 
-Gerar uma nova versao publicada em npm (`@owerride/argus`), com tag Git, release GitHub (`owerride-argus-*.tgz` + `SHA256SUMS`) e docs alinhadas.
+Gerar uma nova versao publicada em npm (`@owerride/argus`), com tag Git e release GitHub (`owerride-argus-*.tgz` + `SHA256SUMS`).
 
 ## Pre-requisitos
 
 - Branch limpa ou com mudancas conhecidas.
-- `gh auth status` autenticado, se for preciso inspecionar Actions/release.
-- Secret `NPM_TOKEN` no GitHub (token npm **Automation** da conta `owerride`).
-- Node suportado pelo projeto (`>=20`); release CI usa Node 24.
+- `gh auth status` autenticado.
+- `npm whoami` = `owerride` (ou `NODE_AUTH_TOKEN`).
+- Node `>=20`.
 
 ## Passo a passo
 
@@ -25,7 +29,7 @@ rtk npm view @owerride/argus version dist-tags --json
 
 2. Escolher a versao nova.
 
-- Patch: correcao pequena, docs de release, CI, bug compat.
+- Patch: correcao pequena, docs de release, bug compat.
 - Minor: feature compat.
 - Major: quebra de contrato CLI/MCP/API.
 
@@ -41,8 +45,6 @@ Arquivos obrigatorios:
 - `CHANGELOG.md`
 - `package-lock.json`
 
-Comando recomendado para lockfile:
-
 ```bash
 rtk npm install --package-lock-only
 ```
@@ -56,28 +58,24 @@ rtk npm run release:check
 
 Regra: install publico e `npm install -g @owerride/argus` (nao `argus` sem escopo).
 
-5. Validar codigo e pacote.
+5. Validar codigo e pacote (gates locais).
 
 ```bash
+export TMPDIR=/tmp
 rtk npm run validate
 rtk npm run smoke:package
 rtk npm pack --workspace=@owerride/argus --dry-run --json
 ```
 
-6. Conferir CI.
+6. Commitar bump, abrir PR `release/vX.Y.Z` → `main`, mergear (1 review; sem checks de Actions).
 
-Release por tag deve cobrir:
+7. Na `main`: tag `vX.Y.Z`, push, e publicar:
 
-- `npm ci`, validate, smoke, release check
-- `npm pack --workspace=@owerride/argus` → `dist-release/owerride-argus-X.Y.Z.tgz`
-- `npm publish --workspace=@owerride/argus --access public`
-- GitHub release com assets `dist-release/*`
+```bash
+node scripts/manual-release.mjs
+```
 
-7. Commitar bump, criar tag `vX.Y.Z`, push.
-
-8. Acompanhar release CI.
-
-9. Confirmar publicacao.
+8. Confirmar publicacao.
 
 ```bash
 rtk npm view @owerride/argus version dist-tags --json
@@ -96,9 +94,9 @@ rtk gh release view vX.Y.Z --json assets
 ## Falhas comuns
 
 - `npm install -g argus` ou `npx argus`: pacote de terceiro no registry.
-- `NPM_TOKEN` ausente/expirado: npm nao publica, mas GitHub release pode subir.
+- npm sem auth: `npm login` (owerride) ou `NODE_AUTH_TOKEN`.
 - Lockfile esquecido apos rename de pacote.
 
 ## Regra para IA
 
-Release pronto exige `@owerride/argus@X.Y.Z` no npm **e** GitHub release concluida.
+Release pronto exige `@owerride/argus@X.Y.Z` no npm **e** GitHub release concluida via processo manual.
