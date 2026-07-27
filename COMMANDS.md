@@ -522,5 +522,11 @@ Tags `v*` run CI, tarball smoke, npm publish (`@owerride/argus`), and a GitHub R
 | Index missing/corrupted | delete `.argus/index.db`, then `argus index` |
 | Invalid workspace | keep code, delete `.argus/`, then `argus init` + `argus index` |
 | Corrupted handle | re-pack with `argus pack-context` (don't edit `.argus/packed-handles`) |
+| `status` asks for sync right after `sync` (loop) | the workspace root diverged; Argus now **heals** `workspace.json.root_path` automatically (warning `W_WORKSPACE_ROOT_HEALED`). If a shadow `.argus` exists at the old path, it is **not** deleted — `argus install --refresh` diagnoses both paths (and also refreshes agent rules/MCP); compare and migrate the shadow manually |
+| `E_WORKSPACE_INVALID` when running from a subdirectory | Argus resolves the root via walk-up from cwd; with no `.argus` in any ancestor it fails explicitly. Run `argus init` at the repo root (or export `ARGUS_WORKSPACE_ROOT`) |
 
-> Project files are never modified by recovery — only `.argus/` is touched.
+> Deleting/rebuilding index state only touches `.argus/`. `argus install --refresh`
+> may update `AGENTS.md`/`CLAUDE.md` managed blocks and MCP host configuration.
+> Argus keeps a **single** `.argus/` at the canonical root (realpath of the dir
+> holding `workspace.json`). There is no dual-state between `cwd` and `root_path`;
+> healing is automatic and a shadow is never deleted without explicit confirmation.

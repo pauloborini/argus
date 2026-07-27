@@ -522,5 +522,11 @@ Tags `v*` rodam CI, smoke do tarball, publicação npm (`@owerride/argus`) e Git
 | Índice ausente/corrompido | apague `.argus/index.db`, depois `argus index` |
 | Workspace inválido | preserve o código, apague `.argus/`, depois `argus init` + `argus index` |
 | Handle corrompido | reempacote com `argus pack-context` (não edite `.argus/packed-handles`) |
+| `status` pede sync logo após `sync` (loop) | o root do workspace divergiu; o Argus agora **heala** `workspace.json.root_path` automaticamente (warning `W_WORKSPACE_ROOT_HEALED`). Se houver um `.argus` sombra no path antigo, ele **não** é apagado — `argus install --refresh` diagnostica os dois paths (e também atualiza agent-rules/MCP); compare e migre a sombra manualmente |
+| `E_WORKSPACE_INVALID` ao rodar de um subdiretório | o Argus resolve o root via walk-up a partir do cwd; sem `.argus` em nenhum ancestral, falha explícito. Rode `argus init` na raiz do repo (ou exporte `ARGUS_WORKSPACE_ROOT`) |
 
-> Arquivos do projeto nunca são alterados pela recuperação — só o `.argus/` é tocado.
+> Apagar/reconstruir estado de índice toca apenas `.argus/`. `argus install --refresh`
+> pode atualizar blocos gerenciados em `AGENTS.md`/`CLAUDE.md` e a config MCP dos hosts.
+> O Argus mantém **um único** `.argus/` no root canônico (realpath do diretório que
+> contém `workspace.json`). Não há dual-state entre `cwd` e `root_path`; heal é
+> automático e sombra nunca é apagada sem confirmação explícita.

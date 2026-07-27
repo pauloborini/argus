@@ -222,6 +222,11 @@ members (`.cs`/`.csx`).
   `memory dream`) is **local-first**: nothing leaves the workspace without an
   explicit LLM provider config; without embeddings or LLM the runtime returns
   `parcial` with documented limitations, not full certainty.
+- Workspace state lives in a **single** `.argus/` at the canonical root
+  (realpath of the directory holding `workspace.json`). If `root_path` diverges,
+  Argus heals it automatically (warning `W_WORKSPACE_ROOT_HEALED`) rather than
+  splitting state across two paths. A shadow `.argus` at an old path is
+  **diagnosed, never auto-deleted** — migrate it manually.
 
 ---
 

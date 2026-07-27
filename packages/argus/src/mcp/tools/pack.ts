@@ -3,10 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { stubResponse } from "../../contracts/response-state.js";
 import { closeIndexDb, filePathExistsInIndex, openIndexDb } from "../../storage/sqlite-index-store.js";
-import { getIndexDbPath, readWorkspaceMetadata } from "../../workspace/workspace.js";
+import { getIndexDbPath } from "../../workspace/workspace.js";
+import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
 import { getVaultDir } from "../../memory/paths.js";
 import { openMemoryDb, closeMemoryDb } from "../../memory/storage/sqlite-db.js";
-import { uniqueByKey, isWithinPath } from "./common.js";
+import { WORKSPACE_MISSING, uniqueByKey, isWithinPath } from "./common.js";
 import type { ToolResponsePayload, PackContextArgs, RetrieveArgs, IndexEnvelope, ExploreSnippetRef, PackOriginRef, PackRemovedEntry, PackSegment, ReadStoredPackHandleResult, TraceNode } from "./common.js";
 import { LazyTraceGraph, personalizedPageRank } from "./graph.js";
 import { buildExploreResponse } from "./explore.js";
@@ -79,8 +80,18 @@ export function buildRetrieveResponse(cwd: string, args?: RetrieveArgs): ToolRes
       ...stubResponse("falha", "E_RETRIEVE_INVALID: Handle inválido."),
     };
   }
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
+    return {
+      handle,
+      content: "",
+      origin_refs: [],
+      reversibility: "none",
+      ...stubResponse("falha", WORKSPACE_MISSING),
+    };
+  }
 
-  const stored = readStoredPackHandle(cwd, handle);
+  const stored = readStoredPackHandle(rootPath, handle);
   if (!stored.found) {
     return {
       handle,
@@ -103,8 +114,8 @@ export function buildRetrieveResponse(cwd: string, args?: RetrieveArgs): ToolRes
       if (fileCache.has(relativePath)) {
         return fileCache.get(relativePath) ?? null;
       }
-      const absolutePath = join(cwd, relativePath);
-      const value = isWithinPath(cwd, absolutePath)
+      const absolutePath = join(rootPath, relativePath);
+      const value = isWithinPath(rootPath, absolutePath)
         ? (() => {
             try {
               return readFileSync(absolutePath, "utf-8").split("\n");
@@ -189,11 +200,11 @@ function uniqueOriginRefs(refs: PackOriginRef[]): PackOriginRef[] {
 }
 
 function sourceLooksLikeIndexedFile(cwd: string, source: string): boolean {
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata) {
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
     return false;
   }
-  const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+  const db = openIndexDb(getIndexDbPath(rootPath), { readonly: true });
   try {
     return filePathExistsInIndex(db, source);
   } finally {
@@ -425,13 +436,13 @@ function buildMemoryPackSegment(cwd: string, source: string): PackSegment | null
 }
 
 function rankSegmentsByLazyPageRank(cwd: string, segments: PackSegment[]): PackSegment[] {
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata || segments.length <= 1) {
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath || segments.length <= 1) {
     return segments;
   }
 
   try {
-    const db = openIndexDb(getIndexDbPath(metadata.root_path), { readonly: true });
+    const db = openIndexDb(getIndexDbPath(rootPath), { readonly: true });
     try {
       const graph = new LazyTraceGraph(db, true);
       const seedNodes = uniqueByKey(
@@ -502,6 +513,18 @@ export function buildPackContextResponse(
     };
   }
 
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
+    return {
+      packed_context: "",
+      origin_refs: [],
+      removed_or_summarized: [],
+      reversibility: "none",
+      token_estimate: 0,
+      ...stubResponse("falha", WORKSPACE_MISSING),
+    };
+  }
+
   const sourceIsMemoryOnly = (item: string) =>
     item.startsWith("rh_") || item.startsWith("mh_") || item.startsWith("memory:") || item.startsWith("note:");
 
@@ -525,7 +548,7 @@ export function buildPackContextResponse(
   let hadSnippetTruncation = false;
 
   for (const source of sources) {
-    const result = buildPackSegmentsFromSource(cwd, envelope, source, goal, style);
+    const result = buildPackSegmentsFromSource(rootPath, envelope, source, goal, style);
     for (const limitation of result.limitations) {
       limitations.add(limitation);
     }
@@ -540,7 +563,7 @@ export function buildPackContextResponse(
 
   // Item 14: PageRank personalizado no subgrafo curto das fontes, via
   // LazyTraceGraph. Evita reconstruir o grafo inteiro só para ordenar segmentos.
-  segments.splice(0, segments.length, ...rankSegmentsByLazyPageRank(cwd, segments));
+  segments.splice(0, segments.length, ...rankSegmentsByLazyPageRank(rootPath, segments));
 
   if (segments.length === 0) {
     return {
@@ -631,7 +654,7 @@ export function buildPackContextResponse(
       ? "mh"
       : "rh";
     retrieveHandle = createRetrieveHandleId(handlePrefix);
-    const storedReversibility = writeStoredPackHandle(cwd, {
+    const storedReversibility = writeStoredPackHandle(rootPath, {
       handle: retrieveHandle,
       created_at: new Date().toISOString(),
       goal,

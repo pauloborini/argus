@@ -1,6 +1,7 @@
 import { VaultEngine } from "../../memory/vault-engine.js";
 import type { Embedder } from "../../embeddings/embedder.js";
-import type { ToolResponsePayload } from "./common.js";
+import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
+import { WORKSPACE_MISSING, type ToolResponsePayload } from "./common.js";
 
 export interface RecallArgs {
   query?: string;
@@ -19,10 +20,14 @@ export function buildRecallResponse(cwd: string, args?: RecallArgs): ToolRespons
       confidence: "low",
     };
   }
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
+    return { state: "falha", message: WORKSPACE_MISSING };
+  }
   return VaultEngine.search(query, {
     limit: args?.limit,
     includeSnippets: args?.include_snippets,
-  }, cwd);
+  }, rootPath);
 }
 
 export async function buildRecallResponseAsync(
@@ -34,8 +39,12 @@ export async function buildRecallResponseAsync(
   if (!query) {
     return buildRecallResponse(cwd, args);
   }
+  const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
+  if (!rootPath) {
+    return { state: "falha", message: WORKSPACE_MISSING };
+  }
   return VaultEngine.recall(query, {
     limit: args?.limit,
     includeSnippets: args?.include_snippets,
-  }, cwd, embedder);
+  }, rootPath, embedder);
 }

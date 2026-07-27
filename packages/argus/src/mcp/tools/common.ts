@@ -7,7 +7,8 @@ import { ManifestCorruptedError, readManifest } from "../../discovery/manifest.j
 import { computeManifestStaleness } from "../../discovery/staleness.js";
 import type { StructuralIndex } from "../../extraction/types.js";
 import { IndexDbCorruptedError, IndexDbSchemaError, loadStructuralIndexForRead, loadStructuralMetaForRead } from "../../storage/index-persistence.js";
-import { getManifestPath, readWorkspaceMetadata, resolveRespectGitignore } from "../../workspace/workspace.js";
+import { resolveLocalStateRoot } from "../../workspace/resolve-workspace.js";
+import { getManifestPath, resolveRespectGitignore } from "../../workspace/workspace.js";
 
 export interface ToolResponsePayload extends OperationalEnvelope {
   [key: string]: unknown;
@@ -301,8 +302,8 @@ export function buildIndexEnvelope(
   cwd: string,
   mode: StructuralLoadMode = "full",
 ): IndexEnvelope {
-  const metadata = readWorkspaceMetadata(cwd);
-  if (!metadata) {
+  const resolved = resolveLocalStateRoot(cwd);
+  if (!resolved) {
     return {
       state: "falha",
       message: WORKSPACE_MISSING,
@@ -311,10 +312,11 @@ export function buildIndexEnvelope(
       schema_version: null,
     };
   }
+  const { rootPath, metadata } = resolved;
 
   let manifest: DiscoveryManifest | null;
   try {
-    manifest = readManifest(getManifestPath(metadata.root_path));
+    manifest = readManifest(getManifestPath(rootPath));
   } catch (err) {
     if (err instanceof ManifestCorruptedError) {
       return {
@@ -344,7 +346,7 @@ export function buildIndexEnvelope(
 
   let structural: StructuralIndex | null = null;
   try {
-    structural = loadStructuralIndex(metadata.root_path, mode);
+    structural = loadStructuralIndex(rootPath, mode);
   } catch (err) {
     if (err instanceof IndexDbCorruptedError || err instanceof IndexDbSchemaError) {
       return {
@@ -362,7 +364,7 @@ export function buildIndexEnvelope(
   const storage_backend = structural ? ("sqlite" as const) : null;
   const schema_version = structural?.schema_version ?? null;
 
-  const staleness = computeManifestStaleness(metadata.root_path, manifest, {
+  const staleness = computeManifestStaleness(rootPath, manifest, {
     respect_gitignore: resolveRespectGitignore(metadata),
   });
   if (staleness.staleness === "stale") {

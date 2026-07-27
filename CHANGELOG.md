@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 2.3.0 - 2026-07-22
+
+- release: GitHub Actions removido; publicação canônica via
+  `docs/MANUAL_RELEASE.md` + `npm run release:manual`
+  (skill `.cursor/skills/argus-manual-release/`)
+- workspace: unificação do estado `.argus/` em um único root canônico. CLI, MCP,
+  hooks, daemon e memória agora leem e escrevem **um só** `<rootPath>/.argus/`
+  (o mesmo que a LLM consome), encerrando o dual-write `cwd` vs
+  `metadata.root_path` que causava o loop `argus sync` → `argus status` re-pedir
+  sync. Após resolver o workspace, `resolveWorkspaceRoot` aplica **heal** (D4):
+  se `.argus/workspace.json` está em `S` e `root_path ≠ realpath(S)`, reescreve
+  `root_path := realpath(S)` com warning estável `W_WORKSPACE_ROOT_HEALED`.
+  Metadata ilegível falha alto com `E_WORKSPACE_INVALID` — sem fallback silencioso,
+  symlink ou merge de dois `.argus`
+- workspace: CLI em subdiretório agora resolve o root via walk-up (antes só o
+  `serve --mcp` fazia), com a mesma precedência do MCP (`ARGUS_WORKSPACE_ROOT` →
+  ancestrais → registry). `requireWorkspace` unificou CLI ≡ MCP ≡ daemon
+- workspace: se um `.argus` sombra existir no path anterior ao heal, ele **não** é
+  apagado — `argus install --refresh` / `argus uninstall` o diagnosticam
+  (`findShadowArgusState`) para o usuário decidir. Migração manual; sem perda
+- status: `argus status` separa visualmente "Última sync do índice" (estrutural,
+  `manifest.generated_at`) de "Última sync do cofre" (memória), removendo a
+  ambiguidade "há 8 h" após um sync. JSON adicionou
+  `structural_status.last_sync_at` (distinto de `memory.last_sync_at`; ambos preservados)
+- correção: `pack_context`/`retrieve`/`status` falham fechado quando o root do
+  workspace não resolve — sem consumir `.argus` órfão via fallback para `cwd`
+
 ## 2.2.0 - 2026-07-21
 
 - surface MCP slim por default: ListTools anuncia cinco tools

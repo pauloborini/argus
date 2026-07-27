@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { VaultEngine } from "../memory/vault-engine.js";
 import { DreamEngine } from "../memory/dream-engine.js";
 import { serializePayload } from "../output.js";
+import { requireWorkspace } from "../workspace/workspace.js";
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -16,9 +17,17 @@ function print(payload: { state?: unknown; [key: string]: unknown }): number {
   return payload.state === "falha" ? 1 : 0;
 }
 
+/**
+ * Resolve o root canônico do workspace antes de I/O de memória.
+ * `requireWorkspace` já faz walk-up + heal D4 (Plano 4).
+ */
+function resolveMemoryRoot(): string {
+  return requireWorkspace(process.cwd()).root_path;
+}
+
 export function runMemoryInit(): number {
   try {
-    return print(VaultEngine.init());
+    return print(VaultEngine.init(resolveMemoryRoot()));
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
@@ -30,6 +39,7 @@ export async function runMemoryRemember(
   options: { stdin?: boolean; file?: string; type?: string; tag?: string[]; link?: string[] },
 ): Promise<number> {
   try {
+    const rootPath = resolveMemoryRoot();
     const content = options.stdin ? await readStdin() : options.file ? "" : text ?? "";
     return print(
       await VaultEngine.remember(content, {
@@ -37,7 +47,7 @@ export async function runMemoryRemember(
         type: options.type,
         tags: options.tag,
         links: options.link,
-      }),
+      }, rootPath),
     );
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
@@ -47,7 +57,7 @@ export async function runMemoryRemember(
 
 export function runMemorySync(): number {
   try {
-    return print(VaultEngine.sync());
+    return print(VaultEngine.sync(resolveMemoryRoot()));
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
@@ -56,7 +66,7 @@ export function runMemorySync(): number {
 
 export async function runMemoryEmbed(): Promise<number> {
   try {
-    return print(await VaultEngine.embed());
+    return print(await VaultEngine.embed(resolveMemoryRoot()));
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
@@ -65,7 +75,7 @@ export async function runMemoryEmbed(): Promise<number> {
 
 export function runMemorySearch(query: string, options?: { limit?: number }): number {
   try {
-    return print(VaultEngine.search(query, { limit: options?.limit }));
+    return print(VaultEngine.search(query, { limit: options?.limit }, resolveMemoryRoot()));
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
@@ -74,7 +84,7 @@ export function runMemorySearch(query: string, options?: { limit?: number }): nu
 
 export async function runMemoryDream(): Promise<number> {
   try {
-    return print(await DreamEngine.run());
+    return print(await DreamEngine.run(resolveMemoryRoot()));
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
@@ -83,7 +93,11 @@ export async function runMemoryDream(): Promise<number> {
 
 export function runMemoryDoctor(): number {
   try {
-    return print({ memory: VaultEngine.status(), ...VaultEngine.search("__argus_doctor_probe__", { limit: 1 }) });
+    const rootPath = resolveMemoryRoot();
+    return print({
+      memory: VaultEngine.status(rootPath),
+      ...VaultEngine.search("__argus_doctor_probe__", { limit: 1 }, rootPath),
+    });
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
@@ -92,7 +106,7 @@ export function runMemoryDoctor(): number {
 
 export function runMemoryRebuild(): number {
   try {
-    return print(VaultEngine.rebuild());
+    return print(VaultEngine.rebuild(resolveMemoryRoot()));
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return 1;
