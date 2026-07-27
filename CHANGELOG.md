@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.3.1 - 2026-07-27
+
+- sync: todo `argus sync` (CLI, daemon/watch e auto-sync do MCP) sincroniza
+  também o cofre de memória no **mesmo** root `.argus/`. Após o sync,
+  `structural_status.last_sync_at` e `memory.last_sync_at` ficam recentes —
+  mesmo em no-op de conteúdo. Fecha a ponta em que o status mostrava
+  "Última sync do cofre: há X h" logo após um sync bem-sucedido. Rótulos
+  distintos índice/cofre permanecem (INV-W7); o que muda é o acoplamento no
+  caminho de sync
+
 ## 2.3.0 - 2026-07-22
 
 - release: GitHub Actions removido; publicação canônica via

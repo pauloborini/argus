@@ -34,6 +34,7 @@ import {
   computeStructuralMetaAfterDelta,
   extractChangedStructuralFiles,
 } from "../extraction/pipeline.js";
+import { VaultEngine } from "../memory/vault-engine.js";
 import {
   getIndexDbPath,
   getManifestPath,
@@ -385,6 +386,21 @@ export async function runSync(options: SyncOptions = {}): Promise<number> {
         for (const limitation of resolved.limitations) {
           console.warn(`- ${limitation.code}: ${limitation.path ?? "-"} ${limitation.message}`);
         }
+      }
+
+      // Todo sync estrutural (CLI, daemon/watch, MCP auto-sync) força sync do
+      // cofre no mesmo root — `memory.last_sync_at` acompanha o momento do sync,
+      // mesmo em no-op de conteúdo. Falha do cofre não desfaz o índice; avisa.
+      try {
+        const memorySync = VaultEngine.sync(rootPath);
+        if (memorySync.state === "falha") {
+          console.warn(
+            `Sync do cofre falhou após sync do índice: ${String(memorySync.message ?? "erro desconhecido")}`,
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`Sync do cofre falhou após sync do índice: ${message}`);
       }
 
       return 0;

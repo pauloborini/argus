@@ -178,10 +178,9 @@ describe("Plano 6 — UX de status: cofre vs índice (AC-6.1.*, INV-W7)", () => 
     expect(text).toContain("Sincronização com o código:");
   });
 
-  it("AC-6.1.2: pós-sync, status mostra timestamp estrutural recente mesmo com cofre antigo", async () => {
+  it("AC-6.1.2: pós-sync, índice e cofre ficam recentes (mesmo processo, mesmo root)", async () => {
     const root = setupWorkspace();
-    // Executa remember + sync reais 8 h no passado. O relógio é a fronteira
-    // externa controlada; nenhum estado final do cofre é fabricado via SQL.
+    // Cofre envelhecido 8 h no passado; sync estrutural deve forçar sync do cofre.
     const { VaultEngine } = await import("../src/memory/vault-engine.js");
     const staleTime = new Date(Date.now() - 8 * 3_600_000);
     vi.useFakeTimers();
@@ -194,25 +193,31 @@ describe("Plano 6 — UX de status: cofre vs índice (AC-6.1.*, INV-W7)", () => 
     VaultEngine.sync(root);
     vi.useRealTimers();
 
-    // Ciclo estrutural real: index inicial cria manifest + DB estrutural.
     expect(await runIndex()).toBe(0);
 
-    // Força um delta para que o segundo sync reescreva o manifest + generated_at.
     writeFileSync(join(root, "feature.ts"), "export const feature = true;\n", "utf-8");
     expect(await runSync()).toBe(0);
 
     const payload = buildToolResponse("status", root, { response_format: "detailed" });
     const text = formatRepoStatusHuman(payload, root);
 
-    // Cofre permanece "há 8 h"; índice agora é recente.
-    expect(text).toContain("Última sync do cofre: há");
-    expect(text).toMatch(/Última sync do cofre: há [0-9]+ h/);
-
-    // Índice é "agora" ou minutos — não 8h.
+    // Ambos os timestamps refletem o sync que acabou de rodar — não "há 8 h".
+    const cofreLine = text.split("\n").find((l) => l.startsWith("  Última sync do cofre:"));
     const indexLine = text.split("\n").find((l) => l.startsWith("  Última sync do índice:"));
+    expect(cofreLine).toBeDefined();
     expect(indexLine).toBeDefined();
-    expect(indexLine).not.toMatch(/há 8 h/);
+    expect(cofreLine).not.toMatch(/há [0-9]+ h/);
+    expect(indexLine).not.toMatch(/há [0-9]+ h/);
+    expect(cofreLine!).toMatch(/(agora|há \d+ min)/);
     expect(indexLine!).toMatch(/(agora|há \d+ min)/);
+
+    const memory = payload.memory as { last_sync_at: string | null };
+    const structural = payload.structural_status as { last_sync_at: string };
+    expect(memory.last_sync_at).toBeTruthy();
+    const memMs = Date.parse(memory.last_sync_at!);
+    const structMs = Date.parse(structural.last_sync_at);
+    expect(Date.now() - memMs).toBeLessThan(60_000);
+    expect(Date.now() - structMs).toBeLessThan(60_000);
   });
 
   it("AC-6.1.3 / INV-W7: com índice fresh, saída não induz usuário a rodar sync estrutural", async () => {
@@ -233,14 +238,15 @@ describe("Plano 6 — UX de status: cofre vs índice (AC-6.1.*, INV-W7)", () => 
     // Seção "Próximo passo" não deve existir quando state=sucesso.
     expect(text).not.toContain("Próximo passo:");
 
-    // Campos distintos no JSON (sem breaking silencioso): structural_status
-    // separado de memory.last_sync_at.
+    // Campos distintos no JSON (rótulos separados); após sync ambos recentes.
     expect(payload.structural_status).toBeDefined();
     expect((payload.structural_status as { last_sync_at: string }).last_sync_at).toBeTruthy();
     const memory = payload.memory as { last_sync_at: string | null };
-    expect(memory.last_sync_at).not.toBe(
-      (payload.structural_status as { last_sync_at: string }).last_sync_at,
-    );
+    expect(memory.last_sync_at).toBeTruthy();
+    expect(Date.now() - Date.parse(memory.last_sync_at!)).toBeLessThan(60_000);
+    expect(
+      Date.now() - Date.parse((payload.structural_status as { last_sync_at: string }).last_sync_at),
+    ).toBeLessThan(60_000);
   });
 
   it("INV-W7: rótulos não misturam cofre e índice mesmo com cofre não inicializado", () => {
