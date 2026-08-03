@@ -18,6 +18,10 @@ import {
   type WorkspaceSubscription,
 } from "./watcher.js";
 import { acquireDaemonLock } from "./lock.js";
+import { loadMemoryConfig, resolveDreamSchedule } from "../memory/config.js";
+import { DreamEngine } from "../memory/dream-engine.js";
+import { getVaultDir } from "../memory/paths.js";
+import type { ToolResponsePayload } from "../mcp/tools/common.js";
 
 const DEFAULT_DEBOUNCE_MS = 400;
 const DEFAULT_MAX_DEBOUNCE_MS = 3_000;
@@ -25,6 +29,8 @@ const STATUS_INTERVAL_MS = 15_000;
 const SNAPSHOT_INTERVAL_MS = 30_000;
 const MAX_RESUBSCRIBE_BACKOFF_MS = 30_000;
 const POLL_INTERVAL_MS = 30_000;
+/** How often the daemon re-checks per-workspace dream eligibility (not the dream interval itself). */
+const DEFAULT_DREAM_TICK_INTERVAL_MS = 60_000;
 
 /**
  * Reconhece exaustão de watches do SO (inotify no Linux, descritores no
@@ -43,6 +49,13 @@ export function watcherExhaustionHint(err: Error): string | null {
   return null;
 }
 
+export type DreamRunMode = "dry-run" | "apply";
+
+export type DreamRunner = (
+  cwd: string,
+  options: { dryRun?: boolean },
+) => Promise<ToolResponsePayload>;
+
 interface WorkspaceState {
   root: string;
   pipeline: WorkspacePipeline;
@@ -58,11 +71,27 @@ interface WorkspaceState {
   lastError: string | null;
   watchBackend: "parcel-watcher" | "poll" | "off";
   pollTimer: NodeJS.Timeout | null;
+  lastDreamAt: string | null;
+  lastDreamOk: boolean | null;
+  lastDreamMode: DreamRunMode | null;
+  lastDreamError: string | null;
+  dreamScheduleEnabled: boolean | null;
+  dreamRunning: boolean;
 }
 
 export interface DaemonRuntimeOptions {
   debounceMs?: number;
   maxDebounceMs?: number;
+  /** Override do intervalo do tick de verificação do schedule (testes / ops). */
+  dreamTickIntervalMs?: number;
+  /** Injeta o runner de dream (default: DreamEngine.run). */
+  dreamRunner?: DreamRunner;
+  /** Relógio injetável (epoch ms) para testes de intervalo. */
+  now?: () => number;
+  /** Quando false, `stop()` não chama `process.exit` (testes). Default true. */
+  exitProcessOnStop?: boolean;
+  /** Quando false, não abre watchers FS (testes de schedule). Default true. */
+  enableWatchers?: boolean;
 }
 
 /** Estado serializável publicado no status file para `argus daemon status`. */
@@ -80,6 +109,11 @@ export interface DaemonStatusSnapshot {
     last_event_at: string | null;
     last_error: string | null;
     watch_backend: "parcel-watcher" | "poll" | "off";
+    last_dream_at: string | null;
+    last_dream_ok: boolean | null;
+    last_dream_mode: DreamRunMode | null;
+    last_dream_error: string | null;
+    dream_schedule_enabled: boolean | null;
   }[];
 }
 
@@ -100,21 +134,32 @@ function writeFileAtomic(path: string, content: string): void {
  * coalesce eventos por debounce e mantém o índice fresco por delta de paths.
  * Resiliente a queda de backend (resubscribe com backoff) e a downtime
  * (catch-up por snapshot no boot). Encerra limpo em SIGTERM/SIGINT e recarrega
- * o registry em SIGHUP.
+ * o registry em SIGHUP. Agenda dream periódico (dry-run por default) por workspace.
  */
 export class DaemonRuntime {
   private readonly states = new Map<string, WorkspaceState>();
   private readonly debounceMs: number;
   private readonly maxDebounceMs: number;
+  private readonly dreamTickIntervalMs: number;
+  private readonly dreamRunner: DreamRunner;
+  private readonly nowFn: () => number;
+  private readonly exitProcessOnStop: boolean;
+  private readonly enableWatchers: boolean;
   private readonly startedAt = new Date().toISOString();
   private statusTimer: NodeJS.Timeout | null = null;
   private snapshotTimer: NodeJS.Timeout | null = null;
+  private dreamTimer: NodeJS.Timeout | null = null;
   private daemonLockRelease: (() => void) | null = null;
   private stopping = false;
 
   constructor(options: DaemonRuntimeOptions = {}) {
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.maxDebounceMs = options.maxDebounceMs ?? DEFAULT_MAX_DEBOUNCE_MS;
+    this.dreamTickIntervalMs = options.dreamTickIntervalMs ?? DEFAULT_DREAM_TICK_INTERVAL_MS;
+    this.dreamRunner = options.dreamRunner ?? ((cwd, opts) => DreamEngine.run(cwd, opts));
+    this.nowFn = options.now ?? (() => Date.now());
+    this.exitProcessOnStop = options.exitProcessOnStop ?? true;
+    this.enableWatchers = options.enableWatchers ?? true;
   }
 
   async start(): Promise<boolean> {
@@ -130,12 +175,30 @@ export class DaemonRuntime {
 
     this.statusTimer = setInterval(() => this.writeStatus(), STATUS_INTERVAL_MS);
     this.snapshotTimer = setInterval(() => void this.refreshSnapshots(), SNAPSHOT_INTERVAL_MS);
+    this.dreamTimer = setInterval(() => void this.tickDreamSchedules(), this.dreamTickIntervalMs);
     this.writeStatus();
+    // Primeiro tick assíncrono sem esperar o intervalo (testes / boot).
+    void this.tickDreamSchedules();
 
     process.on("SIGHUP", () => void this.reloadRegistry());
     process.on("SIGTERM", () => void this.stop(0));
     process.on("SIGINT", () => void this.stop(0));
     return true;
+  }
+
+  /** Snapshot atual (também usado por testes sem ler o arquivo de status). */
+  getStatusSnapshot(): DaemonStatusSnapshot {
+    return this.buildStatusSnapshot();
+  }
+
+  /** Tick público para testes; soft-fail por workspace. */
+  async tickDreamSchedules(): Promise<void> {
+    if (this.stopping) {
+      return;
+    }
+    for (const state of this.states.values()) {
+      await this.maybeRunDream(state);
+    }
   }
 
   /** Sincroniza o conjunto observado com o registry (add novos, remove sumidos). */
@@ -192,6 +255,12 @@ export class DaemonRuntime {
       lastError: null,
       watchBackend: "off",
       pollTimer: null,
+      lastDreamAt: null,
+      lastDreamOk: null,
+      lastDreamMode: null,
+      lastDreamError: null,
+      dreamScheduleEnabled: null,
+      dreamRunning: false,
     };
     this.states.set(root, state);
 
@@ -211,7 +280,9 @@ export class DaemonRuntime {
       state.lastError = err instanceof Error ? err.message : String(err);
     }
 
-    await this.subscribe(state);
+    if (this.enableWatchers) {
+      await this.subscribe(state);
+    }
   }
 
   private async subscribe(state: WorkspaceState): Promise<void> {
@@ -311,8 +382,94 @@ export class DaemonRuntime {
     }
   }
 
-  private writeStatus(): void {
-    const snapshot: DaemonStatusSnapshot = {
+  private async maybeRunDream(state: WorkspaceState): Promise<void> {
+    const config = loadMemoryConfig(state.root);
+    const schedule = resolveDreamSchedule(config);
+    state.dreamScheduleEnabled = schedule.enabled;
+
+    if (!schedule.enabled) {
+      return;
+    }
+
+    const vaultDir = getVaultDir(state.root);
+    if (!existsSync(vaultDir)) {
+      // Sprint §7.2 vazio / EVAL-003: skip silencioso — não marca last_dream_ok=false.
+      return;
+    }
+
+    if (state.dreamRunning) {
+      return;
+    }
+
+    if (state.lastDreamAt) {
+      const elapsed = this.nowFn() - Date.parse(state.lastDreamAt);
+      if (Number.isFinite(elapsed) && elapsed < schedule.intervalMs) {
+        return;
+      }
+    }
+
+    state.dreamRunning = true;
+    const mode: DreamRunMode = schedule.dryRun ? "dry-run" : "apply";
+    try {
+      console.error(
+        JSON.stringify({
+          event: "dream_schedule_start",
+          root: state.root,
+          mode,
+          interval_ms: schedule.intervalMs,
+        }),
+      );
+      const result = await this.dreamRunner(state.root, { dryRun: schedule.dryRun });
+      const vaultMissing =
+        typeof result.message === "string" && result.message.includes("E_VAULT_NOT_FOUND");
+      if (vaultMissing) {
+        // Prefer skip prévio; se ainda assim voltar falha de vault, não contar como erro.
+        console.error(
+          JSON.stringify({
+            event: "dream_schedule_skip",
+            root: state.root,
+            reason: "vault_missing",
+          }),
+        );
+        return;
+      }
+      state.lastDreamAt = new Date(this.nowFn()).toISOString();
+      state.lastDreamMode = mode;
+      state.lastDreamOk = result.state !== "falha";
+      state.lastDreamError = state.lastDreamOk
+        ? null
+        : (typeof result.message === "string" ? result.message : "dream falhou");
+      console.error(
+        JSON.stringify({
+          event: "dream_schedule_done",
+          root: state.root,
+          mode,
+          ok: state.lastDreamOk,
+          state: result.state,
+        }),
+      );
+    } catch (err) {
+      // Soft-fail: loga e segue; sync/watch intactos (Sprint §7 D7 / EVAL-002).
+      state.lastDreamAt = new Date(this.nowFn()).toISOString();
+      state.lastDreamMode = mode;
+      state.lastDreamOk = false;
+      state.lastDreamError = err instanceof Error ? err.message : String(err);
+      console.error(
+        JSON.stringify({
+          event: "dream_schedule_error",
+          root: state.root,
+          mode,
+          error: state.lastDreamError,
+        }),
+      );
+    } finally {
+      state.dreamRunning = false;
+      this.writeStatus();
+    }
+  }
+
+  private buildStatusSnapshot(): DaemonStatusSnapshot {
+    return {
       pid: process.pid,
       started_at: this.startedAt,
       updated_at: new Date().toISOString(),
@@ -326,8 +483,17 @@ export class DaemonRuntime {
         last_event_at: s.lastEventAt,
         last_error: s.lastError,
         watch_backend: s.watchBackend,
+        last_dream_at: s.lastDreamAt,
+        last_dream_ok: s.lastDreamOk,
+        last_dream_mode: s.lastDreamMode,
+        last_dream_error: s.lastDreamError,
+        dream_schedule_enabled: s.dreamScheduleEnabled,
       })),
     };
+  }
+
+  private writeStatus(): void {
+    const snapshot = this.buildStatusSnapshot();
     try {
       writeFileAtomic(daemonStatusPath(), JSON.stringify(snapshot, null, 2) + "\n");
     } catch {
@@ -342,9 +508,15 @@ export class DaemonRuntime {
     this.stopping = true;
     if (this.statusTimer) {
       clearInterval(this.statusTimer);
+      this.statusTimer = null;
     }
     if (this.snapshotTimer) {
       clearInterval(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
+    if (this.dreamTimer) {
+      clearInterval(this.dreamTimer);
+      this.dreamTimer = null;
     }
     for (const state of this.states.values()) {
       await this.refreshOne(state);
@@ -356,7 +528,9 @@ export class DaemonRuntime {
       this.daemonLockRelease();
       this.daemonLockRelease = null;
     }
-    process.exit(code);
+    if (this.exitProcessOnStop) {
+      process.exit(code);
+    }
   }
 
   private async refreshOne(state: WorkspaceState): Promise<void> {

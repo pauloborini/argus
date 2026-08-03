@@ -18,7 +18,7 @@
         "path": "packages/argus/tests/fixtures/homologation/corpus-medium"
       }
     ],
-    "notes": "Q1: corpus-small + corpus-medium versionados no repo. retrieve só entra na sequência live se explore emitir handle. Plano 2: ListTools default inclui remember (5 tools); agent_rules_version 2."
+    "notes": "Q1: corpus-small + corpus-medium versionados no repo. retrieve só entra na sequência live se explore emitir handle. Plano 2: ListTools default inclui remember (5 tools); agent_rules_version 3."
   },
   "corpora": {
     "corpus-small": {
@@ -44,7 +44,7 @@
       "recall_hit": true,
       "status_initialized": true,
       "status_mcp_slim": true,
-      "agent_rules_version": 2,
+      "agent_rules_version": 3,
       "full_structural_load_count": 0,
       "stdout_write_count": 0
     },
@@ -71,7 +71,7 @@
       "recall_hit": true,
       "status_initialized": true,
       "status_mcp_slim": true,
-      "agent_rules_version": 2,
+      "agent_rules_version": 3,
       "full_structural_load_count": 0,
       "stdout_write_count": 0
     }

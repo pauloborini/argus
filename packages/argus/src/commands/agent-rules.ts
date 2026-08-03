@@ -10,7 +10,7 @@ export const BLOCK_END = "<!-- <<< argus <<< -->";
  * Versão do corpo gerado (independente do semver do pacote).
  * Bump quando o texto/contrato do path feliz mudar — `install --refresh` detecta drift.
  */
-export const AGENT_RULES_VERSION = 2;
+export const AGENT_RULES_VERSION = 3;
 
 /** Marcador parseável dentro do bloco (ex.: `<!-- argus-agent-rules-version: 1 -->`). */
 export const AGENT_RULES_VERSION_MARKER_RE =
@@ -53,6 +53,11 @@ Memória local no mesmo estado \`.argus/\`:
 
 - \`remember\` / \`recall\` — captura e busca no cofre sem LLM.
 - \`pack_context\` aceita código + memória; prefira um pacote a várias leituras.
+- Fatos promovidos do Talos HANDOFF usam shape nativa \`content\` / \`type\` / \`tags\` / \`links\`
+  (ver \`docs/MEMORY_V2_CONTRACT.md\` §11). Tags mínimas: \`talos-handoff\` + \`anchor:<tipo>:<valor>\` quando houver âncora.
+- Loop handoff → \`remember\` → \`recall\`: após promote, prefira \`recall\` antes de inventar regra.
+- Ref 1+1: 1 leitura do path \`ref\` → 1 name search pelo basename → se falhar, seguir só com o fato (não trava).
+- Nunca invente \`argus learn\`, receipt JSON ou API nova de ingestão — só \`remember\` / \`recall\` existentes.
 
 Tools avançadas (\`search\`, \`trace\`, \`impact\`, \`diff_impact\`, \`files\`,
 \`retrieve\`, \`semantic_search\`) continuam invocáveis via CallTool

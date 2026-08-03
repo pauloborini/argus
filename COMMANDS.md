@@ -422,12 +422,32 @@ are coalesced into a single incremental sync (explicit-paths delta, never a full
 walk).
 
 ```bash
-argus daemon status     # watched workspaces and each one's last sync
+argus daemon status     # watched workspaces, last sync, and last dream per workspace
 argus daemon start      # run in background (the service usually does this)
 argus daemon stop
 argus daemon restart
 argus daemon reload     # reload the registry without restarting (after a new install)
 ```
+
+### Dream schedule (daemon)
+
+While running, the daemon also schedules a periodic **memory dream** per
+registered workspace that has a vault. Defaults (safe):
+
+- `dream_schedule_enabled`: `true`
+- `dream_schedule_interval_ms`: `86400000` (24h)
+- `dream_schedule_dry_run`: `true` (no destructive apply)
+
+Configure these fields in `.argus/memory/config.json`. To disable the schedule:
+
+```json
+{ "dream_schedule_enabled": false }
+```
+
+`argus daemon status` exposes `last_dream_at`, `last_dream_ok`, `last_dream_mode`,
+and `last_dream_error` per workspace. Failures are soft: they are logged and do
+not stop sync/watch. Manual CLI `argus memory dream` is unchanged (apply by
+default unless you pass dry-run there).
 
 `argus install` already installs and starts the user service (launchd on macOS,
 systemd --user on Linux) with login auto-start. To manage the service directly:

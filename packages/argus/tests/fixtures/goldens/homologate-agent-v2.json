@@ -53,7 +53,7 @@
       "sync_called": false,
       "status_initialized": true,
       "status_mcp_slim": true,
-      "agent_rules_version": 2,
+      "agent_rules_version": 3,
       "full_structural_load_count": 0,
       "stdout_write_count": 0
     },
@@ -84,7 +84,7 @@
       "sync_called": false,
       "status_initialized": true,
       "status_mcp_slim": true,
-      "agent_rules_version": 2,
+      "agent_rules_version": 3,
       "full_structural_load_count": 0,
       "stdout_write_count": 0
     },
@@ -116,7 +116,7 @@
       "sync_called": false,
       "status_initialized": true,
       "status_mcp_slim": true,
-      "agent_rules_version": 2,
+      "agent_rules_version": 3,
       "full_structural_load_count": 0,
       "stdout_write_count": 0
     }

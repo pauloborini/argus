@@ -421,12 +421,32 @@ rajadas de saves ou troca de branch os eventos são coalescidos num único sync
 incremental (delta por paths, nunca walk completo).
 
 ```bash
-argus daemon status     # workspaces observados e último sync de cada um
+argus daemon status     # workspaces observados, último sync e último dream de cada um
 argus daemon start      # sobe em background (normalmente o serviço já faz isso)
 argus daemon stop
 argus daemon restart
 argus daemon reload     # recarrega o registry sem reiniciar (após novo install)
 ```
+
+### Dream periódico (daemon)
+
+Enquanto roda, o daemon também agenda um **memory dream** periódico por
+workspace registrado que tenha vault. Defaults (seguros):
+
+- `dream_schedule_enabled`: `true`
+- `dream_schedule_interval_ms`: `86400000` (24h)
+- `dream_schedule_dry_run`: `true` (sem apply destrutivo)
+
+Configure esses campos em `.argus/memory/config.json`. Para desligar o schedule:
+
+```json
+{ "dream_schedule_enabled": false }
+```
+
+O `argus daemon status` expõe `last_dream_at`, `last_dream_ok`, `last_dream_mode`
+e `last_dream_error` por workspace. Falhas são soft: logam e não param
+sync/watch. O CLI manual `argus memory dream` permanece igual (apply por default
+salvo dry-run explícito).
 
 O `argus install` já instala e sobe o serviço de usuário (launchd no macOS,
 systemd --user no Linux) com auto-start no login. Para gerir o serviço à parte:
