@@ -40,7 +40,7 @@ serviço de usuário auto-start). Idempotente.
 
 Sem `--hosts`, fia **Claude Code** e **Cursor** sempre (idioma de projeto) e
 **auto-detecta** Codex, OpenCode, Pi, Antigravity, ZCode e VS Code quando
-instalados nesta máquina (binario no PATH ou diretorio de config presente).
+instalados nesta máquina (binário no PATH ou diretório de config presente).
 
 ```bash
 argus install                     # fiação completa (auto-detecta hosts)
@@ -86,21 +86,21 @@ Depois disso é só codar — o daemon mantém o índice fresco sozinho.
 ### `argus uninstall`
 Reverte a fiação do repo: remove o registro de MCP dos hosts (todos os escopos
 por padrão — global + local), o bloco de agent-rules, hooks git e o registro no
-daemon. Quando o **ultimo workspace** e desinstalado, o servico de usuario
-auto-start (launchd/systemd) tambem e removido. `--purge` remove tambem o
+daemon. Quando o **último workspace** é desinstalado, o serviço de usuário
+auto-start (launchd/systemd) também é removido. `--purge` remove também o
 `.argus/`.
 
-Use `--scope` para limitar a limpeza a um unico escopo, `--local`/`--global` como
-atalho, ou `--hosts` para hosts especificos.
+Use `--scope` para limitar a limpeza a um único escopo, `--local`/`--global` como
+atalho, ou `--hosts` para hosts específicos.
 
 ```bash
-argus uninstall                     # reversao completa (todos hosts, todos escopos)
-argus uninstall --global            # limpa so o registro MCP global
-argus uninstall --local             # limpa so o registro MCP deste repo
+argus uninstall                     # reversão completa (todos hosts, todos escopos)
+argus uninstall --global            # limpa só o registro MCP global
+argus uninstall --local             # limpa só o registro MCP deste repo
 argus uninstall --scope global      # equivalente a --global
-argus uninstall --hosts codex       # limpa so hosts especificos (CSV)
-argus uninstall --hosts opencode --scope global  # limpa so opencode global
-argus uninstall --purge             # remove tambem o .argus/
+argus uninstall --hosts codex       # limpa só hosts específicos (CSV)
+argus uninstall --hosts opencode --scope global  # limpa só opencode global
+argus uninstall --purge             # remove também o .argus/
 ```
 
 ### `argus init`

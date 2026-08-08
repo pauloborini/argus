@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- docs: README (EN/pt-BR) atualizados com base no vault vigente e no código —
+  VS Code adicionado à lista de hosts auto-detectados (8 hosts), handle de
+  memória `mh_…` restabelecido na versão pt-BR, quickstart pt-BR igualado ao EN
+  (`memory remember`/`memory search`), menção breve ao dream scheduling do
+  daemon e números do benchmark revalidados em rodada 2026-08-08
+  (tokens −92,7%→−94,9%; cirúrgico −97,8%→−98,8%; varredura −55,7%→−53,0%;
+  tool calls −11,8% e ground-truth 6/6 inalterados)
+- docs(pt-BR): normalização de acentuação em COMMANDS.pt-BR.md e README.pt-BR.md
+  — "serviço", "usuário", "também", "único", "específicos", "último", "reversão",
+  "só", "binário", "diretório"
+
 ## 2.3.1 - 2026-07-27
 
 - sync: todo `argus sync` (CLI, daemon/watch e auto-sync do MCP) sincroniza

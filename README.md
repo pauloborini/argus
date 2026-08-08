@@ -1,6 +1,6 @@
 <!-- Language: **English** · [Português](README.pt-BR.md) -->
 <p align="center">
-  <img src="docs/assets/atlas-logo.png" alt="Atlas" width="96" height="96">
+  <img src="assets/atlas-logo.png" alt="Atlas" width="96" height="96">
 </p>
 
 # Argus
@@ -30,14 +30,14 @@ agent**, tokens via a documented offline heuristic):
 
 | Metric (baseline → Argus) | Result |
 |---|---|
-| Approx. tokens | **−92.7%** |
+| Approx. tokens | **−94.9%** |
 | Tool calls | **−11.8%** |
 | Ground-truth answered (Argus arm) | **6/6** |
 
 The token win is almost entirely the **index returning less content** (ranges +
 handles instead of whole files), not formatting — isolated, the format-only gain is
-**~0%**. It pays off most on **surgical lookups** (−97.8%) and less on **broad
-sweeps** (−55.7%), where an agent reads many files regardless. This is an **internal
+**~0%**. It pays off most on **surgical lookups** (−98.8%) and less on **broad
+sweeps** (−53.0%), where an agent reads many files regardless. This is an **internal
 scripted upper bound** until a live-agent run lands; full method and per-task numbers
 in [`.argus/benchmark/latest/SUMMARY.md`](.argus/benchmark/latest/SUMMARY.md).
 
@@ -119,7 +119,7 @@ manual `sync`. Check `argus daemon status` to see what's being watched, and
 
 The simplest path is to let `argus install` wire your hosts — without `--hosts`
 it registers **Claude Code** and **Cursor** and auto-detects **Codex**,
-**OpenCode**, **Pi**, **Antigravity** and **ZCode** when installed
+**OpenCode**, **Pi**, **Antigravity**, **ZCode** and **VS Code** when installed
 (`--global`/`--local`/`--scope` control the scope; `argus uninstall` reverts
 everything including daemon registration and auto-start service — see
 [COMMANDS](COMMANDS.md#argus-install--entry-point-command)).
@@ -221,7 +221,9 @@ members (`.cs`/`.csx`).
 - Intelligent memory (`remember`/`recall`, `pack_context` with `synthesize`,
   `memory dream`) is **local-first**: nothing leaves the workspace without an
   explicit LLM provider config; without embeddings or LLM the runtime returns
-  `parcial` with documented limitations, not full certainty.
+  `parcial` with documented limitations, not full certainty. The daemon also
+  schedules a periodic consolidation cycle (`dream`, dry-run by default) per
+  workspace — see [COMMANDS → daemon](COMMANDS.md).
 - Workspace state lives in a **single** `.argus/` at the canonical root
   (realpath of the directory holding `workspace.json`). If `root_path` diverges,
   Argus heals it automatically (warning `W_WORKSPACE_ROOT_HEALED`) rather than

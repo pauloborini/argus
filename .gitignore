@@ -1,8 +1,3 @@
-GitNexus
-headroom
-Understand-Anything
-codegraph
-.app-vault
 .env
 .env.*
 
@@ -12,10 +7,20 @@ dist/
 dist-release/
 .argus/
 *.tsbuildinfo
+*.tgz
 
-#Atlas Ecosystem
+# Atlas Ecosystem / local tooling
 .talos
 .athena
-.argus
-
 .claude
+
+# IDEs / ferramentas locais (não versionar configs pessoais)
+.cursor/
+.codex/
+.agents/
+
+# Processo local: guides, brainstorming, prd, references, private, archive
+.app-work/
+
+# OS
+.DS_Store

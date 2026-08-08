@@ -37,7 +37,7 @@ const candidates = configured ?? [
   fixtureMedium,
   resolve(root, "../talos"),
   resolve(root, "../paytrainer-app"),
-  join(root, ".app-vault", "archive", "headroom"),
+  join(root, ".app-work", "references", "headroom"),
 ];
 const targets = candidates.filter(existsSync);
 

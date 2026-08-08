@@ -1,6 +1,6 @@
 <!-- Idioma: [English](README.md) · **Português** -->
 <p align="center">
-  <img src="docs/assets/atlas-logo.png" alt="Atlas" width="96" height="96">
+  <img src="assets/atlas-logo.png" alt="Atlas" width="96" height="96">
 </p>
 
 # Argus
@@ -30,14 +30,14 @@ vivo**, tokens por heurística offline documentada):
 
 | Métrica (baseline → Argus) | Resultado |
 |---|---|
-| Tokens aprox. | **−92,7%** |
+| Tokens aprox. | **−94,9%** |
 | Tool calls | **−11,8%** |
 | Ground-truth respondido (arm Argus) | **6/6** |
 
 O ganho de tokens vem quase todo do **índice entregar menos conteúdo** (ranges +
 handles em vez de arquivos inteiros), não de formato — isolado, o ganho só-de-formato
-é **~0%**. Compensa mais em **lookup cirúrgico** (−97,8%) e menos em **varredura
-ampla** (−55,7%), onde o agente leria muitos arquivos de qualquer jeito. É um
+é **~0%**. Compensa mais em **lookup cirúrgico** (−98,8%) e menos em **varredura
+ampla** (−53,0%), onde o agente leria muitos arquivos de qualquer jeito. É um
 **limite superior interno scriptado** até rodar com agente vivo; metodologia e
 números por task em [`.argus/benchmark/latest/SUMMARY.md`](.argus/benchmark/latest/SUMMARY.md).
 
@@ -103,6 +103,8 @@ argus install
 # Fazer perguntas
 argus search "calculateTotal"            # achar um símbolo rápido
 argus explore src/billing.ts --mode file # contexto estruturado de um arquivo
+printf "# decision\n" | argus memory remember --stdin
+argus memory search decision
 ```
 
 Após o `install`, o daemon de auto-sync mantém o índice fresco a cada save — sem
@@ -117,9 +119,9 @@ no [COMMANDS.pt-BR.md](COMMANDS.pt-BR.md) com flags e exemplos completos.**
 
 O jeito mais simples é deixar o `argus install` fiar os hosts por você — sem
 `--hosts`, ele registra **Claude Code** e **Cursor** e auto-detecta **Codex**,
-**OpenCode**, **Pi**, **Antigravity** e **ZCode** quando instalados
+**OpenCode**, **Pi**, **Antigravity**, **ZCode** e **VS Code** quando instalados
 (`--global`/`--local`/`--scope` controlam o escopo; `argus uninstall` reverte
-tudo inclusive registro no daemon e servico auto-start — veja
+tudo inclusive registro no daemon e serviço auto-start — veja
 [COMMANDS](COMMANDS.pt-BR.md#argus-install--comando-de-entrada)).
 
 Para fiar à mão, aponte seu agente ou IDE para o servidor MCP stdio:
@@ -190,8 +192,8 @@ Duas ideias que valem conhecer:
   expõem `fresh` / `stale` / `unknown` — resultado nunca é silenciosamente
   errado.
 - **Retrieve handles.** `pack_context` pode retornar um contexto compacto mais
-  um handle opaco (`rh_…`). `retrieve <handle>` reidrata o original, sob
-  demanda, confinado ao mesmo workspace.
+  um handle opaco (`rh_…` para código, `mh_…` para memória). `retrieve <handle>`
+  reidrata o original, sob demanda, confinado ao mesmo workspace.
 
 ---
 
@@ -220,7 +222,9 @@ namespaces, classes, structs, records, interfaces, enums e membros top-level
 - Memória inteligente (`remember`/`recall`, `pack_context` com `synthesize`,
   `memory dream`) é **local-first**: nada sai do workspace sem configuração explícita
   de provider LLM; sem embeddings ou LLM o runtime retorna `parcial` com limitações
-  documentadas, não certeza plena.
+  documentadas, não certeza plena. O daemon também agenda um ciclo periódico de
+  consolidação (`dream`, dry-run por default) por workspace — veja
+  [COMMANDS → daemon](COMMANDS.pt-BR.md).
 - O estado do workspace vive em **um único** `.argus/` no root canônico (realpath
   do diretório que contém `workspace.json`). Se `root_path` divergir, o Argus
   **heala** automaticamente (warning `W_WORKSPACE_ROOT_HEALED`) em vez de

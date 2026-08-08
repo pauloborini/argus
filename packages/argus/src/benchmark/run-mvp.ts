@@ -274,16 +274,16 @@ function prepareBenchmarkCorpus(workspaceRoot: string, outputDir: string): TaskC
   const headroom = join(corpusRoot, "headroom");
   const understandAnything = join(corpusRoot, "Understand-Anything");
 
-  copyCorpusSnapshot(join(workspaceRoot, ".app-vault/archive/codegraph"), codegraph);
-  copyCorpusSnapshot(join(workspaceRoot, ".app-vault/archive/GitNexus"), gitnexus);
-  copyCorpusSnapshot(join(workspaceRoot, ".app-vault/archive/headroom"), headroom);
-  copyCorpusSnapshot(join(workspaceRoot, ".app-vault/archive/Understand-Anything"), understandAnything);
+  copyCorpusSnapshot(join(workspaceRoot, ".app-work/references/codegraph"), codegraph);
+  copyCorpusSnapshot(join(workspaceRoot, ".app-work/references/GitNexus"), gitnexus);
+  copyCorpusSnapshot(join(workspaceRoot, ".app-work/references/headroom"), headroom);
+  copyCorpusSnapshot(join(workspaceRoot, ".app-work/references/Understand-Anything"), understandAnything);
 
   return { codegraph, gitnexus, headroom, understandAnything };
 }
 
 function createCodegraphDiffSnapshot(workspaceRoot: string, outputDir: string): string {
-  const source = join(workspaceRoot, ".app-vault/archive/codegraph");
+  const source = join(workspaceRoot, ".app-work/references/codegraph");
   const target = join(outputDir, "tmp", "codegraph-diff");
   copyCorpusSnapshot(source, target);
 
