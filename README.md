@@ -39,7 +39,7 @@ handles instead of whole files), not formatting — isolated, the format-only ga
 **~0%**. It pays off most on **surgical lookups** (−98.8%) and less on **broad
 sweeps** (−53.0%), where an agent reads many files regardless. This is an **internal
 scripted upper bound** until a live-agent run lands; full method and per-task numbers
-in [`.argus/benchmark/latest/SUMMARY.md`](.argus/benchmark/latest/SUMMARY.md).
+in [`docs/benchmark/SUMMARY.md`](docs/benchmark/SUMMARY.md).
 
 It is **local-first**: nothing is indexed or sent to a remote service, and
 recovered context never leaves the workspace.

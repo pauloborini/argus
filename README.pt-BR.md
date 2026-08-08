@@ -39,7 +39,7 @@ handles em vez de arquivos inteiros), não de formato — isolado, o ganho só-d
 é **~0%**. Compensa mais em **lookup cirúrgico** (−98,8%) e menos em **varredura
 ampla** (−53,0%), onde o agente leria muitos arquivos de qualquer jeito. É um
 **limite superior interno scriptado** até rodar com agente vivo; metodologia e
-números por task em [`.argus/benchmark/latest/SUMMARY.md`](.argus/benchmark/latest/SUMMARY.md).
+números por task em [`docs/benchmark/SUMMARY.md`](docs/benchmark/SUMMARY.md).
 
 É **local-first**: nada é indexado ou enviado para serviço remoto, e o contexto
 recuperado nunca sai do workspace.
