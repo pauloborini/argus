@@ -262,7 +262,7 @@ Scripts de build, benchmark, smoke, homologação e release estão documentados 
 ## Mapa da documentação
 
 - **[COMMANDS.pt-BR.md](COMMANDS.pt-BR.md)** — todos os comandos, flags e campos de saída.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — como contribuir.
+- [CONTRIBUTING.pt-BR.md](CONTRIBUTING.pt-BR.md) — como contribuir ([English](CONTRIBUTING.md)).
 - [SECURITY.md](SECURITY.md) — reporte de vulnerabilidades.
 - [CHANGELOG.md](CHANGELOG.md) — histórico de releases.
 - `.argus/contracts/` — surface MCP/CLI congelada e contratos de estado.
