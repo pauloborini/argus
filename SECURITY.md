@@ -1,14 +1,17 @@
-# Segurança
+<!-- Language: **English** · [Português](SECURITY.pt-BR.md) -->
 
-Reporte vulnerabilidades de forma privada pelo GitHub Security Advisories do
-repositório. Não abra issue pública com exploit, conteúdo indexado ou segredo.
+# Security
 
-## Modelo
+Report vulnerabilities privately through the repository's GitHub Security
+Advisories. Do not open a public issue containing an exploit, indexed content,
+or secret.
 
-- processamento e persistência são locais
-- `.argus/` pertence ao workspace indexado
-- `retrieve_handle` só aceita IDs opacos no formato `rh_<16 hex>`
-- nenhuma tool executa código do workspace
-- paths retornados e lidos devem permanecer confinados ao workspace
+## Model
 
-Versões suportadas: última minor da série `1.x`.
+- Processing and persistence are local.
+- `.argus/` belongs to the indexed workspace.
+- `retrieve_handle` accepts only opaque IDs in the `rh_<16 hex>` format.
+- No tool executes workspace code.
+- Returned and read paths must remain confined to the workspace.
+
+Supported versions: the latest minor release in the current `2.x` major line.

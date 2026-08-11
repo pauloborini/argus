@@ -263,7 +263,7 @@ Build, benchmark, smoke, homologation and release scripts are documented in
 ## Documentation map
 
 - **[COMMANDS.md](COMMANDS.md)** — every command, flag and output field.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute ([Português](CONTRIBUTING.pt-BR.md)).
 - [SECURITY.md](SECURITY.md) — reporting vulnerabilities.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
 - `.argus/contracts/` — frozen MCP/CLI surface and response-state contracts.
