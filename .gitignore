@@ -20,7 +20,9 @@ dist-release/
 .agents/
 
 # Processo local: guides, brainstorming, prd, references, private, archive
-.app-work/
+# (só o .gitignore do .app-work é versionado — schema AppVault)
+.app-work/*
+!.app-work/.gitignore
 
 # OS
 .DS_Store
