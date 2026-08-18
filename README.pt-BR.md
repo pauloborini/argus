@@ -1,6 +1,6 @@
 <!-- Idioma: [English](README.md) · **Português** -->
 <p align="center">
-  <img src="assets/atlas-logo.png" alt="Atlas" width="96" height="96">
+  <img src="assets/atlas-logo.png" alt="Atlas" width="200" height="200">
 </p>
 
 # Argus
