@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "packVersion": "8",
+    "schemaVersion": "1",
+    "lastRunAt": "2026-09-14T15:00:00Z",
+    "lastRunId": "heph-argus-20260914-adopt",
+    "adoptionStatus": "validated",
+    "adoptionRunId": "heph-argus-20260914-adopt",
+    "adoptionUpdatedAt": "2026-09-14T15:10:00Z"
+  },
+  "routing": {},
+  "answers": {
+    "5949f4dea26ebf7b0cedce7378a32cd15c055f7c04bc616c3e66d05f0f78b412": {
+      "answer": {
+        "issuesVisibility": "gitignored"
+      },
+      "contextFingerprint": "6edaffbf39aeb68bf232369fcdff1a9a2e78a85f7554fc9c4df9256d80906709",
+      "scope": "this-project",
+      "sourceEvidence": "repo publico (gh repo view pauloborini/argus -> visibility PUBLIC); .app-work/.gitignore atual ignora references/, private/ e issues/",
+      "answeredAt": "2026-09-14T13:30:00Z"
+    },
+    "316fd5df7133dea1c57ae502b4c641653deb1ac515c9a3d8f4c2abc375f57f36": {
+      "answer": {
+        "processVisibility": "versioned-map-and-roadmap",
+        "unignore": [
+          ".app-work/INDEX.md",
+          ".app-work/roadmap/",
+          ".app-work/hephaestus-state.json"
+        ],
+        "stayLocal": [
+          ".app-work/guides/",
+          ".app-work/archive/",
+          ".app-work/brainstorming/",
+          ".app-work/prd/",
+          ".app-work/docs/",
+          ".app-work/issues/",
+          ".app-work/private/",
+          ".app-work/references/"
+        ]
+      },
+      "contextFingerprint": "37a6e46096a6b023e11fa84082079e391c44e1091be92b8c80ec864c5d56213d",
+      "scope": "this-project",
+      "sourceEvidence": "root .gitignore (commit ec0d054) + SCHEMA §2 lista fechada",
+      "answeredAt": "2026-09-14T13:30:00Z"
+    },
+    "5084287322547a285982fbb16e27840831ec229494904a1b6774356796b24907": {
+      "answer": {
+        "adrShell": ".app-work/archive/001-athena-absorption-and-mcp-surface.md",
+        "dossier": ".app-work/private/notes/DOSSIE_LLM_RETRIEVAL_MEMORY/",
+        "includeInPack": false
+      },
+      "contextFingerprint": "d4acea186ba1de482d009b64b6ec07494562d25f5c7ba9baf8d201acbf5dc2ec",
+      "scope": "this-project",
+      "sourceEvidence": "catalogo routing-defaults (docs/adr -> destino null, procedimento 'arquivo -> .app-work/archive/') e SCHEMA §2 (private subdirs fechados)",
+      "answeredAt": "2026-09-14T13:30:00Z"
+    }
+  },
+  "shield": []
+}
