@@ -1,3 +1,4 @@
+# GitHub Actions nao roda neste repo: gates rodam localmente.
 .env
 .env.*
 
@@ -19,10 +20,16 @@ dist-release/
 .codex/
 .agents/
 
-# Processo local: guides, brainstorming, prd, references, private, archive
-# (só o .gitignore do .app-work é versionado — schema AppVault)
+# Processo local: guides, brainstorming, prd, references, private, archive, issues
+# (só o .gitignore, o mapa, o roadmap e o state do kit são versionados — schema AppVault)
 .app-work/*
 !.app-work/.gitignore
+!.app-work/INDEX.md
+!.app-work/roadmap/
+!.app-work/hephaestus-state.json
+
+# Checkpoint efêmero do kit (hephaestus)
+.hephaestus/
 
 # OS
 .DS_Store
