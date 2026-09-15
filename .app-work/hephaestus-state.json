@@ -2,7 +2,7 @@
   "meta": {
     "packVersion": "8",
     "schemaVersion": "1",
-    "lastRunAt": "2026-09-14T15:00:00Z",
+    "lastRunAt": "2026-09-15T02:50:00Z",
     "lastRunId": "heph-argus-20260914-adopt",
     "adoptionStatus": "validated",
     "adoptionRunId": "heph-argus-20260914-adopt",
@@ -53,6 +53,40 @@
       "scope": "this-project",
       "sourceEvidence": "catalogo routing-defaults (docs/adr -> destino null, procedimento 'arquivo -> .app-work/archive/') e SCHEMA §2 (private subdirs fechados)",
       "answeredAt": "2026-09-14T13:30:00Z"
+    },
+    "bbfbe778cd89c686e2c9ec1cea522978e72cb56715db586ee8a77e3a54b217b5": {
+      "answer": {
+        "residueReview": "approved",
+        "files": [
+          "project-rules/rules/operational_rules.md",
+          "project-rules/rules/architecture_rules.md",
+          "project-rules/rules/security_rules.md"
+        ],
+        "clearsDegradingResidue": true
+      },
+      "contextFingerprint": "484623fb3846842e9d38e0a1d1e75937599ec9bac544e0a357984ebbc7cd527f",
+      "scope": "this-project",
+      "sourceEvidence": "revisao humana pos-closeout (2026-09-15): conteudo lido por amostragem das 3 regras; fontes versionadas citadas (CONTRIBUTING, package.json, scripts, testes de contrato, SECURITY, README)",
+      "answeredAt": "2026-09-15T02:50:00Z"
+    },
+    "e799aff9ee33fc90bf0b157ada1ec0c956e5ced266cf976e60b26f471c658f76": {
+      "answer": {
+        "releaseProtocol": "local-only",
+        "publishedSurface": "gates e aceite em project-rules/rules/operational_rules.md"
+      },
+      "contextFingerprint": "15c269406fe87b7449622869eca31500907888b40eee44ff276f0929b7c942ba",
+      "scope": "this-project",
+      "sourceEvidence": "relatorio de adocao apontou should-internalize para o runbook de release em .app-work/private/; gates publicos ja versionados em project-rules/rules/operational_rules.md",
+      "answeredAt": "2026-09-15T02:50:00Z"
+    },
+    "7e9a2cbb0c473e16b8754f49dc2d3e6a41d590da64eca197c24e2cee679946c0": {
+      "answer": {
+        "archiveVisibility": "local-only"
+      },
+      "contextFingerprint": "eb84f7fd18e24f7291070fde2f516aedad08eb7822de2777efac5717841efc9f",
+      "scope": "this-project",
+      "sourceEvidence": "decisao anterior (adocao) ja mantinha .app-work/archive/ local-only; reafirmada apos o espelho datado dos 4 packs",
+      "answeredAt": "2026-09-15T02:50:00Z"
     }
   },
   "shield": []
