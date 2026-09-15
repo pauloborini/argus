@@ -266,7 +266,8 @@ Build, benchmark, smoke, homologation and release scripts are documented in
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute ([Português](CONTRIBUTING.pt-BR.md)).
 - [SECURITY.md](SECURITY.md) — reporting vulnerabilities.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
-- `.argus/contracts/` — frozen MCP/CLI surface and response-state contracts.
+- [project-rules/](project-rules/) — indexes, rules and references for coding tasks ([AGENTS.md](AGENTS.md) is the agent contract).
+- [project-rules/reference/mcp_surface_reference.md](project-rules/reference/mcp_surface_reference.md) — MCP/CLI surface, slim ListTools default and the response envelope.
 
 ---
 
