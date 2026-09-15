@@ -16,6 +16,6 @@ npm link --workspace=@owerride/argus
 
 For end-user installation, see [README.md](README.md#install).
 
-CLI/MCP surface changes require CLI/MCP tests and README/CHANGELOG updates. Parsing changes require fixtures for the affected language. Do not copy code from incompatible sources; see `.argus/compliance/REUSO_FONTES.md`.
+CLI/MCP surface changes require CLI/MCP tests and README/CHANGELOG updates. Parsing changes require fixtures for the affected language. Do not copy code from incompatible sources; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [project-rules/reference/third_party_reference.md](project-rules/reference/third_party_reference.md).
 
-There are no GitHub Actions release jobs. Follow `docs/MANUAL_RELEASE.md` and `npm run release:manual` for publishing.
+There are no GitHub Actions release jobs: publishing is local. The release gates and accept criteria live in [project-rules/rules/operational_rules.md](project-rules/rules/operational_rules.md) (section "Distribuicao e versao"); the publish run itself is `node scripts/manual-release.mjs`.

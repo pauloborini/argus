@@ -10,7 +10,7 @@
 > quando `$pack-roadmap` roda. Espelho defasado entre execuções é esperado, não defeito.
 
 **Marco / objetivo deste roadmap:** Marco V2 — Indexação Estrutural Local, Memória Persistente SQLite e Unificação de Estado de Workspace.
-**Entrevista de decisões:** `docs/adr/001-athena-absorption-and-mcp-surface.md` · `docs/MEMORY_V2_CONTRACT.md` · dossiê `_app-vault/docs/DOSSIE_LLM_RETRIEVAL_MEMORY/`
+**Entrevista de decisões:** `.app-work/archive/001-athena-absorption-and-mcp-surface.md` · `_app-vault/specs/MEMORY_V2_CONTRACT.md` · dossiê `.app-work/private/notes/DOSSIE_LLM_RETRIEVAL_MEMORY/`
 **Criado em:** 2026-07-21 · **Última atualização:** 2026-09-08
 
 ---

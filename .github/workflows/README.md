@@ -9,5 +9,5 @@ Gates e publicação rodam **localmente**:
 - `npm run smoke:package`
 - `node scripts/manual-release.mjs` (publish npm + GitHub Release)
 
-Protocolo: [`docs/MANUAL_RELEASE.md`](../docs/MANUAL_RELEASE.md)  
-Skill: `.cursor/skills/argus-manual-release/`
+Gates e aceite de publicação: [`project-rules/rules/operational_rules.md`](../project-rules/rules/operational_rules.md) (seção "Distribuição e versão").  
+O runbook operacional completo (auth, fluxos A/B, falhas comuns) é local do mantenedor e não vive no repositório.
