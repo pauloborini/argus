@@ -21,6 +21,9 @@ export const MCP_SERVER_NAME = "argus";
 /** Env que controla quais tools aparecem em ListTools (não afeta CallTool). */
 export const ARGUS_MCP_TOOLS_ENV = "ARGUS_MCP_TOOLS";
 
+/** Env que ativa o modo somente leitura no servidor MCP (somente "1" ativa). */
+export const ARGUS_MCP_READ_ONLY_ENV = "ARGUS_MCP_READ_ONLY";
+
 /**
  * Path feliz default (D1): no máximo cinco tools listadas (inclui captura).
  * CallTool continua aceitando o catálogo completo em `MCP_TOOL_NAMES`.

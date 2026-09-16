@@ -395,7 +395,12 @@ continuam invocáveis via CallTool. Controle a descoberta com `ARGUS_MCP_TOOLS`
 (`all` ou CSV); exige restart do MCP após mudança. Controle o budget de tokens
 de resposta com `ARGUS_MCP_RESPONSE_BUDGET` (default `20000` tokens; respostas
 acima do budget sofrem truncamento estrutural com limitation `W_RESPONSE_TRUNCATED`).
-Chamadas de tool validam argumentos estritamente e rejeitam parâmetros desconhecidos (`.strict()`).
+Controle o modo somente leitura com `ARGUS_MCP_READ_ONLY=1` (estritamente `1`;
+bloqueia tools mutantes como `remember` com `E_MCP_READ_ONLY` e pula o auto-sync
+antes das tool calls, mantendo o disco intacto; comandos CLI continuam não afetados).
+Chamadas de tool validam argumentos estritamente, rejeitam parâmetros desconhecidos (`.strict()`)
+e aplicam limites de tamanho em strings (`query`/`goal` ≤ 512, alvos/paths ≤ 1024, filtros escalares ≤ 128,
+conteúdo de `remember` ≤ 65536, arrays de tags/links ≤ 16 itens de ≤ 128 caracteres).
 
 ```bash
 argus serve --mcp

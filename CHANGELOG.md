@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- mcp (breaking leve): modo somente leitura via `ARGUS_MCP_READ_ONLY=1` (estrito). Bloqueia tools
+  mutantes (`remember`) retornando `state: falha` com `E_MCP_READ_ONLY` e pula o auto-sync incremental
+  antes de tool calls, mantendo `.argus/` totalmente intacto. O CLI permanece inalterado.
+- mcp: limites de tamanho de entrada de strings (`.max()`) em todas as 12 schemas do catálogo MCP
+  (`query`/`goal` ≤ 512, targets/paths ≤ 1024, filtros escalares ≤ 128, `remember` content ≤ 65536,
+  arrays de tags/links ≤ 16 itens de ≤ 128 caracteres). Entradas excedentes falham na validação de schema.
 - mcp: budget central de tokens em respostas JSON serializadas via `ARGUS_MCP_RESPONSE_BUDGET`
   (default 20000 tokens). Respostas excedentes passam por truncamento estrutural
   determinístico, recebem a limitation `W_RESPONSE_TRUNCATED` e degradam `state` para `parcial`.

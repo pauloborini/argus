@@ -5,7 +5,14 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { MCP_SERVER_NAME, isMcpToolName, resolveListedTools, buildMcpToolDefinitions } from "./tool-registry.js";
+import {
+  MCP_SERVER_NAME,
+  isMcpToolName,
+  resolveListedTools,
+  buildMcpToolDefinitions,
+  ARGUS_MCP_READ_ONLY_ENV,
+  type McpToolName,
+} from "./tool-registry.js";
 import { buildToolResponseAsync, buildToolResponseTsv, enforceResponseBudget } from "./tools/response.js";
 import { ARGUS_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
@@ -20,6 +27,11 @@ export interface McpServerOptions {
    * Mudança em runtime exige novo `createMcpServer` (restart MCP).
    */
   listedToolsEnv?: string | undefined;
+  /**
+   * Override de `ARGUS_MCP_READ_ONLY` (testes). Ausente = lê process.env.
+   * Valor "1" ativa o modo somente leitura; qualquer outro valor/ausente = inativo.
+   */
+  readOnlyEnv?: string | undefined;
 }
 
 function editDistance(a: string, b: string): number {
@@ -57,45 +69,45 @@ function findClosestKey(target: string, validKeys: string[]): string | undefined
 
 const TOOL_INPUT_SCHEMAS = {
   search: z.object({
-    query: z.string().min(1),
-    scope: z.string().min(1).optional(),
-    kind: z.string().min(1).optional(),
+    query: z.string().min(1).max(512),
+    scope: z.string().min(1).max(128).optional(),
+    kind: z.string().min(1).max(128).optional(),
     limit: z.number().int().positive().max(100).optional(),
   }).strict(),
   explore: z.object({
-    target: z.string().min(1),
+    target: z.string().min(1).max(1024),
     mode: z.enum(["symbol", "file", "topic"]).optional(),
     depth: z.number().int().nonnegative().max(5).optional(),
     include_tests: z.boolean().optional(),
     budget: z.number().int().positive().max(100).optional(),
   }).strict(),
   trace: z.object({
-    from: z.string().min(1),
-    to: z.string().min(1).optional(),
+    from: z.string().min(1).max(1024),
+    to: z.string().min(1).max(1024).optional(),
     direction: z.enum(["forward", "backward", "both"]).optional(),
     max_hops: z.number().int().positive().max(6).optional(),
   }).strict(),
   impact: z.object({
-    target: z.string().min(1),
+    target: z.string().min(1).max(1024),
     direction: z.enum(["dependents", "dependencies", "both"]).optional(),
     depth: z.number().int().positive().max(8).optional(),
     include_tests: z.boolean().optional(),
     summary_only: z.boolean().optional(),
   }).strict(),
   files: z.object({
-    pattern: z.string().min(1).optional(),
+    pattern: z.string().min(1).max(1024).optional(),
     max_depth: z.number().int().nonnegative().max(32).optional(),
   }).strict(),
   status: z.object({
-    path: z.string().min(1).optional(),
+    path: z.string().min(1).max(1024).optional(),
   }).strict(),
   diff_impact: z.object({
     scope: z.enum(["unstaged", "staged", "all", "compare"]).optional(),
-    base_ref: z.string().min(1).optional(),
+    base_ref: z.string().min(1).max(1024).optional(),
   }).strict(),
   pack_context: z.object({
-    sources: z.array(z.string().min(1)).min(1),
-    goal: z.string().min(1),
+    sources: z.array(z.string().min(1).max(128)).min(1),
+    goal: z.string().min(1).max(512),
     token_budget: z.number().int().positive().max(8000),
     style: z.enum(["brief", "balanced", "deep"]).optional(),
     synthesize: z.boolean().optional(),
@@ -105,28 +117,39 @@ const TOOL_INPUT_SCHEMAS = {
     context_lines: z.number().int().min(0).max(100).optional(),
   }).strict(),
   semantic_search: z.object({
-    query: z.string().min(1),
+    query: z.string().min(1).max(512),
     mode: z.enum(["dense", "hybrid"]).optional(),
     domain: z.enum(["code", "memory", "all"]).optional(),
-    scope: z.string().min(1).optional(),
-    kind: z.string().min(1).optional(),
+    scope: z.string().min(1).max(128).optional(),
+    kind: z.string().min(1).max(128).optional(),
     limit: z.number().int().positive().max(100).optional(),
   }).strict(),
   remember: z.object({
-    content: z.string().min(1),
+    content: z.string().min(1).max(65536),
     type: z.enum(["inbox", "decision", "meeting", "entity", "project", "reference"]).optional(),
-    tags: z.array(z.string()).optional(),
-    links: z.array(z.string()).optional(),
+    tags: z.array(z.string().min(1).max(128)).max(16).optional(),
+    links: z.array(z.string().min(1).max(128)).max(16).optional(),
   }).strict(),
   recall: z.object({
-    query: z.string().min(1),
+    query: z.string().min(1).max(512),
     limit: z.number().int().positive().max(50).optional(),
     include_snippets: z.boolean().optional(),
   }).strict(),
 } as const;
 
+/**
+ * Tools que realizam mutação em disco/estado.
+ * Manutenção: atualizar quando novas tools mutantes forem adicionadas ao catálogo.
+ */
+const MUTATING_MCP_TOOLS: readonly McpToolName[] = ["remember"] as const;
+
 export function createMcpServer(options: McpServerOptions = {}): Server {
   const autoSync = options.autoSync !== false;
+  const readOnlyRaw =
+    "readOnlyEnv" in options
+      ? options.readOnlyEnv
+      : process.env[ARGUS_MCP_READ_ONLY_ENV];
+  const readOnly = readOnlyRaw === "1";
   // Política de descoberta resolvida no boot: ListTools usa listed; CallTool usa all.
   // `listedToolsEnv` permite testes isolarem a env sem mutar process.env globalmente.
   const listedResolution =
@@ -272,8 +295,26 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
       };
     }
 
-    // Garante índice fresco antes de responder, consumindo a dirty-flag.
-    await autoSyncIfDirty();
+    // Bloqueio de mutação em modo somente leitura (ARGUS_MCP_READ_ONLY=1).
+    if (readOnly && (MUTATING_MCP_TOOLS as readonly string[]).includes(toolName)) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              state: "falha",
+              message: "E_MCP_READ_ONLY: servidor em modo somente leitura (ARGUS_MCP_READ_ONLY=1).",
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    if (!readOnly) {
+      // Garante índice fresco antes de responder, consumindo a dirty-flag.
+      await autoSyncIfDirty();
+    }
 
     const pathArg = typeof args.path === "string" ? args.path : process.cwd();
 
