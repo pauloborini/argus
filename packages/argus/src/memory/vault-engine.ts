@@ -215,6 +215,29 @@ function buildMemoryResultsByPseudoIds(
   return chunks.sort((a, b) => b.score - a.score || a.note_id.localeCompare(b.note_id));
 }
 
+interface NoteEmbeddingsMetaRow {
+  model?: string;
+  dim?: number;
+  note_count: number;
+  vault_hash: string | null;
+}
+
+function readNoteEmbeddingsMeta(db: Database): NoteEmbeddingsMetaRow | undefined {
+  return db
+    .prepare("SELECT model, dim, note_count, vault_hash FROM note_embeddings_meta WHERE id = 1")
+    .get() as NoteEmbeddingsMetaRow | undefined;
+}
+
+function isEmbeddingIdentityMismatch(
+  meta: { model?: string; dim?: number } | undefined,
+  embedder: { model: string; dim: number },
+): boolean {
+  if (!meta || meta.model === undefined || meta.dim === undefined) {
+    return false;
+  }
+  return meta.model !== embedder.model || meta.dim !== embedder.dim;
+}
+
 async function hybridRows(
   db: Database,
   query: string,
@@ -228,6 +251,10 @@ async function hybridRows(
     return { chunks: lexical.slice(0, limit), mechanism: "fts-only" };
   }
   const embedder = embedderOverride ?? createEmbedder();
+  const meta = readNoteEmbeddingsMeta(db);
+  if (isEmbeddingIdentityMismatch(meta, embedder)) {
+    return { chunks: lexical.slice(0, limit), mechanism: "fts-only" };
+  }
   const [queryVector] = await embedder.embed([`${BGE_QUERY_INSTRUCTION}${query}`]);
   const q = quantizeInt8(queryVector!);
   const readableIds = readReadableNotePseudoIds(db, filter);
@@ -582,7 +609,12 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
-      return (await hybridRows(db, query, limit, embedderOverride)).chunks;
+      const embedder = embedderOverride ?? createEmbedder();
+      const meta = readNoteEmbeddingsMeta(db);
+      if (isEmbeddingIdentityMismatch(meta, embedder)) {
+        return lexicalFallback(db, query, limit);
+      }
+      return (await hybridRows(db, query, limit, embedder)).chunks;
     } catch {
       return lexicalFallback(db, query, limit);
     } finally {
@@ -602,8 +634,13 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
+      const embedder = embedderOverride ?? createEmbedder();
+      const meta = readNoteEmbeddingsMeta(db);
+      const identityMismatch = isEmbeddingIdentityMismatch(meta, embedder);
       const filter = options.asOf ? { ...defaultMemoryReadFilter(), asOf: options.asOf } : undefined;
-      const result = await hybridRows(db, query, limit, embedderOverride, filter);
+      const result = identityMismatch
+        ? { chunks: ftsRows(db, query, Math.max(limit, 50), filter).slice(0, limit), mechanism: "fts-only" as const }
+        : await hybridRows(db, query, limit, embedder, filter);
       let chunks = result.chunks;
       if (!options.includeContent) {
         chunks = chunks.map(({ content: _content, ...rest }) => rest);
@@ -613,6 +650,9 @@ export class VaultEngine {
       }
       const readState = deriveReadState(chunks);
       const limitations: string[] = [];
+      if (identityMismatch) {
+        limitations.push("W_EMBEDDING_IDENTITY_MISMATCH: Modelo ou dimensão de embedding divergente dos vetores de memória.");
+      }
       if (chunks.some((chunk) => chunk.stale_reason)) {
         limitations.push("Resultados incluem fatos com stale_reason.");
       }
@@ -620,17 +660,21 @@ export class VaultEngine {
         limitations.push("Resultados incluem fatos com contradiction_reason.");
       }
       const responseState =
-        result.mechanism === "fts-only"
-          ? chunks.length === 0
-            ? "sucesso"
-            : "parcial"
-          : readState;
+        identityMismatch
+          ? "parcial"
+          : result.mechanism === "fts-only"
+            ? chunks.length === 0
+              ? "sucesso"
+              : "parcial"
+            : readState;
       return {
         mechanism: result.mechanism,
         chunks,
         ...stubResponse(
           responseState,
-          chunks.length ? "Busca de memória concluída." : "Nenhuma nota encontrada.",
+          identityMismatch
+            ? "W_EMBEDDING_IDENTITY_MISMATCH: Modelo ou dimensão de embedding divergente dos vetores de memória. Resultados lexicais como fallback."
+            : chunks.length ? "Busca de memória concluída." : "Nenhuma nota encontrada.",
           limitations.length ? { limitations } : undefined,
         ),
       };
@@ -667,9 +711,7 @@ export class VaultEngine {
           .get() as
           | { schema_version: string; last_sync_at: string | null; notes_count: number; vault_hash: string | null }
           | undefined;
-        const emb = db.prepare("SELECT note_count, vault_hash FROM note_embeddings_meta WHERE id = 1").get() as
-          | { note_count: number; vault_hash: string | null }
-          | undefined;
+        const emb = readNoteEmbeddingsMeta(db);
         const vaultDir = getVaultDir(cwd);
         const files = walkMarkdown(vaultDir);
         const currentVaultHash = computeVaultHash(vaultDir, files);

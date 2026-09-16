@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildExplicitDelta } from "../src/discovery/explicit-delta.js";
 import { withSyncLock } from "../src/concurrency/sync-lock.js";
@@ -32,6 +32,7 @@ import { WorkspacePipeline } from "../src/daemon/pipeline.js";
 import { markDirty, readDirtyFlag } from "../src/discovery/dirty-flag.js";
 import { runInstall } from "../src/commands/install.js";
 import { acquireDaemonLock } from "../src/daemon/lock.js";
+import { daemonLockPath } from "../src/workspace/user-paths.js";
 
 function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
@@ -263,6 +264,60 @@ describe("S30 — daemon de auto-sync + instalação zero-toque", () => {
       const third = acquireDaemonLock(50);
       expect(third).not.toBeNull();
       third?.();
+    });
+
+    it("lock com PID vivo mas start divergente é roubado (detecção de PID-reuse)", () => {
+      const root = makeRepo();
+      process.env.XDG_STATE_HOME = join(root, "state");
+      const lockPath = daemonLockPath();
+      mkdirSync(dirname(lockPath), { recursive: true });
+
+      // Simula lock preso com PID vivo (o processo atual), mas start_ms divergente
+      const forgedRecord = {
+        pid: process.pid,
+        acquired_at: Date.now(),
+        start_ms: 12345, // divergente do start_ms real do processo atual
+      };
+      writeFileSync(lockPath, JSON.stringify(forgedRecord), "utf-8");
+
+      const release = acquireDaemonLock(200);
+      expect(release).not.toBeNull();
+      release?.();
+    });
+
+    it("lock legado sem start_ms de processo vivo não é roubado", () => {
+      const root = makeRepo();
+      process.env.XDG_STATE_HOME = join(root, "state");
+      const lockPath = daemonLockPath();
+      mkdirSync(dirname(lockPath), { recursive: true });
+
+      // Simula lock legado sem start_ms pertencente a processo vivo
+      const legacyRecord = {
+        pid: process.pid,
+        acquired_at: Date.now(),
+      };
+      writeFileSync(lockPath, JSON.stringify(legacyRecord), "utf-8");
+
+      const result = acquireDaemonLock(50);
+      expect(result).toBeNull();
+    });
+
+    it("acquireDaemonLock grava start_ms no record em SO suportado", () => {
+      const root = makeRepo();
+      process.env.XDG_STATE_HOME = join(root, "state");
+      const lockPath = daemonLockPath();
+
+      const release = acquireDaemonLock(50);
+      expect(release).not.toBeNull();
+
+      const raw = readFileSync(lockPath, "utf-8");
+      const record = JSON.parse(raw);
+      expect(record.pid).toBe(process.pid);
+      if (process.platform === "darwin" || process.platform === "linux") {
+        expect(typeof record.start_ms).toBe("number");
+        expect(record.start_ms).toBeGreaterThan(0);
+      }
+      release?.();
     });
   });
 

@@ -106,7 +106,10 @@ const EMBEDDINGS_UNAVAILABLE =
   "W_EMBEDDINGS_UNAVAILABLE: Índice de embeddings ausente; execute argus embed. Resultados lexicais como fallback.";
 const EMBEDDINGS_STALE =
   "W_EMBEDDINGS_STALE: Embeddings defasados em relação ao índice; execute argus embed.";
+const EMBEDDINGS_IDENTITY_MISMATCH =
+  "W_EMBEDDING_IDENTITY_MISMATCH: Modelo ou dimensão de embedding divergente dos vetores indexados. Resultados lexicais como fallback.";
 const EMBEDDINGS_HINT = `${STALE_RUN_EMBED}: Execute argus embed para (re)gerar os vetores semânticos.`;
+const EMBEDDINGS_REBUILD_HINT = "Execute argus index rebuild para atualizar os vetores com o modelo atual.";
 
 function toCandidate(detail: SymbolDetail, score: number, reason: string): SearchCandidate {
   return {
@@ -309,6 +312,36 @@ export async function buildSemanticSearchResponse(
     // Embedda a query (com a instrução bge de busca). Falha de modelo/dep →
     // degrada honesto para lexical em vez de quebrar a tool.
     const embedder = deps?.embedder ?? createEmbedder();
+
+    // Checagem de identidade (GN-04): se o modelo ou a dimensão divergirem
+    // dos vetores já gravados no índice, pula o ranking denso e degrada para fts-only.
+    const embMeta = readEmbeddingsMeta(db);
+    if (embMeta && (embMeta.model !== embedder.model || embMeta.dim !== embedder.dim)) {
+      const codeCandidates = lexicalCandidates(db, query, limit, filters);
+      let finalCandidates = codeCandidates;
+      let memoryState: ToolResponsePayload | null = null;
+      if (domain === "all") {
+        memoryState = await VaultEngine.recall(query, { limit }, rootPath, embedder);
+        const memoryCandidates = mapMemoryCandidates(memoryState.chunks as MemoryCandidateChunk[] | undefined);
+        finalCandidates = fuseCodeAndMemoryCandidates(codeCandidates, memoryCandidates, limit);
+      }
+      return {
+        mechanism: "fts-only",
+        candidates: finalCandidates,
+        storage_backend: envelope.storage_backend,
+        schema_version: envelope.schema_version,
+        domain,
+        memory: memoryState ? { state: memoryState.state, mechanism: memoryState.mechanism } : undefined,
+        ...stubResponse("parcial", EMBEDDINGS_IDENTITY_MISMATCH, {
+          limitations: [
+            "W_EMBEDDING_IDENTITY_MISMATCH: Modelo ou dimensão de embedding divergente dos vetores indexados.",
+            ...((memoryState?.limitations as string[] | undefined) ?? []),
+          ],
+          staleness_hint: EMBEDDINGS_REBUILD_HINT,
+        }),
+      };
+    }
+
     let queryVector: Float32Array;
     try {
       const [vec] = await embedder.embed([`${BGE_QUERY_INSTRUCTION}${query}`]);
@@ -387,7 +420,6 @@ export async function buildSemanticSearchResponse(
 
     // Staleness: índice estrutural mudou desde o embed → marca stale (serve).
     const indexMeta = readIndexMeta(db);
-    const embMeta = readEmbeddingsMeta(db);
     const stale =
       indexMeta && embMeta ? indexMeta.manifest_hash !== embMeta.manifest_hash : false;
 
