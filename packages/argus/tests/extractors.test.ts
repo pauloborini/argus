@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -42,6 +42,168 @@ describe("extractors core", () => {
     expect(result.imports[0]?.source).toBe("./bar");
     expect(result.imports[0]?.resolved_path).toBe("bar.ts");
   });
+
+  it("resolve imports por alias de tsconfig e preserva imports relativos (§7.1)", () => {
+    const fixtureRoot = join(fixturesDir, "sample-alias");
+    const result = extractFile(fixtureRoot, "src/consumer.ts");
+    const aliasImport = result.imports.find((i) => i.source === "@app/util");
+    const relativeImport = result.imports.find((i) => i.source === "./util");
+
+    expect(aliasImport).toBeDefined();
+    expect(aliasImport?.resolved_path).toBe("src/util.ts");
+    expect(relativeImport).toBeDefined();
+    expect(relativeImport?.resolved_path).toBe("src/util.ts");
+  });
+
+  it("alias cujo target sai do rootPath não gera edge e mantém confinamento (§7.2)", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "argus-alias-escape-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "argus-alias-outside-"));
+    try {
+      writeFileSync(join(outsideDir, "secret.ts"), "export const secret = 1;\n", "utf-8");
+      const relToOutside = relative(tempDir, outsideDir).split("\\").join("/");
+      writeFileSync(
+        join(tempDir, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            baseUrl: ".",
+            paths: {
+              "@outside/*": [`${relToOutside}/*`],
+            },
+          },
+        }),
+        "utf-8",
+      );
+      writeFileSync(
+        join(tempDir, "main.ts"),
+        'import { secret } from "@outside/secret";\n',
+        "utf-8",
+      );
+
+      const result = extractFile(tempDir, "main.ts");
+      expect(result.imports[0]?.source).toBe("@outside/secret");
+      expect(result.imports[0]?.resolved_path).toBeUndefined();
+    } finally {
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("tsconfig com extends de 1 nível herda paths e 2 níveis degrada para undefined sem erro (§7.3)", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "argus-alias-extends-"));
+    mkdirSync(join(tempDir, "shared"), { recursive: true });
+    writeFileSync(join(tempDir, "shared", "helper.ts"), "export const val = 42;\n", "utf-8");
+
+    // 1 nível: herda paths
+    writeFileSync(
+      join(tempDir, "tsconfig.base.json"),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@shared/*": ["shared/*"],
+          },
+        },
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempDir, "tsconfig.json"),
+      JSON.stringify({
+        extends: "./tsconfig.base.json",
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempDir, "index.ts"),
+      'import { val } from "@shared/helper";\n',
+      "utf-8",
+    );
+
+    const result1 = extractFile(tempDir, "index.ts");
+    expect(result1.imports[0]?.source).toBe("@shared/helper");
+    expect(result1.imports[0]?.resolved_path).toBe("shared/helper.ts");
+
+    // 2 níveis de extends: degrada para undefined sem erro
+    writeFileSync(
+      join(tempDir, "tsconfig.root.json"),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: ".",
+          paths: {
+            "@deep/*": ["shared/*"],
+          },
+        },
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempDir, "tsconfig.mid.json"),
+      JSON.stringify({
+        extends: "./tsconfig.root.json",
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempDir, "tsconfig.json"),
+      JSON.stringify({
+        extends: "./tsconfig.mid.json",
+      }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempDir, "deep.ts"),
+      'import { val } from "@deep/helper";\n',
+      "utf-8",
+    );
+
+    const result2 = extractFile(tempDir, "deep.ts");
+    expect(result2.imports[0]?.source).toBe("@deep/helper");
+    expect(result2.imports[0]?.resolved_path).toBeUndefined();
+    expect(result2.parse_errors).toEqual([]);
+  });
+
+  it("sem tsconfig ou sem paths, import não-relativo devolve undefined (§7.4)", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "argus-alias-none-"));
+    writeFileSync(
+      join(tempDir, "main.ts"),
+      'import { something } from "unmapped-pkg";\n',
+      "utf-8",
+    );
+
+    const result = extractFile(tempDir, "main.ts");
+    expect(result.imports[0]?.source).toBe("unmapped-pkg");
+    expect(result.imports[0]?.resolved_path).toBeUndefined();
+  });
+
+  it("suporta tsconfig com comentários e trailing commas (JSONC)", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "argus-alias-jsonc-"));
+    mkdirSync(join(tempDir, "lib"), { recursive: true });
+    writeFileSync(join(tempDir, "lib", "tool.ts"), "export const ok = true;\n", "utf-8");
+    writeFileSync(
+      join(tempDir, "tsconfig.json"),
+      `// Comentário de cabeçalho
+{
+  /* Bloco de comentário
+     com múltiplas linhas */
+  "compilerOptions": {
+    "baseUrl": ".", // baseUrl aqui
+    "paths": {
+      "@lib/*": ["lib/*"], // trailing comma
+    },
+  },
+}
+`,
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempDir, "main.ts"),
+      'import { ok } from "@lib/tool";\n',
+      "utf-8",
+    );
+
+    const result = extractFile(tempDir, "main.ts");
+    expect(result.imports[0]?.resolved_path).toBe("lib/tool.ts");
+  });
+
 
   it("resolve imports locais por linguagem quando há arquivo inequívoco", () => {
     tempDir = mkdtempSync(join(tmpdir(), "argus-import-resolve-poly-"));
