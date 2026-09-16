@@ -67,7 +67,7 @@ function findClosestKey(target: string, validKeys: string[]): string | undefined
   return undefined;
 }
 
-const TOOL_INPUT_SCHEMAS = {
+export const TOOL_INPUT_SCHEMAS = {
   search: z.object({
     query: z.string().min(1).max(512),
     scope: z.string().min(1).max(128).optional(),
@@ -134,6 +134,7 @@ const TOOL_INPUT_SCHEMAS = {
     query: z.string().min(1).max(512),
     limit: z.number().int().positive().max(50).optional(),
     include_snippets: z.boolean().optional(),
+    as_of: z.string().max(32).optional(),
   }).strict(),
 } as const;
 

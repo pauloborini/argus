@@ -7,6 +7,19 @@ export interface RecallArgs {
   query?: string;
   limit?: number;
   include_snippets?: boolean;
+  as_of?: string;
+}
+
+const ISO_8601_REGEX = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/;
+
+function isValidIsoDateTime(value: string): boolean {
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+  if (!ISO_8601_REGEX.test(value)) {
+    return false;
+  }
+  return Number.isFinite(Date.parse(value));
 }
 
 export function buildRecallResponse(cwd: string, args?: RecallArgs): ToolResponsePayload {
@@ -20,6 +33,15 @@ export function buildRecallResponse(cwd: string, args?: RecallArgs): ToolRespons
       confidence: "low",
     };
   }
+  if (args?.as_of !== undefined && !isValidIsoDateTime(args.as_of)) {
+    return {
+      mechanism: "fts-only",
+      chunks: [],
+      state: "falha",
+      message: "E_MEMORY_INPUT_INVALID: as_of precisa ser ISO 8601.",
+      confidence: "low",
+    };
+  }
   const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
   if (!rootPath) {
     return { state: "falha", message: WORKSPACE_MISSING };
@@ -27,6 +49,7 @@ export function buildRecallResponse(cwd: string, args?: RecallArgs): ToolRespons
   return VaultEngine.search(query, {
     limit: args?.limit,
     includeSnippets: args?.include_snippets,
+    asOf: args?.as_of,
   }, rootPath);
 }
 
@@ -39,6 +62,15 @@ export async function buildRecallResponseAsync(
   if (!query) {
     return buildRecallResponse(cwd, args);
   }
+  if (args?.as_of !== undefined && !isValidIsoDateTime(args.as_of)) {
+    return {
+      mechanism: "fts-only",
+      chunks: [],
+      state: "falha",
+      message: "E_MEMORY_INPUT_INVALID: as_of precisa ser ISO 8601.",
+      confidence: "low",
+    };
+  }
   const rootPath = resolveLocalStateRoot(cwd)?.rootPath;
   if (!rootPath) {
     return { state: "falha", message: WORKSPACE_MISSING };
@@ -46,5 +78,6 @@ export async function buildRecallResponseAsync(
   return VaultEngine.recall(query, {
     limit: args?.limit,
     includeSnippets: args?.include_snippets,
+    asOf: args?.as_of,
   }, rootPath, embedder);
 }

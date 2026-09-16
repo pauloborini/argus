@@ -524,7 +524,7 @@ export class VaultEngine {
 
   static search(
     query: string,
-    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean } = {},
+    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean; asOf?: string } = {},
     cwd: string = process.cwd(),
   ): ToolResponsePayload & { chunks: MemorySearchResult[]; mechanism: string } {
     const limit = Math.max(1, Math.min(options.limit ?? 10, 50));
@@ -539,7 +539,8 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
-      const lexical = ftsRows(db, query, Math.max(limit, 50));
+      const filter = options.asOf ? { ...defaultMemoryReadFilter(), asOf: options.asOf } : undefined;
+      const lexical = ftsRows(db, query, Math.max(limit, 50), filter);
       let chunks = lexical.slice(0, limit);
       const mechanism = "fts-only";
       if (!options.includeContent) {
@@ -591,7 +592,7 @@ export class VaultEngine {
 
   static async recall(
     query: string,
-    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean } = {},
+    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean; asOf?: string } = {},
     cwd: string = process.cwd(),
     embedderOverride?: Embedder,
   ): Promise<ToolResponsePayload & { chunks: MemorySearchResult[]; mechanism: string }> {
@@ -601,7 +602,8 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
-      const result = await hybridRows(db, query, limit, embedderOverride);
+      const filter = options.asOf ? { ...defaultMemoryReadFilter(), asOf: options.asOf } : undefined;
+      const result = await hybridRows(db, query, limit, embedderOverride, filter);
       let chunks = result.chunks;
       if (!options.includeContent) {
         chunks = chunks.map(({ content: _content, ...rest }) => rest);

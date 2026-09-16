@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- mcp: recall aceita `as_of` (ISO 8601) para consulta temporal de memória v2, respeitando vigência no ponto especificado (`valid_from <= asOf` e exclusão de notas supersedidas); valor inválido retorna `state: falha` com `E_MEMORY_INPUT_INVALID`.
 - mcp (breaking leve): modo somente leitura via `ARGUS_MCP_READ_ONLY=1` (estrito). Bloqueia tools
   mutantes (`remember`) retornando `state: falha` com `E_MCP_READ_ONLY` e pula o auto-sync incremental
   antes de tool calls, mantendo `.argus/` totalmente intacto. O CLI permanece inalterado.
