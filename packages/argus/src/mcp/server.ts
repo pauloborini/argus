@@ -67,12 +67,15 @@ function findClosestKey(target: string, validKeys: string[]): string | undefined
   return undefined;
 }
 
+const RESPONSE_FORMAT_ZOD = z.enum(["concise", "detailed", "tsv"]).optional();
+
 export const TOOL_INPUT_SCHEMAS = {
   search: z.object({
     query: z.string().min(1).max(512),
     scope: z.string().min(1).max(128).optional(),
     kind: z.string().min(1).max(128).optional(),
     limit: z.number().int().positive().max(100).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   explore: z.object({
     target: z.string().min(1).max(1024),
@@ -80,12 +83,14 @@ export const TOOL_INPUT_SCHEMAS = {
     depth: z.number().int().nonnegative().max(5).optional(),
     include_tests: z.boolean().optional(),
     budget: z.number().int().positive().max(100).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   trace: z.object({
     from: z.string().min(1).max(1024),
     to: z.string().min(1).max(1024).optional(),
     direction: z.enum(["forward", "backward", "both"]).optional(),
     max_hops: z.number().int().positive().max(6).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   impact: z.object({
     target: z.string().min(1).max(1024),
@@ -93,17 +98,21 @@ export const TOOL_INPUT_SCHEMAS = {
     depth: z.number().int().positive().max(8).optional(),
     include_tests: z.boolean().optional(),
     summary_only: z.boolean().optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   files: z.object({
     pattern: z.string().min(1).max(1024).optional(),
     max_depth: z.number().int().nonnegative().max(32).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   status: z.object({
     path: z.string().min(1).max(1024).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   diff_impact: z.object({
     scope: z.enum(["unstaged", "staged", "all", "compare"]).optional(),
     base_ref: z.string().min(1).max(1024).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   pack_context: z.object({
     sources: z.array(z.string().min(1).max(128)).min(1),
@@ -111,10 +120,12 @@ export const TOOL_INPUT_SCHEMAS = {
     token_budget: z.number().int().positive().max(8000),
     style: z.enum(["brief", "balanced", "deep"]).optional(),
     synthesize: z.boolean().optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   retrieve: z.object({
     handle: z.string().regex(/^(rh|mh)_[a-f0-9]{16}$/),
     context_lines: z.number().int().min(0).max(100).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   semantic_search: z.object({
     query: z.string().min(1).max(512),
@@ -123,18 +134,21 @@ export const TOOL_INPUT_SCHEMAS = {
     scope: z.string().min(1).max(128).optional(),
     kind: z.string().min(1).max(128).optional(),
     limit: z.number().int().positive().max(100).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   remember: z.object({
     content: z.string().min(1).max(65536),
     type: z.enum(["inbox", "decision", "meeting", "entity", "project", "reference"]).optional(),
     tags: z.array(z.string().min(1).max(128)).max(16).optional(),
     links: z.array(z.string().min(1).max(128)).max(16).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
   recall: z.object({
     query: z.string().min(1).max(512),
     limit: z.number().int().positive().max(50).optional(),
     include_snippets: z.boolean().optional(),
     as_of: z.string().max(32).optional(),
+    response_format: RESPONSE_FORMAT_ZOD,
   }).strict(),
 } as const;
 

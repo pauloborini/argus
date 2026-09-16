@@ -82,6 +82,15 @@ function timestampForFile(now = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
 }
 
+function normalizeAsOf(asOf?: string): string | undefined {
+  if (!asOf) {
+    return undefined;
+  }
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(asOf);
+  const parsed = dateOnly ? new Date(`${asOf}T23:59:59.999Z`) : new Date(asOf);
+  return Number.isNaN(parsed.getTime()) ? asOf : parsed.toISOString();
+}
+
 function walkMarkdown(dir: string): string[] {
   if (!existsSync(dir)) {
     return [];
@@ -140,6 +149,7 @@ function ftsRows(
   // Fatores v2 reranqueiam depois — relevância lexical controlada não depende só da posição.
   const positives = rows.map((row) => Math.max(1e-9, -row.rank));
   const maxPositive = Math.max(...positives, 1e-9);
+  const asOfDate = filter.asOf ? new Date(filter.asOf) : undefined;
   const chunks = rows.map((row, index) =>
     normalizeMemoryChunk(
       row,
@@ -147,6 +157,7 @@ function ftsRows(
       "fts-only",
       row.snippet || row.content.slice(0, 240),
       true,
+      asOfDate,
     ),
   );
   return chunks.sort((a, b) => b.score - a.score || a.note_id.localeCompare(b.note_id));
@@ -198,6 +209,7 @@ function buildMemoryResultsByPseudoIds(
   filter: MemoryReadFilter = defaultMemoryReadFilter(),
 ): MemorySearchResult[] {
   const notes = readNotesByPseudoIds(db, ordered, filter);
+  const asOfDate = filter.asOf ? new Date(filter.asOf) : undefined;
   const chunks = ordered
     .map((id, index) => {
       const note = notes.get(id);
@@ -208,6 +220,7 @@ function buildMemoryResultsByPseudoIds(
             mechanism,
             note.content.slice(0, 240),
             true,
+            asOfDate,
           )
         : null;
     })
@@ -566,7 +579,8 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
-      const filter = options.asOf ? { ...defaultMemoryReadFilter(), asOf: options.asOf } : undefined;
+      const normalizedAsOf = normalizeAsOf(options.asOf);
+      const filter = normalizedAsOf ? { ...defaultMemoryReadFilter(), asOf: normalizedAsOf } : undefined;
       const lexical = ftsRows(db, query, Math.max(limit, 50), filter);
       let chunks = lexical.slice(0, limit);
       const mechanism = "fts-only";
@@ -637,7 +651,8 @@ export class VaultEngine {
       const embedder = embedderOverride ?? createEmbedder();
       const meta = readNoteEmbeddingsMeta(db);
       const identityMismatch = isEmbeddingIdentityMismatch(meta, embedder);
-      const filter = options.asOf ? { ...defaultMemoryReadFilter(), asOf: options.asOf } : undefined;
+      const normalizedAsOf = normalizeAsOf(options.asOf);
+      const filter = normalizedAsOf ? { ...defaultMemoryReadFilter(), asOf: normalizedAsOf } : undefined;
       const result = identityMismatch
         ? { chunks: ftsRows(db, query, Math.max(limit, 50), filter).slice(0, limit), mechanism: "fts-only" as const }
         : await hybridRows(db, query, limit, embedder, filter);

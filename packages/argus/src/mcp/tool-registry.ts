@@ -321,6 +321,7 @@ export const TOOL_INPUT_JSON_SCHEMAS = {
       query: { type: "string" },
       limit: { type: "integer", minimum: 1, maximum: 50 },
       include_snippets: { type: "boolean" },
+      as_of: { type: "string" },
       response_format: RESPONSE_FORMAT_SCHEMA,
     },
     required: ["query"],

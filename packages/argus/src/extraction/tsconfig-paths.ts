@@ -175,14 +175,24 @@ export function loadTsconfigAliases(rootPath: string, fromDir: string): Tsconfig
               ...(rawPaths ?? {}),
             };
           }
-          if (effectiveBaseUrl === null && typeof baseOptions.baseUrl === "string") {
-            effectiveBaseUrl = resolve(dirname(extendTarget), baseOptions.baseUrl);
+          if (effectiveBaseUrl === null) {
+            if (typeof baseOptions.baseUrl === "string") {
+              effectiveBaseUrl = resolve(dirname(extendTarget), baseOptions.baseUrl);
+            } else if (baseOptions.paths) {
+              effectiveBaseUrl = dirname(extendTarget);
+            }
           }
         }
       } catch {
         // Degrada sem erro em base tsconfig ilegível
       }
     }
+  }
+
+  // Fallback da especificação do TypeScript (>= 4.1): paths sem baseUrl explícito
+  // resolve relativo ao diretório do próprio tsconfig.json.
+  if (effectiveBaseUrl === null) {
+    effectiveBaseUrl = tsconfigDir;
   }
 
   if (!rawPaths || Object.keys(rawPaths).length === 0) {
