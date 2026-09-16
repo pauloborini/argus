@@ -168,6 +168,20 @@ describe("memory v2 write path (S03)", () => {
     }
   });
 
+  it("§7.4 remember grava nota de forma atômica sem deixar .tmp residual e com conteúdo íntegro", async () => {
+    const cwd = root();
+    const result = await VaultEngine.remember("Nota atômica de prova §7.4", { type: "inbox" }, cwd);
+    expect(result.state).toBe("sucesso");
+    const inboxDir = join(cwd, ".argus", "memory", "vault", "inbox");
+    const files = readdirSync(inboxDir);
+    const tmpFiles = files.filter((f) => f.endsWith(".tmp"));
+    expect(tmpFiles).toHaveLength(0);
+    const noteFile = files.find((f) => f.endsWith(".md"));
+    expect(noteFile).toBeTruthy();
+    const content = readFileSync(join(inboxDir, noteFile!), "utf-8");
+    expect(content).toContain("Nota atômica de prova §7.4");
+  });
+
   it("AC-5.1.1 remember de decisão persiste confidence=confirmed no SQLite (hot path)", async () => {
     const cwd = root();
     const result = await VaultEngine.remember("Decisão: usar ranking confirmed no remember", {

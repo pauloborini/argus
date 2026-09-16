@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync } from "node:fs";
 import { basename, extname, join, relative, resolve } from "node:path";
+import { writeFileAtomic } from "./atomic-write.js";
 import { stubResponse } from "../contracts/response-state.js";
 import { blobToInt8, int8ToBlob, quantizeInt8 } from "../embeddings/quantize.js";
 import { BGE_QUERY_INSTRUCTION, createEmbedder, EmbeddingsUnavailableError, type Embedder } from "../embeddings/embedder.js";
@@ -310,7 +311,7 @@ export class VaultEngine {
       parsed.body.trim(),
       "",
     ].join("\n");
-    writeFileSync(notePath, finalContent, "utf-8");
+    writeFileAtomic(notePath, finalContent);
     const vaultRel = relative(getVaultDir(cwd), notePath);
     const noteId = hashText(`${vaultRel}\n${finalContent}`).slice(0, 16);
     // Namespace import permite prova de wire parcial (spy) sem mockar o seam no retry.
