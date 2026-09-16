@@ -10,7 +10,7 @@ export const BLOCK_END = "<!-- <<< argus <<< -->";
  * Versão do corpo gerado (independente do semver do pacote).
  * Bump quando o texto/contrato do path feliz mudar — `install --refresh` detecta drift.
  */
-export const AGENT_RULES_VERSION = 3;
+export const AGENT_RULES_VERSION = 4;
 
 /** Marcador parseável dentro do bloco (ex.: `<!-- argus-agent-rules-version: 1 -->`). */
 export const AGENT_RULES_VERSION_MARKER_RE =
@@ -44,6 +44,9 @@ Decisão operacional:
 4. \`remember\` — ao fechar uma decisão ou insight, capture no cofre
    (MCP \`remember\` ou CLI \`argus memory remember\`).
 5. \`status\` — saúde, staleness e modo slim da surface MCP.
+6. completude de busca — antes de declarar que algo "não existe no repositório",
+   combine busca semântica (\`semantic_search\`) com grep exaustivo (termo + sinônimos,
+   código + testes + configs).
 
 Fallback CLI (quando o MCP não estiver disponível): \`argus explore\`,
 \`argus pack-context\`, \`argus memory search\` (equiv. recall),

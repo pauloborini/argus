@@ -392,7 +392,10 @@ path feliz: `explore`, `pack_context`, `recall`, `remember`, `status`. As **doze
 registradas (`search`, `explore`, `trace`, `impact`, `diff_impact`, `files`,
 `pack_context`, `retrieve`, `status`, `semantic_search`, `remember`, `recall`)
 continuam invocáveis via CallTool. Controle a descoberta com `ARGUS_MCP_TOOLS`
-(`all` ou CSV); exige restart do MCP após mudança.
+(`all` ou CSV); exige restart do MCP após mudança. Controle o budget de tokens
+de resposta com `ARGUS_MCP_RESPONSE_BUDGET` (default `20000` tokens; respostas
+acima do budget sofrem truncamento estrutural com limitation `W_RESPONSE_TRUNCATED`).
+Chamadas de tool validam argumentos estritamente e rejeitam parâmetros desconhecidos (`.strict()`).
 
 ```bash
 argus serve --mcp

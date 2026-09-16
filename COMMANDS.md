@@ -393,7 +393,10 @@ Start the stdio MCP server. **ListTools** defaults to five happy-path tools:
 (`search`, `explore`, `trace`, `impact`, `diff_impact`, `files`, `pack_context`,
 `retrieve`, `status`, `semantic_search`, `remember`, `recall`) remain callable
 via CallTool. Control discovery with `ARGUS_MCP_TOOLS` (`all` or CSV); requires
-MCP restart after change.
+MCP restart after change. Control response token budget with `ARGUS_MCP_RESPONSE_BUDGET`
+(default `20000` tokens; responses exceeding budget are structurally truncated
+with limitation `W_RESPONSE_TRUNCATED`). Tool calls strictly validate arguments
+and reject unknown parameters (`.strict()`).
 
 ```bash
 argus serve --mcp

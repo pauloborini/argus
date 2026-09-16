@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- mcp: budget central de tokens em respostas JSON serializadas via `ARGUS_MCP_RESPONSE_BUDGET`
+  (default 20000 tokens). Respostas excedentes passam por truncamento estrutural
+  determinístico, recebem a limitation `W_RESPONSE_TRUNCATED` e degradam `state` para `parcial`.
+- mcp (breaking): validação estrita de argumentos (`.strict()`) em todas as 12 tools do catálogo.
+  Chamadas com parâmetros desconhecidos agora falham com `state: falha`, citando a chave rejeitada
+  e sugerindo a chave válida mais próxima.
+- agent-rules: versão 4 (`AGENT_RULES_VERSION = 4`) com item de completude de busca (exige busca
+  semântica e grep exaustivo antes de declarar ausência no repositório). Requer `argus install --refresh`.
 - docs: README (EN/pt-BR) atualizados com base no vault vigente e no código —
   VS Code adicionado à lista de hosts auto-detectados (8 hosts), handle de
   memória `mh_…` restabelecido na versão pt-BR, quickstart pt-BR igualado ao EN

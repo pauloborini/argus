@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { MCP_SERVER_NAME, isMcpToolName, resolveListedTools, buildMcpToolDefinitions } from "./tool-registry.js";
-import { buildToolResponseAsync, buildToolResponseTsv } from "./tools/response.js";
+import { buildToolResponseAsync, buildToolResponseTsv, enforceResponseBudget } from "./tools/response.js";
 import { ARGUS_VERSION } from "../version.js";
 import { hasDirtyPaths } from "../discovery/dirty-flag.js";
 import { isManifestStaleForAutoSync } from "../discovery/staleness.js";
@@ -22,55 +22,88 @@ export interface McpServerOptions {
   listedToolsEnv?: string | undefined;
 }
 
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function findClosestKey(target: string, validKeys: string[]): string | undefined {
+  let closest: string | undefined;
+  let minDistance = Infinity;
+  for (const key of validKeys) {
+    const dist = editDistance(target.toLowerCase(), key.toLowerCase());
+    if (dist < minDistance) {
+      minDistance = dist;
+      closest = key;
+    }
+  }
+  if (closest && minDistance <= Math.max(3, Math.floor(target.length / 2))) {
+    return closest;
+  }
+  return undefined;
+}
+
 const TOOL_INPUT_SCHEMAS = {
   search: z.object({
     query: z.string().min(1),
     scope: z.string().min(1).optional(),
     kind: z.string().min(1).optional(),
     limit: z.number().int().positive().max(100).optional(),
-  }).passthrough(),
+  }).strict(),
   explore: z.object({
     target: z.string().min(1),
     mode: z.enum(["symbol", "file", "topic"]).optional(),
     depth: z.number().int().nonnegative().max(5).optional(),
     include_tests: z.boolean().optional(),
     budget: z.number().int().positive().max(100).optional(),
-  }).passthrough(),
+  }).strict(),
   trace: z.object({
     from: z.string().min(1),
     to: z.string().min(1).optional(),
     direction: z.enum(["forward", "backward", "both"]).optional(),
     max_hops: z.number().int().positive().max(6).optional(),
-  }).passthrough(),
+  }).strict(),
   impact: z.object({
     target: z.string().min(1),
     direction: z.enum(["dependents", "dependencies", "both"]).optional(),
     depth: z.number().int().positive().max(8).optional(),
     include_tests: z.boolean().optional(),
     summary_only: z.boolean().optional(),
-  }).passthrough(),
+  }).strict(),
   files: z.object({
     pattern: z.string().min(1).optional(),
     max_depth: z.number().int().nonnegative().max(32).optional(),
-  }).passthrough(),
+  }).strict(),
   status: z.object({
     path: z.string().min(1).optional(),
-  }).passthrough(),
+  }).strict(),
   diff_impact: z.object({
     scope: z.enum(["unstaged", "staged", "all", "compare"]).optional(),
     base_ref: z.string().min(1).optional(),
-  }).passthrough(),
+  }).strict(),
   pack_context: z.object({
     sources: z.array(z.string().min(1)).min(1),
     goal: z.string().min(1),
     token_budget: z.number().int().positive().max(8000),
     style: z.enum(["brief", "balanced", "deep"]).optional(),
     synthesize: z.boolean().optional(),
-  }).passthrough(),
+  }).strict(),
   retrieve: z.object({
     handle: z.string().regex(/^(rh|mh)_[a-f0-9]{16}$/),
     context_lines: z.number().int().min(0).max(100).optional(),
-  }).passthrough(),
+  }).strict(),
   semantic_search: z.object({
     query: z.string().min(1),
     mode: z.enum(["dense", "hybrid"]).optional(),
@@ -78,18 +111,18 @@ const TOOL_INPUT_SCHEMAS = {
     scope: z.string().min(1).optional(),
     kind: z.string().min(1).optional(),
     limit: z.number().int().positive().max(100).optional(),
-  }).passthrough(),
+  }).strict(),
   remember: z.object({
     content: z.string().min(1),
     type: z.enum(["inbox", "decision", "meeting", "entity", "project", "reference"]).optional(),
     tags: z.array(z.string()).optional(),
     links: z.array(z.string()).optional(),
-  }).passthrough(),
+  }).strict(),
   recall: z.object({
     query: z.string().min(1),
     limit: z.number().int().positive().max(50).optional(),
     include_snippets: z.boolean().optional(),
-  }).passthrough(),
+  }).strict(),
 } as const;
 
 export function createMcpServer(options: McpServerOptions = {}): Server {
@@ -197,12 +230,42 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
     let args: Record<string, unknown>;
     try {
       args = schema.parse(request.params.arguments ?? {}) as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      let message = "Input inválido para a tool";
+      if (error instanceof z.ZodError) {
+        const unrecognizedKeys: string[] = [];
+        for (const issue of error.issues) {
+          if (
+            issue.code === "unrecognized_keys" &&
+            "keys" in issue &&
+            Array.isArray((issue as { keys: unknown[] }).keys)
+          ) {
+            unrecognizedKeys.push(...(issue as { keys: string[] }).keys);
+          }
+        }
+        if (unrecognizedKeys.length > 0) {
+          const validKeys = Object.keys(schema.shape);
+          const suggestions = unrecognizedKeys
+            .map((k) => {
+              const closest = findClosestKey(k, validKeys);
+              return closest ? `'${closest}'` : undefined;
+            })
+            .filter((s): s is string => Boolean(s));
+          const keysFormatted = unrecognizedKeys.map((k) => `'${k}'`).join(", ");
+          const hint =
+            suggestions.length > 0
+              ? ` Você quis dizer ${suggestions.join(", ")}?`
+              : "";
+          message = `Input inválido para a tool: argumento(s) desconhecido(s) ${keysFormatted}.${hint}`;
+        } else {
+          message = `Input inválido para a tool: ${error.issues.map((i) => `${i.path.join(".") || "argumento"}: ${i.message}`).join("; ")}`;
+        }
+      }
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify({ state: "falha", message: "Input inválido para a tool" }),
+            text: JSON.stringify({ state: "falha", message }),
           },
         ],
         isError: true,
@@ -227,10 +290,12 @@ export function createMcpServer(options: McpServerOptions = {}): Server {
       };
     }
 
-    const payload = await buildToolResponseAsync(
-      toolName,
-      pathArg,
-      args,
+    const payload = enforceResponseBudget(
+      await buildToolResponseAsync(
+        toolName,
+        pathArg,
+        args,
+      ),
     );
 
     return {
