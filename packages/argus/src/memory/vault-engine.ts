@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync } from "node:fs";
 import { basename, extname, join, relative, resolve } from "node:path";
+import { writeFileAtomic } from "./atomic-write.js";
 import { stubResponse } from "../contracts/response-state.js";
 import { blobToInt8, int8ToBlob, quantizeInt8 } from "../embeddings/quantize.js";
 import { BGE_QUERY_INSTRUCTION, createEmbedder, EmbeddingsUnavailableError, type Embedder } from "../embeddings/embedder.js";
@@ -81,6 +82,15 @@ function timestampForFile(now = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
 }
 
+function normalizeAsOf(asOf?: string): string | undefined {
+  if (!asOf) {
+    return undefined;
+  }
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(asOf);
+  const parsed = dateOnly ? new Date(`${asOf}T23:59:59.999Z`) : new Date(asOf);
+  return Number.isNaN(parsed.getTime()) ? asOf : parsed.toISOString();
+}
+
 function walkMarkdown(dir: string): string[] {
   if (!existsSync(dir)) {
     return [];
@@ -139,6 +149,7 @@ function ftsRows(
   // Fatores v2 reranqueiam depois — relevância lexical controlada não depende só da posição.
   const positives = rows.map((row) => Math.max(1e-9, -row.rank));
   const maxPositive = Math.max(...positives, 1e-9);
+  const asOfDate = filter.asOf ? new Date(filter.asOf) : undefined;
   const chunks = rows.map((row, index) =>
     normalizeMemoryChunk(
       row,
@@ -146,6 +157,7 @@ function ftsRows(
       "fts-only",
       row.snippet || row.content.slice(0, 240),
       true,
+      asOfDate,
     ),
   );
   return chunks.sort((a, b) => b.score - a.score || a.note_id.localeCompare(b.note_id));
@@ -197,6 +209,7 @@ function buildMemoryResultsByPseudoIds(
   filter: MemoryReadFilter = defaultMemoryReadFilter(),
 ): MemorySearchResult[] {
   const notes = readNotesByPseudoIds(db, ordered, filter);
+  const asOfDate = filter.asOf ? new Date(filter.asOf) : undefined;
   const chunks = ordered
     .map((id, index) => {
       const note = notes.get(id);
@@ -207,11 +220,35 @@ function buildMemoryResultsByPseudoIds(
             mechanism,
             note.content.slice(0, 240),
             true,
+            asOfDate,
           )
         : null;
     })
     .filter((item): item is MemorySearchResult => item !== null);
   return chunks.sort((a, b) => b.score - a.score || a.note_id.localeCompare(b.note_id));
+}
+
+interface NoteEmbeddingsMetaRow {
+  model?: string;
+  dim?: number;
+  note_count: number;
+  vault_hash: string | null;
+}
+
+function readNoteEmbeddingsMeta(db: Database): NoteEmbeddingsMetaRow | undefined {
+  return db
+    .prepare("SELECT model, dim, note_count, vault_hash FROM note_embeddings_meta WHERE id = 1")
+    .get() as NoteEmbeddingsMetaRow | undefined;
+}
+
+function isEmbeddingIdentityMismatch(
+  meta: { model?: string; dim?: number } | undefined,
+  embedder: { model: string; dim: number },
+): boolean {
+  if (!meta || meta.model === undefined || meta.dim === undefined) {
+    return false;
+  }
+  return meta.model !== embedder.model || meta.dim !== embedder.dim;
 }
 
 async function hybridRows(
@@ -227,6 +264,10 @@ async function hybridRows(
     return { chunks: lexical.slice(0, limit), mechanism: "fts-only" };
   }
   const embedder = embedderOverride ?? createEmbedder();
+  const meta = readNoteEmbeddingsMeta(db);
+  if (isEmbeddingIdentityMismatch(meta, embedder)) {
+    return { chunks: lexical.slice(0, limit), mechanism: "fts-only" };
+  }
   const [queryVector] = await embedder.embed([`${BGE_QUERY_INSTRUCTION}${query}`]);
   const q = quantizeInt8(queryVector!);
   const readableIds = readReadableNotePseudoIds(db, filter);
@@ -310,7 +351,7 @@ export class VaultEngine {
       parsed.body.trim(),
       "",
     ].join("\n");
-    writeFileSync(notePath, finalContent, "utf-8");
+    writeFileAtomic(notePath, finalContent);
     const vaultRel = relative(getVaultDir(cwd), notePath);
     const noteId = hashText(`${vaultRel}\n${finalContent}`).slice(0, 16);
     // Namespace import permite prova de wire parcial (spy) sem mockar o seam no retry.
@@ -523,7 +564,7 @@ export class VaultEngine {
 
   static search(
     query: string,
-    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean } = {},
+    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean; asOf?: string } = {},
     cwd: string = process.cwd(),
   ): ToolResponsePayload & { chunks: MemorySearchResult[]; mechanism: string } {
     const limit = Math.max(1, Math.min(options.limit ?? 10, 50));
@@ -538,7 +579,9 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
-      const lexical = ftsRows(db, query, Math.max(limit, 50));
+      const normalizedAsOf = normalizeAsOf(options.asOf);
+      const filter = normalizedAsOf ? { ...defaultMemoryReadFilter(), asOf: normalizedAsOf } : undefined;
+      const lexical = ftsRows(db, query, Math.max(limit, 50), filter);
       let chunks = lexical.slice(0, limit);
       const mechanism = "fts-only";
       if (!options.includeContent) {
@@ -580,7 +623,12 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
-      return (await hybridRows(db, query, limit, embedderOverride)).chunks;
+      const embedder = embedderOverride ?? createEmbedder();
+      const meta = readNoteEmbeddingsMeta(db);
+      if (isEmbeddingIdentityMismatch(meta, embedder)) {
+        return lexicalFallback(db, query, limit);
+      }
+      return (await hybridRows(db, query, limit, embedder)).chunks;
     } catch {
       return lexicalFallback(db, query, limit);
     } finally {
@@ -590,7 +638,7 @@ export class VaultEngine {
 
   static async recall(
     query: string,
-    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean } = {},
+    options: { limit?: number; includeSnippets?: boolean; includeContent?: boolean; asOf?: string } = {},
     cwd: string = process.cwd(),
     embedderOverride?: Embedder,
   ): Promise<ToolResponsePayload & { chunks: MemorySearchResult[]; mechanism: string }> {
@@ -600,7 +648,14 @@ export class VaultEngine {
     }
     const db = openMemoryDb(cwd, { readonly: true });
     try {
-      const result = await hybridRows(db, query, limit, embedderOverride);
+      const embedder = embedderOverride ?? createEmbedder();
+      const meta = readNoteEmbeddingsMeta(db);
+      const identityMismatch = isEmbeddingIdentityMismatch(meta, embedder);
+      const normalizedAsOf = normalizeAsOf(options.asOf);
+      const filter = normalizedAsOf ? { ...defaultMemoryReadFilter(), asOf: normalizedAsOf } : undefined;
+      const result = identityMismatch
+        ? { chunks: ftsRows(db, query, Math.max(limit, 50), filter).slice(0, limit), mechanism: "fts-only" as const }
+        : await hybridRows(db, query, limit, embedder, filter);
       let chunks = result.chunks;
       if (!options.includeContent) {
         chunks = chunks.map(({ content: _content, ...rest }) => rest);
@@ -610,6 +665,9 @@ export class VaultEngine {
       }
       const readState = deriveReadState(chunks);
       const limitations: string[] = [];
+      if (identityMismatch) {
+        limitations.push("W_EMBEDDING_IDENTITY_MISMATCH: Modelo ou dimensão de embedding divergente dos vetores de memória.");
+      }
       if (chunks.some((chunk) => chunk.stale_reason)) {
         limitations.push("Resultados incluem fatos com stale_reason.");
       }
@@ -617,17 +675,21 @@ export class VaultEngine {
         limitations.push("Resultados incluem fatos com contradiction_reason.");
       }
       const responseState =
-        result.mechanism === "fts-only"
-          ? chunks.length === 0
-            ? "sucesso"
-            : "parcial"
-          : readState;
+        identityMismatch
+          ? "parcial"
+          : result.mechanism === "fts-only"
+            ? chunks.length === 0
+              ? "sucesso"
+              : "parcial"
+            : readState;
       return {
         mechanism: result.mechanism,
         chunks,
         ...stubResponse(
           responseState,
-          chunks.length ? "Busca de memória concluída." : "Nenhuma nota encontrada.",
+          identityMismatch
+            ? "W_EMBEDDING_IDENTITY_MISMATCH: Modelo ou dimensão de embedding divergente dos vetores de memória. Resultados lexicais como fallback."
+            : chunks.length ? "Busca de memória concluída." : "Nenhuma nota encontrada.",
           limitations.length ? { limitations } : undefined,
         ),
       };
@@ -664,9 +726,7 @@ export class VaultEngine {
           .get() as
           | { schema_version: string; last_sync_at: string | null; notes_count: number; vault_hash: string | null }
           | undefined;
-        const emb = db.prepare("SELECT note_count, vault_hash FROM note_embeddings_meta WHERE id = 1").get() as
-          | { note_count: number; vault_hash: string | null }
-          | undefined;
+        const emb = readNoteEmbeddingsMeta(db);
         const vaultDir = getVaultDir(cwd);
         const files = walkMarkdown(vaultDir);
         const currentVaultHash = computeVaultHash(vaultDir, files);

@@ -447,6 +447,9 @@ describe("S28 — sync de baixo atrito", () => {
       expect(claude).toContain("BYTES_EXTERNOS_XYZ");
       expect(claude).toContain("RODAPÉ_EXTERNO_ABC");
       expect(parseAgentRulesVersion(claude)).toBe(AGENT_RULES_VERSION);
+      expect(parseAgentRulesVersion(claude)).toBe(4);
+      expect(claude).toContain("semantic_search");
+      expect(claude).toContain("grep exaustivo");
       expect(claude).toContain(buildBlock());
       expect(claude.split(BLOCK_BEGIN).length - 1).toBe(1);
     });

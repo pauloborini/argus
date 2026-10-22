@@ -3,6 +3,9 @@
 // limitations com códigos E_*/W_*) são preservados pelo caller (applyResponseFormat).
 import type { ToolResponsePayload } from "./common.js";
 import type { McpToolName } from "../tool-registry.js";
+import { countTokens } from "../../packing/tokenizer.js";
+
+export const MIN_TOKENS_TO_COMPRESS = 250;
 
 // Remove campos que o consumidor pode derivar dos dados primários.
 function stripDerivedFields(payload: ToolResponsePayload, tool: McpToolName): ToolResponsePayload {
@@ -124,5 +127,11 @@ function elideEmptyFields(payload: ToolResponsePayload): ToolResponsePayload {
 }
 
 export function compressPayload(payload: ToolResponsePayload, tool: McpToolName): ToolResponsePayload {
-  return elideEmptyFields(applyPathDictionary(stripDerivedFields(payload, tool)));
+  const originalTokens = countTokens(JSON.stringify(payload));
+  if (originalTokens < MIN_TOKENS_TO_COMPRESS) {
+    return payload;
+  }
+  const compressed = elideEmptyFields(applyPathDictionary(stripDerivedFields(payload, tool)));
+  const compressedTokens = countTokens(JSON.stringify(compressed));
+  return compressedTokens < originalTokens ? compressed : payload;
 }

@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { mkdirSync } from "node:fs";
+import { writeFileAtomic } from "./atomic-write.js";
 import { getCodeIndexPath, getMemoryConfigPath, getMemoryDbPath, getVaultDir } from "./paths.js";
 
 export interface MemoryConfig {
@@ -78,5 +78,5 @@ export function loadMemoryConfig(cwd: string = process.cwd()): MemoryConfig | nu
 export function writeMemoryConfig(config: MemoryConfig, cwd: string = process.cwd()): void {
   const path = getMemoryConfigPath(cwd);
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  writeFileAtomic(path, JSON.stringify(config, null, 2) + "\n");
 }

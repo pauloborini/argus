@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- mcp: recall aceita `as_of` (ISO 8601) para consulta temporal de memória v2, respeitando vigência no ponto especificado (`valid_from <= asOf` e exclusão de notas supersedidas); valor inválido retorna `state: falha` com `E_MEMORY_INPUT_INVALID`.
+- mcp (breaking leve): modo somente leitura via `ARGUS_MCP_READ_ONLY=1` (estrito). Bloqueia tools
+  mutantes (`remember`) retornando `state: falha` com `E_MCP_READ_ONLY` e pula o auto-sync incremental
+  antes de tool calls, mantendo `.argus/` totalmente intacto. O CLI permanece inalterado.
+- mcp: limites de tamanho de entrada de strings (`.max()`) em todas as 12 schemas do catálogo MCP
+  (`query`/`goal` ≤ 512, targets/paths ≤ 1024, filtros escalares ≤ 128, `remember` content ≤ 65536,
+  arrays de tags/links ≤ 16 itens de ≤ 128 caracteres). Entradas excedentes falham na validação de schema.
+- mcp: budget central de tokens em respostas JSON serializadas via `ARGUS_MCP_RESPONSE_BUDGET`
+  (default 20000 tokens). Respostas excedentes passam por truncamento estrutural
+  determinístico, recebem a limitation `W_RESPONSE_TRUNCATED` e degradam `state` para `parcial`.
+- mcp (breaking): validação estrita de argumentos (`.strict()`) em todas as 12 tools do catálogo.
+  Chamadas com parâmetros desconhecidos agora falham com `state: falha`, citando a chave rejeitada
+  e sugerindo a chave válida mais próxima.
+- agent-rules: versão 4 (`AGENT_RULES_VERSION = 4`) com item de completude de busca (exige busca
+  semântica e grep exaustivo antes de declarar ausência no repositório). Requer `argus install --refresh`.
 - docs: README (EN/pt-BR) atualizados com base no vault vigente e no código —
   VS Code adicionado à lista de hosts auto-detectados (8 hosts), handle de
   memória `mh_…` restabelecido na versão pt-BR, quickstart pt-BR igualado ao EN

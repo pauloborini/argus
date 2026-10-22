@@ -21,6 +21,7 @@ import { buildRememberResponse, type RememberArgs } from "./remember.js";
 import { buildRecallResponse, buildRecallResponseAsync, type RecallArgs } from "./recall.js";
 import { compressPayload } from "./payload-compress.js";
 import { ThinkEngine } from "../../memory/think-engine.js";
+import { countTokens } from "../../packing/tokenizer.js";
 
 /** Respostas honestas por tool — campos vazios alinhados a SURFACE_MCP_CLI.md (S02) */
 type ResponseFormat = "concise" | "detailed";
@@ -372,6 +373,152 @@ export function buildToolResponseTsv(
       ? `Showing ${TSV_TRUNCATE_LIMIT} of ${total}; refine query for more.`
       : undefined;
   return { text, truncationNote, isError: false };
+}
+
+export const DEFAULT_MCP_RESPONSE_BUDGET = 20_000;
+
+export function resolveResponseBudget(budgetOverride?: number): number {
+  if (typeof budgetOverride === "number" && budgetOverride > 0) {
+    return budgetOverride;
+  }
+  const rawEnv = process.env.ARGUS_MCP_RESPONSE_BUDGET;
+  if (rawEnv) {
+    const parsed = Number.parseInt(rawEnv, 10);
+    if (!Number.isNaN(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return DEFAULT_MCP_RESPONSE_BUDGET;
+}
+
+/**
+ * Aplica teto de tokens na resposta JSON serializada (Q1: default 20000,
+ * configurável via `ARGUS_MCP_RESPONSE_BUDGET`).
+ * Truncamento determinístico:
+ * 1. mede tokens via countTokens; se <= budget, retorna payload intacto;
+ * 2. corta arrays de resultado do maior para o menor campo até caber;
+ * 3. se ainda acima, remove campos de conteúdo verbatim (snippet/content);
+ * 4. se ainda acima, trunca strings longas;
+ * 5. adiciona W_RESPONSE_TRUNCATED em limitations e degrada state para parcial quando era sucesso.
+ */
+export function enforceResponseBudget(
+  payload: ToolResponsePayload,
+  budgetOverride?: number,
+): ToolResponsePayload {
+  const budget = resolveResponseBudget(budgetOverride);
+  const initialJson = JSON.stringify(payload);
+  const initialTokens = countTokens(initialJson);
+
+  if (initialTokens <= budget) {
+    return payload;
+  }
+
+  const truncated: ToolResponsePayload = { ...payload };
+
+  const limitations = Array.isArray(truncated.limitations)
+    ? [...(truncated.limitations as string[])]
+    : [];
+  if (!limitations.includes("W_RESPONSE_TRUNCATED")) {
+    limitations.push("W_RESPONSE_TRUNCATED");
+  }
+  truncated.limitations = limitations;
+
+  if (truncated.state === "sucesso") {
+    truncated.state = "parcial";
+  }
+  if (truncated.confidence) {
+    truncated.confidence = "medium";
+  }
+
+  let currentTokens = countTokens(JSON.stringify(truncated));
+  if (currentTokens <= budget) {
+    return truncated;
+  }
+
+  // Cortar arrays de resultado do maior para o menor campo (ex.: chunks, results, symbols, files)
+  const arrayKeys = Object.keys(truncated).filter(
+    (key) =>
+      key !== "limitations" &&
+      Array.isArray(truncated[key]) &&
+      (truncated[key] as unknown[]).length > 0,
+  );
+
+  arrayKeys.sort((a, b) => {
+    const lenB = JSON.stringify(truncated[b]).length;
+    const lenA = JSON.stringify(truncated[a]).length;
+    return lenB - lenA;
+  });
+
+  for (const key of arrayKeys) {
+    let arr = [...(truncated[key] as unknown[])];
+    while (arr.length > 0 && currentTokens > budget) {
+      const excess = currentTokens - budget;
+      const arrTokens = countTokens(JSON.stringify(arr));
+      const tokensPerItem = Math.max(1, arrTokens / arr.length);
+      const toRemove = Math.max(1, Math.ceil(excess / tokensPerItem));
+      const nextLen = Math.max(0, arr.length - toRemove);
+      arr = arr.slice(0, nextLen);
+      truncated[key] = arr;
+      currentTokens = countTokens(JSON.stringify(truncated));
+    }
+    if (currentTokens <= budget) {
+      return truncated;
+    }
+  }
+
+  // Se ainda acima, remover campos de conteúdo verbatim (snippet/content)
+  const verbatimKeys = [
+    "snippet",
+    "content",
+    "packed_content",
+    "text",
+    "code",
+    "body",
+    "raw",
+    "context",
+  ];
+  for (const key of verbatimKeys) {
+    if (key in truncated && typeof truncated[key] === "string") {
+      delete truncated[key];
+      currentTokens = countTokens(JSON.stringify(truncated));
+      if (currentTokens <= budget) {
+        return truncated;
+      }
+    }
+  }
+
+  // Se ainda assim estiver acima (ex.: strings longas restantes)
+  const stringKeys = Object.keys(truncated).filter(
+    (key) =>
+      key !== "state" &&
+      key !== "message" &&
+      key !== "limitations" &&
+      typeof truncated[key] === "string" &&
+      (truncated[key] as string).length > 0,
+  );
+  stringKeys.sort(
+    (a, b) =>
+      (truncated[b] as string).length - (truncated[a] as string).length,
+  );
+
+  for (const key of stringKeys) {
+    let str = truncated[key] as string;
+    while (currentTokens > budget) {
+      if (str.length <= 1) {
+        delete truncated[key];
+        currentTokens = countTokens(JSON.stringify(truncated));
+        break;
+      }
+      str = str.slice(0, Math.floor(str.length / 2));
+      truncated[key] = str;
+      currentTokens = countTokens(JSON.stringify(truncated));
+    }
+    if (currentTokens <= budget) {
+      return truncated;
+    }
+  }
+
+  return truncated;
 }
 
 export { STRUCTURAL_INDEX_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION };

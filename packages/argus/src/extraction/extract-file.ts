@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, normalize, relative } from "node:path";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import { detectLanguageFromPath } from "./language.js";
 import { extractDart } from "./extractors/dart.js";
 import { extractGo } from "./extractors/go.js";
@@ -10,6 +10,7 @@ import { extractPython } from "./extractors/python.js";
 import { extractRust } from "./extractors/rust.js";
 import { extractTypeScriptLike } from "./extractors/typescript.js";
 import { parseFile } from "./parsers/registry.js";
+import { loadTsconfigAliases } from "./tsconfig-paths.js";
 import type { SyntaxNode } from "tree-sitter";
 import type {
   ExtractedImport,
@@ -24,9 +25,27 @@ function toRelativePath(rootPath: string, absolutePath: string): string {
   return relative(rootPath, absolutePath).split("\\").join("/");
 }
 
+function isInsideRoot(rootPath: string, candidate: string): boolean {
+  const rel = toRelativePath(rootPath, candidate);
+  if (rel.startsWith("../") || rel === ".." || isAbsolute(rel)) {
+    return false;
+  }
+  try {
+    const canonicalRoot = realpathSync.native(rootPath);
+    const canonicalCandidate = realpathSync.native(candidate);
+    const canonicalRel = relative(canonicalRoot, canonicalCandidate).split("\\").join("/");
+    if (canonicalRel.startsWith("../") || canonicalRel === ".." || isAbsolute(canonicalRel)) {
+      return false;
+    }
+  } catch {
+    // Mantém a verificação de path relativo caso o realpath falhe
+  }
+  return true;
+}
+
 function firstExistingPath(rootPath: string, candidates: string[]): string | undefined {
   for (const candidate of candidates) {
-    if (existsSync(candidate)) {
+    if (existsSync(candidate) && isInsideRoot(rootPath, candidate)) {
       return toRelativePath(rootPath, candidate);
     }
   }
@@ -53,6 +72,49 @@ function resolveTypeScriptImportPath(
   importSource: string,
 ): string | undefined {
   if (!importSource.startsWith(".")) {
+    const aliasMap = loadTsconfigAliases(rootPath, dirname(fromRelativePath));
+    if (!aliasMap) {
+      return undefined;
+    }
+    const baseDir = aliasMap.baseUrl ?? rootPath;
+    for (const pattern of aliasMap.patterns) {
+      let matchedWildcard: string | null = null;
+      if (pattern.hasWildcard === false) {
+        if (importSource === pattern.prefix) {
+          matchedWildcard = "";
+        }
+      } else if (
+        importSource.startsWith(pattern.prefix) &&
+        importSource.endsWith(pattern.suffix) &&
+        importSource.length >= pattern.prefix.length + pattern.suffix.length
+      ) {
+        matchedWildcard = importSource.slice(
+          pattern.prefix.length,
+          importSource.length - pattern.suffix.length,
+        );
+      }
+
+      if (matchedWildcard === null) {
+        continue;
+      }
+
+      for (const target of pattern.targets) {
+        const targetWithStar =
+          pattern.hasWildcard === false
+            ? target
+            : target.replace("*", matchedWildcard);
+        const candidateBase = normalize(join(baseDir, targetWithStar));
+        const candidates = [
+          candidateBase,
+          ...TS_IMPORT_EXTENSIONS.map((ext) => `${candidateBase}${ext}`),
+          ...TS_IMPORT_EXTENSIONS.map((ext) => join(candidateBase, `index${ext}`)),
+        ];
+        const resolved = firstExistingPath(rootPath, candidates);
+        if (resolved) {
+          return resolved;
+        }
+      }
+    }
     return undefined;
   }
 

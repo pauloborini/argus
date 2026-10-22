@@ -17,6 +17,9 @@ import {
 import { VaultEngine } from "../../src/memory/vault-engine.js";
 import { initWorkspace } from "../../src/workspace/workspace.js";
 import { FakeEmbedder } from "../../src/embeddings/embedder.js";
+import { buildRecallResponse, buildRecallResponseAsync } from "../../src/mcp/tools/recall.js";
+import { openMemoryDb, closeMemoryDb } from "../../src/memory/storage/sqlite-db.js";
+import { TOOL_INPUT_SCHEMAS } from "../../src/mcp/server.js";
 
 describe("memory retrieval v2 read filters (S05 T01)", () => {
   let tempDir: string | undefined;
@@ -611,5 +614,199 @@ describe("S6 ranking via recall em banco real", () => {
 
     const titles = recalled.chunks.map((c) => c.note_id);
     expect(titles.indexOf(confirmed.note_id)).toBeLessThan(titles.indexOf(presumed.note_id));
+  });
+
+  describe("MEMORY-ASOF-001 — as_of no recall MCP e repasse ao motor v2", () => {
+    it("§7.1 nota com valid_from futuro: as_of anterior à vigência não traz a nota; sem as_of ou posterior traz (sync e async, com offset)", async () => {
+      const cwd = root();
+      VaultEngine.init(cwd);
+      const vault = join(cwd, ".argus", "memory", "vault", "inbox");
+      mkdirSync(vault, { recursive: true });
+
+      writeFileSync(
+        join(vault, "future.md"),
+        [
+          "---",
+          'title: "Future Billing Feature"',
+          "type: inbox",
+          "scope: project",
+          "source: direct_capture",
+          "confidence: confirmed",
+          "observed_at: 2026-01-01T00:00:00.000Z",
+          "valid_from: 2026-06-01T00:00:00.000Z",
+          "---",
+          "",
+          "billing_feature_token_unique next generation payments",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      writeFileSync(
+        join(vault, "active.md"),
+        [
+          "---",
+          'title: "Active Billing Feature"',
+          "type: inbox",
+          "scope: project",
+          "source: direct_capture",
+          "confidence: confirmed",
+          "observed_at: 2026-01-01T00:00:00.000Z",
+          "valid_from: 2026-01-01T00:00:00.000Z",
+          "---",
+          "",
+          "billing_feature_token_unique legacy stable payments",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      expect(VaultEngine.sync(cwd).state).toBe("sucesso");
+
+      // 1. Sync path: VaultEngine.search com asOf anterior à vigência (2026-03-01)
+      const syncPast = VaultEngine.search("billing_feature_token_unique", { asOf: "2026-03-01T00:00:00.000Z" }, cwd);
+      const syncPastTitles = syncPast.chunks.map((c) => c.title);
+      expect(syncPastTitles).toContain("Active Billing Feature");
+      expect(syncPastTitles).not.toContain("Future Billing Feature");
+
+      // 2. Sync path: VaultEngine.search com asOf posterior à vigência (2026-07-01)
+      const syncFuture = VaultEngine.search("billing_feature_token_unique", { asOf: "2026-07-01T00:00:00.000Z" }, cwd);
+      const syncFutureTitles = syncFuture.chunks.map((c) => c.title);
+      expect(syncFutureTitles).toContain("Active Billing Feature");
+      expect(syncFutureTitles).toContain("Future Billing Feature");
+
+      // 3. Sync path: VaultEngine.search com offset de timezone explícito (Risco 2)
+      // 2026-07-01T03:00:00-03:00 é 2026-07-01T06:00:00.000Z, posterior a 2026-06-01
+      const syncOffset = VaultEngine.search("billing_feature_token_unique", { asOf: "2026-07-01T03:00:00-03:00" }, cwd);
+      expect(syncOffset.chunks.map((c) => c.title)).toContain("Future Billing Feature");
+
+      // 4. Async path: VaultEngine.recall com asOf anterior e posterior
+      const asyncPast = await VaultEngine.recall("billing_feature_token_unique", { asOf: "2026-03-01T00:00:00.000Z" }, cwd);
+      expect(asyncPast.chunks.map((c) => c.title)).not.toContain("Future Billing Feature");
+      expect(asyncPast.chunks.map((c) => c.title)).toContain("Active Billing Feature");
+
+      const asyncFuture = await VaultEngine.recall("billing_feature_token_unique", { asOf: "2026-07-01T00:00:00.000Z" }, cwd);
+      expect(asyncFuture.chunks.map((c) => c.title)).toContain("Future Billing Feature");
+      expect(asyncFuture.chunks.map((c) => c.title)).toContain("Active Billing Feature");
+
+      // 5. Sem asOf: comportamento padrão (now é 2026-09+, posterior a 2026-06-01) traz ambas
+      const semAsOf = await VaultEngine.recall("billing_feature_token_unique", {}, cwd);
+      expect(semAsOf.chunks.map((c) => c.title)).toContain("Future Billing Feature");
+      expect(semAsOf.chunks.map((c) => c.title)).toContain("Active Billing Feature");
+
+      // 6. buildRecallResponse e buildRecallResponseAsync repassam as_of
+      const toolSyncPast = buildRecallResponse(cwd, { query: "billing_feature_token_unique", as_of: "2026-03-01T00:00:00.000Z" });
+      const chunksSync = (toolSyncPast.chunks ?? []) as Array<{ title?: string }>;
+      expect(chunksSync.map((c) => c.title)).not.toContain("Future Billing Feature");
+
+      const toolAsyncPast = await buildRecallResponseAsync(cwd, { query: "billing_feature_token_unique", as_of: "2026-03-01T00:00:00.000Z" });
+      const chunksAsync = (toolAsyncPast.chunks ?? []) as Array<{ title?: string }>;
+      expect(chunksAsync.map((c) => c.title)).not.toContain("Future Billing Feature");
+    });
+
+    it("§7.2 nota supersedida antes de as_of é excluída mas permanece auditável no SQLite", async () => {
+      const cwd = root();
+      VaultEngine.init(cwd);
+      const vault = join(cwd, ".argus", "memory", "vault", "decision");
+      mkdirSync(vault, { recursive: true });
+
+      writeFileSync(
+        join(vault, "origin_superseded.md"),
+        [
+          "---",
+          'title: "Auth Origin Note"',
+          "type: decision",
+          "scope: project",
+          "source: direct_capture",
+          "confidence: presumed",
+          "observed_at: 2025-01-01T00:00:00.000Z",
+          "superseded_by: fb00000000000002",
+          "---",
+          "",
+          "auth_unique_token_asof legacy cookie auth",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      writeFileSync(
+        join(vault, "successor_active.md"),
+        [
+          "---",
+          'title: "Auth Successor Note"',
+          "type: decision",
+          "scope: project",
+          "source: direct_capture",
+          "confidence: confirmed",
+          "observed_at: 2026-01-01T00:00:00.000Z",
+          "---",
+          "",
+          "auth_unique_token_asof modern bearer auth",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      expect(VaultEngine.sync(cwd).state).toBe("sucesso");
+
+      // Recall com as_of posterior não traz a supersedida
+      const recalled = await VaultEngine.recall(
+        "auth_unique_token_asof",
+        { asOf: "2026-06-01T00:00:00.000Z" },
+        cwd,
+      );
+      const titles = recalled.chunks.map((c) => c.title);
+      expect(titles).toContain("Auth Successor Note");
+      expect(titles).not.toContain("Auth Origin Note");
+
+      // Invariante DEC-021: a nota supersedida continua no SQLite para auditoria (não foi deletada)
+      const db = openMemoryDb(cwd);
+      try {
+        const rows = db.prepare("SELECT title, superseded_by FROM notes WHERE title = ?").all("Auth Origin Note") as Array<{ title: string; superseded_by: string }>;
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.superseded_by).toBe("fb00000000000002");
+      } finally {
+        closeMemoryDb(db);
+      }
+    });
+
+    it("§7.3 validação de as_of: rejeita data inválida com E_MEMORY_INPUT_INVALID e aceita ISO 8601 válido", async () => {
+      const cwd = root();
+
+      // Formato inválido sync
+      const invalidSync = buildRecallResponse(cwd, { query: "billing", as_of: "nao-e-uma-data" });
+      expect(invalidSync.state).toBe("falha");
+      expect(invalidSync.message).toBe("E_MEMORY_INPUT_INVALID: as_of precisa ser ISO 8601.");
+      expect(invalidSync.chunks).toEqual([]);
+      expect(invalidSync.mechanism).toBe("fts-only");
+      expect(invalidSync.confidence).toBe("low");
+
+      // Formato inválido async
+      const invalidAsync = await buildRecallResponseAsync(cwd, { query: "billing", as_of: "nao-e-uma-data" });
+      expect(invalidAsync.state).toBe("falha");
+      expect(invalidAsync.message).toBe("E_MEMORY_INPUT_INVALID: as_of precisa ser ISO 8601.");
+      expect(invalidAsync.chunks).toEqual([]);
+      expect(invalidAsync.confidence).toBe("low");
+
+      // ISO válido é aceito na validação
+      const validSync = buildRecallResponse(cwd, { query: "billing", as_of: "2026-06-01T00:00:00.000Z" });
+      expect(validSync.message).not.toContain("E_MEMORY_INPUT_INVALID");
+
+      const validOffset = buildRecallResponse(cwd, { query: "billing", as_of: "2026-06-01T03:00:00-03:00" });
+      expect(validOffset.message).not.toContain("E_MEMORY_INPUT_INVALID");
+
+      // Schema do MCP aceita as_of com max 32
+      const parsed = TOOL_INPUT_SCHEMAS.recall.parse({
+        query: "billing",
+        as_of: "2026-06-01T00:00:00.000Z",
+      });
+      expect(parsed.as_of).toBe("2026-06-01T00:00:00.000Z");
+
+      const tooLong = TOOL_INPUT_SCHEMAS.recall.safeParse({
+        query: "billing",
+        as_of: "2026-06-01T00:00:00.000Z" + "a".repeat(20),
+      });
+      expect(tooLong.success).toBe(false);
+    });
   });
 });

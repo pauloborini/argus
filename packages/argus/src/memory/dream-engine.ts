@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { basename, join, relative } from "node:path";
+import { writeFileAtomic } from "./atomic-write.js";
 import { dump } from "js-yaml";
 import { stubResponse } from "../contracts/response-state.js";
 import type { ResponseState } from "../contracts/response-state.js";
@@ -350,7 +351,7 @@ function writeDreamReport(
     "",
     ...renderSection(actions.blocked),
   ];
-  writeFileSync(join(vaultDir, reportFile), lines.join("\n"), "utf-8");
+  writeFileAtomic(join(vaultDir, reportFile), lines.join("\n"));
   return reportFile;
 }
 
@@ -429,7 +430,7 @@ export class DreamEngine {
       for (const note of triaged) {
         const target = join(vaultDir, note.destination);
         mkdirSync(join(vaultDir, note.destination.split("/")[0]!), { recursive: true });
-        writeFileSync(target, note.content, "utf-8");
+        writeFileAtomic(target, note.content);
         unlinkSync(note.sourcePath);
       }
     }
@@ -667,8 +668,8 @@ export class DreamEngine {
       const currentRaw = mergeFrontmatterFields(currentNote.raw, {
         supersedes: refreshedLink.current.supersedes!,
       });
-      writeFileSync(currentOrigin.absolutePath, originRaw, "utf-8");
-      writeFileSync(currentNote.absolutePath, currentRaw, "utf-8");
+      writeFileAtomic(currentOrigin.absolutePath, originRaw);
+      writeFileAtomic(currentNote.absolutePath, currentRaw);
       appliedSupersedence.add(pairId);
       supersedenceTouchedNotes.add(currentOrigin.path);
       supersedenceTouchedNotes.add(currentNote.path);
